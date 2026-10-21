@@ -1,0 +1,108 @@
+export const offsets = Object.freeze({
+    BattleMode_objectManagerPtr: 0x28,
+    BattleMode_clientInputManager: 0x58,
+    BattleMode_hashKey: 0x60,
+    BattleMode_hashEnabled: 0x70,
+
+    ObjectManager_objectsArray: 0x0,
+    ObjectManager_count: 0xc,
+    ObjectManager_ptrStride: 0x8,
+
+    TileMap_Width: 0xc4,
+    TileMap_Height: 0xc8,
+    TileMap_TilesArray: 0x20,
+    TileTypeData_BlocksMovement: 0x56,
+
+    GameObj_team: 0x40,
+    GameObj_hp: 0xc4,
+    LogicGameObjectClient_ownerIndex: 0x3c,
+
+    LogicCharacterClient_body: 0xa0,
+    LogicCharacterClient_hyperActive: 0xa8,
+    LogicCharacterClientOwn_speedBuff: 0,
+    CharData_brawlerId: 0x35c,
+    HeroData_namePtr: 0x18,
+    LogicSkillData_kind: 0x8,
+
+    LogicProjectileClient_ownerTeam: 0x40,
+    LogicProjectileClient_dataName: 0x18,
+    LogicProjectileClient_data: 0x10,
+    Projectile_isIndirect: 0x118,
+    ProjectileData_speed: 0x124,
+    ProjectileData_radius: 0x74,
+    Projectile_angle: 0,
+
+    ClientInput_x: 0xc,
+    ClientInput_y: 0x10,
+    ClientInput_skillData: 0x40,
+    ClientInput_typeConstantTable: 0xe1bd30,
+    ClientInput_typeFallback: 0xe1bc28,
+    ClientInput_hashInnerMask: 0xe1bbd0,
+    ClientInput_hashOuterMask: 0xe1bbf0,
+
+    ScString_length: 0x4,
+    ScString_data: 0x8,
+
+    VTABLE_PROJECTILE_DATA: 0xff3b18,
+
+    LogicBattleModeClient_update: 0xac1ee8,
+    BattleScreen_activateSkill: 0x7a0084,
+    BattleScreen_getClosestTargetForAutoshoot: 0x7b67ec,
+    LogicTile__setData: 0x9401fc,
+    LogicProjectileClient_ctor: 0xa3146c,
+    LogicProjectileClient_destruct: 0xa31a00,
+
+    BattleMode_getInstance: 0x8c5130,
+    LogicBattleModeClient_getOwnCharacter: 0xac3934,
+    LogicBattleModeClient_getOwnPlayerTeam: 0xa7f47c,
+    LogicBattleModeClient_getOwnPlayerIndex: 0x9cda04,
+    LogicBattleModeClient__getOwnPlayerIndex: 0x9cda04,
+    LogicBattleModeClient_getTileMap: 0x991440,
+    LogicBattleModeClient__getTileMap: 0x991440,
+    LogicBattleModeClient_setClientPredictionMoveTo: 0xac3a58,
+
+    ClientInputManager_addInput: 0x74675c,
+    ClientInput_constructor_int: 0xa95798,
+    operator_new: 0xd8da2c,
+
+    LogicGameObjectClient_getX: 0xa23afc,
+    LogicGameObjectClient_getY: 0xa23b04,
+    LogicGameObjectClient_getData: 0x117050,
+    LogicGameObjectClient_getGlobalID: 0x46464c,
+
+    LogicCharacterData_getSpeed: 0x9911ec,
+    LogicCharacterData_getCollisionRadius: 0x9913e8,
+    LogicCharacterClient_getWeaponSkill: 0x9fc440,
+    LogicCharacterClient__getWeaponSkill: 0x9fc440,
+    LogicCharacterClient_getSkillAt: 0xa007fc,
+    LogicCharacterClient__getSkillAt: 0xa007fc,
+    LogicCharacterClient_getLinkedCarryable: 0x9fc704,
+    LogicCharacterClient__getLinkedCarryable: 0x9fc704,
+
+    LogicSkillClient_getData: 0x1e5650,
+    LogicSkillClient__getData: 0x1e5650,
+    LogicSkillData_getCastingRange: 0x9de9cc,
+    LogicSkillData__getCastingRange: 0x9de9cc,
+    LogicSkillData_getProjectileData: 0x9e84a8,
+    LogicSkillData__getProjectileData: 0x9e84a8,
+
+    LogicProjectileClient_getData: 0x117050,
+    LogicProjectileClient_getTargetX: 0,
+    LogicProjectileClient_getTargetY: 0,
+    LogicProjectileData_getSpeed: 0x8cee94,
+    LogicProjectileData_getRadius: 0x860d88,
+    LogicProjectileData_getRendering: 0x97d5c0,
+    LogicProjectileData_isBeam: 0,
+    LogicProjectileData__isBeam: 0,
+    LogicProjectileData_getSpawnAreaEffect: 0x9cda1c,
+    LogicProjectileData__getSpawnAreaEffect: 0x9cda1c,
+
+    AreaEffectData_getRadius: 0x8cee8c,
+    AreaEffectData__getRadius: 0x8cee8c,
+    AreaEffectData_getActiveTimeMs: 0x9bf8f4,
+    AreaEffectData__getActiveTimeMs: 0x9bf8f4,
+
+    LogicData_getName: 0x9a4f1c,
+    StringCtor: 0xd3f6bc,
+    ScString_destruct: 0xd3f5a0
+});

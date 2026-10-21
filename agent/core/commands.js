@@ -20,10 +20,10 @@ const _zeroBuf = new Uint8Array(CMD_BUF_SIZE).buffer;
 
 const MAX_TABLE_TYPE = 0x16;
 const TABLE_ENTRIES = MAX_TABLE_TYPE + 1;
-const FALLBACK_TYPE_CONST = 0xe1bc28;
 const MASK_SIZE = 16;
 
 var _typeTable = null;
+var _fallbackType = 0;
 var _innerMask = null;
 var _outerMask = null;
 
@@ -41,6 +41,7 @@ function _loadSigningConstants()
     _innerMask = new Uint8Array(base.add(offsets.ClientInput_hashInnerMask).readByteArray(MASK_SIZE));
     _outerMask = new Uint8Array(base.add(offsets.ClientInput_hashOuterMask).readByteArray(MASK_SIZE));
     _typeTable = table;
+    _fallbackType = base.add(offsets.ClientInput_typeFallback).readU32() >>> 0;
     return true;
 }
 
@@ -63,11 +64,10 @@ function _makeHashBlock(key16, mask, padByte)
 function _computeToken(key16, cmdData16)
 {
     const typeRaw = (cmdData16[4] | (cmdData16[5] << 8) | (cmdData16[6] << 16) | (cmdData16[7] << 24)) >>> 0;
-    const typeC = typeRaw <= MAX_TABLE_TYPE ? _typeTable[typeRaw] : FALLBACK_TYPE_CONST;
+    const typeC = typeRaw <= MAX_TABLE_TYPE ? _typeTable[typeRaw] : _fallbackType;
 
     const msg = new Uint8Array(20);
-    for (let i = 0; i < 12; i++) msg[i] = cmdData16[4 + i];
-    for (let i = 0; i < 4; i++) msg[12 + i] = cmdData16[i];
+    for (let i = 0; i < 16; i++) msg[i] = cmdData16[i];
     msg[16] = typeC & 0xff;
     msg[17] = (typeC >>> 8) & 0xff;
     msg[18] = (typeC >>> 16) & 0xff;
