@@ -20,7 +20,7 @@ const _zeroBuf = new Uint8Array(CMD_BUF_SIZE).buffer;
 
 const MAX_TABLE_TYPE = 0x16;
 const TABLE_ENTRIES = MAX_TABLE_TYPE + 1;
-const FALLBACK_TYPE_CONST = 0xdeadbeef;
+const FALLBACK_TYPE_CONST = 0xe1bc28;
 const MASK_SIZE = 16;
 
 var _typeTable = null;
