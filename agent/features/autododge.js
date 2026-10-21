@@ -195,6 +195,7 @@ function _projectileVel(p)
 
 function _ballRadius(p)
 {
+    if (p.isBeam) return PROJ_RADIUS_DEFAULT * 0.6;
     return p.radius > 0 ? p.radius : PROJ_RADIUS_DEFAULT;
 }
 

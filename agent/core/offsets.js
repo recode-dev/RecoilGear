@@ -24,7 +24,7 @@ export const offsets = Object.freeze({
     LogicProjectileClient_ownerTeam: 0x40,
     LogicProjectileClient_dataName: 0x18,
     Projectile_isIndirect: 0x118,
-    ProjectileData_speed: 0x124,
+    ProjectileData_speed: 0x6c,
     ProjectileData_radius: 0x74,
 
     ClientInput_x: 0xc,
@@ -76,6 +76,9 @@ export const offsets = Object.freeze({
     LogicProjectileData_getRadius: 0x860d88,
     LogicProjectileData_getRendering: 0x97d5c0,
     LogicProjectileData__getSpawnAreaEffect: 0x9cda1c,
+    LogicProjectileData_getNumEarlyTicks: 0x979d50,
+    LogicProjectileData_isBeam: 0x9b6448,
+    BattleScreen__calculateProjectilePath: 0x7b3ae8,
 
     AreaEffectData__getRadius: 0x8cee8c,
     AreaEffectData__getActiveTimeMs: 0x9bf8f4,

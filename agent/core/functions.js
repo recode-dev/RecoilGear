@@ -41,6 +41,8 @@ export function initFunctions(baseIn)
         LogicProjectileData_getSpeed: _nf("LogicProjectileData_getSpeed", "uint32", ["pointer"]),
         LogicProjectileData_getRadius: _nf("LogicProjectileData_getRadius", "uint32", ["pointer"]),
         LogicProjectileData_getSpawnAreaEffect: _nf("LogicProjectileData__getSpawnAreaEffect", "pointer", ["pointer"]),
+        LogicProjectileData_getNumEarlyTicks: _nf("LogicProjectileData_getNumEarlyTicks", "uint32", ["pointer"]),
+        LogicProjectileData_isBeam: _nf("LogicProjectileData_isBeam", "uint32", ["pointer"]),
         AreaEffectData_getRadius: _nf("AreaEffectData__getRadius", "int32", ["pointer"]),
         AreaEffectData_getActiveTimeMs: _nf("AreaEffectData__getActiveTimeMs", "int32", ["pointer"]),
         LogicProjectileData_getRendering: _nf("LogicProjectileData_getRendering", "int32", ["pointer"]),

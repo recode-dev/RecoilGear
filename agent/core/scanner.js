@@ -67,6 +67,20 @@ function ptrFromU32(lo, hi)
     return ptr("0x" + (hi >>> 0).toString(16).padStart(8, "0") + (lo >>> 0).toString(16).padStart(8, "0"));
 }
 
+function _earlyTicks(fns, data)
+{
+    try
+    {
+        if (fns.LogicProjectileData_getNumEarlyTicks && data && !data.isNull())
+        {
+            return fns.LogicProjectileData_getNumEarlyTicks(data) | 0;
+        }
+    }
+    catch (_)
+    {}
+    return 0;
+}
+
 function _readDataName(data)
 {
     try
@@ -319,7 +333,13 @@ function _captureProjectile(projectile, data, ownerTeamOverride)
             : (fns.LogicProjectileData_getRadius ? fns.LogicProjectileData_getRadius(data) | 0 : 0));
         const rendering = fns.LogicProjectileData_getRendering ? fns.LogicProjectileData_getRendering(data) | 0 : 0;
         const isThrower = projectile.add(offsets.Projectile_isIndirect).readU32() | 0;
-        const isBeam = false;
+        let isBeam = false;
+        try
+        {
+            isBeam = !!(fns.LogicProjectileData_isBeam && fns.LogicProjectileData_isBeam(data));
+        }
+        catch (_)
+        {}
         let ownerTeam = ownerTeamOverride === void 0 ? 0 : ownerTeamOverride | 0;
         if (ownerTeamOverride === void 0)
         {
@@ -383,7 +403,8 @@ function _captureProjectile(projectile, data, ownerTeamOverride)
             isSniper: classification.isSniper,
             isMassive: classification.isMassive,
             category: classification.category,
-            spawnedAt: Date.now(),
+            spawnedAt: Date.now() - _earlyTicks(fns, data) * 16,
+            earlyTicks: _earlyTicks(fns, data),
             lastX: x,
             lastY: y,
             lastTs: Date.now(),
