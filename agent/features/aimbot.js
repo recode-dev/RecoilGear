@@ -30,6 +30,8 @@ const RANGE_FLIGHT_S = 1.1;
 const RANGE_MARGIN = 0.88;
 const RANGE_UNIT = 300;
 const SPEED_CAP_MUL = 1.35;
+const VEL_SMOOTH = 0.6;
+const LEAD_CLAMP = 0.35;
 
 var _target = null;
 var _aimX = 0;
@@ -59,8 +61,10 @@ function _sample(gid, x, y, moveSpeed, now)
         const dt = (now - prev.t) / 1000;
         if (dt >= 0.008 && dt <= 0.4)
         {
-            vx = (x - prev.x) / dt;
-            vy = (y - prev.y) / dt;
+            const ivx = (x - prev.x) / dt;
+            const ivy = (y - prev.y) / dt;
+            vx = ivx * VEL_SMOOTH + prev.vx * (1 - VEL_SMOOTH);
+            vy = ivy * VEL_SMOOTH + prev.vy * (1 - VEL_SMOOTH);
         }
     }
     const cap = moveSpeed > 0 ? moveSpeed * SPEED_CAP_MUL : 0;
@@ -76,19 +80,33 @@ function _sample(gid, x, y, moveSpeed, now)
 
 function _solve(mx, my, pred, speed, range)
 {
-    let t = LATENCY_S;
+    const cdx = pred.x - mx;
+    const cdy = pred.y - my;
+    const curDist = Math.sqrt(cdx * cdx + cdy * cdy);
+    const maxLead = curDist * LEAD_CLAMP;
+    let t = LATENCY_S + curDist / speed;
+    let lx = 0;
+    let ly = 0;
     for (let i = 0; i < LEAD_ITERATIONS; i++)
     {
-        const px = pred.x + pred.vx * t - mx;
-        const py = pred.y + pred.vy * t - my;
+        lx = pred.vx * t;
+        ly = pred.vy * t;
+        const lm = Math.sqrt(lx * lx + ly * ly);
+        if (lm > maxLead)
+        {
+            lx *= maxLead / lm;
+            ly *= maxLead / lm;
+        }
+        const px = pred.x + lx - mx;
+        const py = pred.y + ly - my;
         t = LATENCY_S + Math.sqrt(px * px + py * py) / speed;
     }
-    const ax = pred.x + pred.vx * t - mx;
-    const ay = pred.y + pred.vy * t - my;
+    const ax = pred.x + lx - mx;
+    const ay = pred.y + ly - my;
     if (range > 0 && Math.sqrt(ax * ax + ay * ay) > range) return null;
     return {
-        x: Math.round(pred.x + pred.vx * t),
-        y: Math.round(pred.y + pred.vy * t),
+        x: Math.round(pred.x + lx),
+        y: Math.round(pred.y + ly),
         t
     };
 }
