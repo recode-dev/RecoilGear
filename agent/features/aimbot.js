@@ -51,6 +51,8 @@ var _track = new Map();
 var _projectileSpeed = SPEED_FALLBACK;
 var _speedAt = 0;
 var _ownBeam = false;
+var _pathFn = null;
+var _pathBuf = null;
 var _rangeCache = 0;
 var _rangeAt = 0;
 var _hooks = false;
@@ -237,9 +239,52 @@ function _aimAt(enemy, now)
     const pred = _sample(enemy.gid, ex, ey, enemy.moveSpeed, now);
     const aim = _solve(mx, my, pred, speed, _ownRange(speed));
     if (!aim) return null;
+    try
+    {
+        const screen = scanData.battleScreen;
+        const own = scanData.ownCharacter;
+        if (screen && !screen.isNull() && own && !own.isNull() && fns.LogicCharacterClient_getWeaponSkill)
+        {
+            const skill = fns.LogicCharacterClient_getWeaponSkill(own);
+            if (skill && !skill.isNull())
+            {
+                const path = _pathCall(screen, own, skill, mx, my, aim.x, aim.y);
+                if (path)
+                {
+                    aim.x = path.x;
+                    aim.y = path.y;
+                }
+            }
+        }
+    }
+    catch (_)
+    {}
     aim.x += Math.round((Math.random() * 2 - 1) * AIM_JITTER);
     aim.y += Math.round((Math.random() * 2 - 1) * AIM_JITTER);
     return aim;
+}
+
+function _pathCall(screen, own, skill, mx, my, ax, ay)
+{
+    if (!_pathFn)
+    {
+        _pathFn = new NativeFunction(getBase().add(offsets.BattleScreen__calculateProjectilePath), "void",
+            ["pointer", "pointer", "pointer", "pointer", "int",
+             "float", "float", "float", "float", "float", "float"]);
+        _pathBuf = Memory.alloc(0x40);
+    }
+    _pathFn(_pathBuf, screen, own, skill, 0, mx, my, 0, ax, ay, 0);
+    const begin = _pathBuf.readPointer();
+    const end = _pathBuf.add(Process.pointerSize).readPointer();
+    if (!begin || begin.isNull() || !end || end.isNull()) return null;
+    const count = end.sub(begin).toInt32() / 12;
+    if (count < 2 || count > 64) return null;
+    const last = begin.add((count - 1) * 12);
+    const px = last.add(4).readFloat();
+    const py = last.add(8).readFloat();
+    if (!isFinite(px) || !isFinite(py)) return null;
+    if (Math.abs(px) > 40000 || Math.abs(py) > 40000) return null;
+    return { x: Math.round(px), y: Math.round(py) };
 }
 
 function _validEnemyPtr(p)
