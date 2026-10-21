@@ -1,622 +1,794 @@
-export const FITS = {
-    orbit:
-    {
-        grow: 0.65,
-        pad: 120
-    },
-    long:
-    {
-        grow: 0.55,
-        pad: 90
-    },
-    thick:
-    {
-        grow: 0.6,
-        pad: 100
-    },
-    broad:
-    {
-        grow: 0.45,
-        pad: 70
-    },
-    half:
-    {
-        grow: 0.4,
-        pad: 50
-    },
-    plain:
-    {
-        grow: 0.45,
-        pad: 60
-    },
-    ray:
-    {
-        grow: 0.5,
-        pad: 80
-    },
-    thin:
-    {
-        grow: 0.35,
-        pad: 40
-    },
-    fallback:
-    {
-        grow: 0.45,
-        pad: 60
-    }
-};
+export const FITS = [
+    { grow: 0.65, pad: 120.0 },
+    { grow: 0.55, pad: 90.0 },
+    { grow: 0.6, pad: 100.0 },
+    { grow: 0.45, pad: 70.0 },
+    { grow: 0.4, pad: 50.0 },
+    { grow: 0.45, pad: 60.0 },
+    { grow: 0.5, pad: 80.0 },
+    { grow: 0.35, pad: 40.0 },
+    { grow: 0.45, pad: 60.0 },
+];
+
+export const K_BLOB = 0x01;
+export const K_LOCKPATH = 0x02;
+export const K_DROP = 0x04;
+export const K_FADE = 0x08;
+export const FIT_FALLBACK = 8;
 
 export const KINDS = {
-    GunslingerProjectile:
-    {
-        fit: "thin"
-    },
-    GunslingerOverchargedProjectile:
-    {
-        fit: "thin",
-        maxRange: 2600
-    },
-    BeeSniperProjectile:
-    {
-        fit: "thin",
-        maxRange: 3000
-    },
-    BeeSniperCirclingProjectile:
-    {
-        fit: "orbit",
-        blob: true
-    },
-    BeeSniperChargedProjectile:
-    {
-        fit: "long",
-        strip: true,
-        maxRange: 2200
-    },
-    BeeSniperUltiProjectile:
-    {
-        fit: "orbit",
-        blob: true
-    },
-    PiperHandgunProjectile:
-    {
-        fit: "half",
-        maxRange: 2200
-    },
-    SniperProjectile:
-    {
-        fit: "long",
-        strip: true
-    },
-    BeamerProjectile:
-    {
-        fit: "ray",
-        chargedRange: 3900,
-        speedMul: 1.15,
-        strip: true
-    },
-    BulletstormLastShotProjectile:
-    {
-        fit: "long",
-        maxRange: 3300
-    },
-    BulletstormOnShellPickedUpProjectile:
-    {
-        fit: "plain",
-        maxRange: 3300
-    },
-    ElectroSniperProjectile:
-    {
-        fit: "long",
-        strip: true
-    },
-    ElectroSniperMutantProjectile:
-    {
-        fit: "long",
-        strip: true
-    },
-    ElectroSniperUltiProjectile:
-    {
-        fit: "broad"
-    },
-    ElectroSniperOverchargedUltiProjectile:
-    {
-        fit: "broad"
-    },
-    ElectroSniperBounceProjectile:
-    {
-        fit: "half"
-    },
-    ElectroSniperSecondaryProjectile_001:
-    {
-        fit: "half"
-    },
-    HookProjectile:
-    {
-        fit: "long"
-    },
-    SnakeOilProjectile:
-    {
-        fit: "long",
-        strip: true
-    },
-    SnakeOilUltiProjectile:
-    {
-        fit: "broad",
-        blob: true
-    },
-    SnakeOilHyperUltiProjectile:
-    {
-        fit: "broad",
-        blob: true
-    },
-    HookProjectile2:
-    {
-        drop: true
-    },
-    SoulCollectorProjectile:
-    {
-        fit: "plain"
-    },
-    SoulCollectorUlti:
-    {
-        fit: "broad",
-        blob: true
-    },
-    MosquitoProjectile:
-    {
-        fit: "thin"
-    },
-    MosquitoProjectilePoison:
-    {
-        fit: "long",
-        strip: true,
-        maxRange: 3300
-    },
-    SpeedyProjectile:
-    {
-        fit: "thin"
-    },
-    SpeedyOverchargedProjectile:
-    {
-        fit: "thin"
-    },
-    RollerProjectile:
-    {
-        fit: "broad"
-    },
-    RollerGadgetProjectile:
-    {
-        fit: "plain"
-    },
-    BowDudeProjectile:
-    {
-        fit: "plain"
-    },
-    BowDudeOverchargedProjectile:
-    {
-        fit: "plain"
-    },
-    BowDudeProjectileTripWire:
-    {
-        fit: "long",
-        blob: true
-    },
-    BowDudeProjectileTripWireBuddy:
-    {
-        fit: "long",
-        blob: true
-    },
-    BowDudeGadgetSkillProjectile:
-    {},
-    BowDudeGadgetSkillProjectileBuddy:
-    {},
-    BowDudeSpawnMineProjectile:
-    {
-        drop: true
-    },
-    BowDudeSpawnOverchargedMineProjectile:
-    {
-        drop: true
-    },
-    RocketGirlProjectile:
-    {
-        fit: "thick",
-        blast: true,
-        lockPath: true,
-        growR: 280
-    },
-    RocketGirlGadgetProjectile:
-    {
-        fit: "broad",
-        maxRange: 3000
-    },
-    RocketGirlUltiProjectile:
-    {
-        fit: "thick",
-        blast: true,
-        growR: 280
-    },
-    RocketGirlUltiOverchargedProjectile:
-    {
-        fit: "thick",
-        blast: true,
-        growR: 280
-    },
-    CannonGirlProjectile:
-    {
-        fit: "long",
-        strip: true
-    },
-    CannonGirlSmallProjectile:
-    {
-        fit: "broad"
-    },
-    CannonGirlChainProjectile:
-    {
-        fit: "half"
-    },
-    CannonGirlExplosionProjectileOvercharged:
-    {
-        fit: "long",
-        blob: true
-    },
-    KnightProjectile1:
-    {
-        fit: "thick"
-    },
-    KnightProjectile2:
-    {
-        fit: "thick"
-    },
-    KnightProjectile3:
-    {
-        fit: "thick"
-    },
-    KnightUltiProjectile:
-    {
-        fit: "thick"
-    },
-    DuplicatorProjectile:
-    {
-        fit: "long"
-    },
-    OverchargedDuplicatorProjectile:
-    {
-        fit: "long"
-    },
-    DuplicatorUltiProjectile:
-    {
-        fit: "broad",
-        blob: true
-    },
-    OverchargedDuplicatorUltiProjectile:
-    {
-        fit: "broad",
-        blob: true
-    },
-    SpawnerDudeProjectile:
-    {
-        fit: "long",
-        strip: true,
-        growR: 250
-    },
-    SpawnerDudeMutantProjectile:
-    {
-        fit: "long"
-    },
-    SpawnerDudeIndirectProjectile:
-    {
-        fit: "broad",
-        blob: true
-    },
-    SpawnerDudeUltiProjectile:
-    {
-        fit: "broad",
-        blob: true
-    },
-    SpawnerDudeOverchargedUltiProjectile:
-    {
-        fit: "broad",
-        blob: true
-    },
-    CocoonerProjectile:
-    {
-        fit: "long",
-        strip: true,
-        growR: 150,
-        reachAdj: -150
-    },
-    CocoonerProjectile2:
-    {
-        fit: "long",
-        growR: 150,
-        home: true
-    },
-    CocoonerUltiProjectile:
-    {
-        fit: "broad",
-        blob: true
-    },
-    CocoonerOverchargedUltiProjectile:
-    {
-        fit: "broad",
-        blob: true
-    },
-    AmbusherProjectile:
-    {
-        fit: "thick"
-    },
-    AmbusherUltiProjectile:
-    {
-        fit: "long"
-    },
-    AmbusherUltiProjectile2:
-    {
-        fit: "long"
-    },
-    AmbusherOverchargedUltiProjectile:
-    {
-        fit: "long"
-    },
-    CrabProjectile:
-    {
-        fit: "long",
-        strip: true
-    },
-    CrabUltiProjectile:
-    {
-        fit: "broad"
-    },
-    CrabOverchargedUltiProjectile:
-    {
-        fit: "broad"
-    },
-    CrabOverchargedUltiReturnProjectile:
-    {
-        fit: "broad"
-    },
-    FishTankUltiProjectile:
-    {
-        fit: "broad"
-    },
-    FishTankUltiProjectileSmall:
-    {
-        fit: "broad"
-    },
-    CookerProjectile:
-    {
-        fit: "long",
-        strip: true,
-        reachAdj: -450
-    },
-    MaisieProjectile:
-    {
-        fit: "long",
-        strip: true,
-        lockPath: true,
-        reachAdj: 900,
-        fade: true,
-        fadeBase: 786.63,
-        fadeK: 0.001231
-    },
-    TrickShotDudeProjectile:
-    {
-        fit: "thin"
-    },
-    TrickShotDudeUltiProjectile:
-    {
-        fit: "thin"
-    },
-    TrickShotDudeOverchargedProjectile:
-    {
-        fit: "thin"
-    },
-    ControllerProjectile:
-    {
-        fit: "broad",
-        growR: 150,
-        reachAdj: 600
-    },
-    ControllerArchetypeCollabProjectileLvl1:
-    {
-        fit: "plain"
-    },
-    ControllerArchetypeCollabProjectileLvl2:
-    {
-        fit: "plain"
-    },
-    ControllerArchetypeCollabProjectileLvl3:
-    {
-        fit: "plain"
-    },
-    ControllerUltiProjectile:
-    {
-        drop: true
-    },
-    ControllerUltiOverchargedProjectile:
-    {
-        drop: true
-    },
-    AxeJugglerProjectile:
-    {
-        fit: "broad",
-        reachAdj: 200
-    },
-    AxeJugglerProjectile2:
-    {
-        fit: "long"
-    },
-    AxeJugglerOverchargedProjectile2:
-    {
-        fit: "long"
-    },
-    SplitterProjectile:
-    {
-        fit: "long"
-    },
-    ArtilleryDudeProjectile:
-    {
-        fit: "broad",
-        strip: true
-    },
-    ArtilleryDudeProjectile2:
-    {
-        fit: "thin"
-    },
-    ArtilleryDudeUltiProjectile:
-    {
-        fit: "broad",
-        blob: true
-    },
-    ArtilleryDudeOverchargedUltiProjectile:
-    {
-        fit: "broad",
-        blob: true
-    },
-    ArtilleryDudeTurretProjectile:
-    {
-        drop: true
-    },
-    ArtilleryDudeOverchargedTurretProjectile:
-    {
-        drop: true
-    },
-    PercenterProjectile:
-    {
-        fit: "long",
-        strip: true,
-        lockPath: true,
-        maxRange: 2800
-    },
-    PercenterOverchargedProjectile:
-    {
-        fit: "long",
-        strip: true,
-        lockPath: true,
-        maxRange: 2800
-    },
-    MeepleProjectile:
-    {
-        fit: "plain",
-        growR: 150,
-        reachAdj: 200
-    },
-    MeepleUltiProjectile:
-    {
-        fit: "broad",
-        blob: true
-    },
-    MeepleOverchargedUltiProjectile:
-    {
-        fit: "broad",
-        blob: true
-    },
-    MeepleWallProjectile:
-    {
-        drop: true
-    },
-    ShamanProjectile:
-    {
-        fit: "long",
-        strip: true
-    },
-    CoopRangedEnemyProjectile:
-    {
-        maxRange: 2500
-    },
-    SniperHomingProjectile:
-    {
-        fit: "long",
-        maxRange: 3500,
-        growR: 100,
-        strip: true
-    },
-    MechanicProjectile2:
-    {
-        fit: "fallback",
-        maxRange: 2000
-    },
-    MechanicProjectile3:
-    {
-        fit: "fallback",
-        maxRange: 2000
-    },
-    DoorManCaneGadgetProjectile:
-    {
-        fit: "fallback",
-        maxRange: 3000
-    },
-    MummyProjectile:
-    {
-        fit: "long",
-        growR: 150,
-        reachAdj: -750,
-        fade: true,
-        fadeBase: 4461.04,
-        fadeK: -0.000971
-    },
-    WhirlwindProjectile:
-    {
-        fit: "long",
-        growR: 250,
-        reachAdj: -250,
-        lockPath: true
-    },
-    WhirlwindProjectile2:
-    {
-        growR: 250,
-        home: true
-    },
-    MorningstarProjectile:
-    {
-        growR: 150,
-        maxRange: 2700
-    },
-    MorningstarProjectileRecall:
-    {
-        growR: 150,
-        home: true
-    },
-    AlternatorHealProjectile:
-    {
-        fit: "fallback",
-        maxRange: 2800
-    },
-    AlternatorDamageProjectile:
-    {
-        fit: "fallback",
-        maxRange: 2800
-    },
-    KickerDudeProjectile2:
-    {
-        fit: "fallback",
-        maxRange: 2200
-    },
-    DancerProjectileSingle:
-    {
-        fit: "fallback",
-        maxRange: 2700
-    },
-    DancerProjectileDouble:
-    {
-        fit: "fallback",
-        maxRange: 2500
-    },
-    DancerProjectileTriple:
-    {
-        fit: "fallback",
-        maxRange: 1700
-    }
+    ShotgunGirlProjectile: { fit: 8, maxRange: 2300 },
+    ShotgunGirlUltiProjectile: { fit: 7, maxRange: 2300 },
+    ShotgunGirlOverchargedUltiProjectile: { fit: 7, chargedRange: 2300, speedMul: 1.2 },
+    GunslingerProjectile: { fit: 7, maxRange: 2700 },
+    GunslingerUltiProjectile: { fit: 4, maxRange: 3300 },
+    GunslingerOverchargedUltiProjectile: { fit: 4, chargedRange: 3300, speedMul: 1.2 },
+    BullDudeProjectile: { fit: 8, maxRange: 1600 },
+    RocketGirlProjectile: { fit: 2, flags: 2, maxRange: 2700, growR: 280 },
+    RocketGirlUltiProjectile: { fit: 2, maxRange: 2500, growR: 280 },
+    TrickshotDudeProjectile: { fit: 7, maxRange: 2900 },
+    TrickshotDudeUltiProjectile: { fit: 7, maxRange: 4000 },
+    TrickshotDudeUltiOverchargedProjectile: { fit: 7, chargedRange: 4000 },
+    CactusProjectile: { fit: 3, maxRange: 2300 },
+    CactusUltiProjectile: { fit: 8, flags: 5, maxRange: 2300 },
+    CactusOverchargedUltiProjectile: { fit: 8, flags: 5, chargedRange: 2300, speedMul: 1.2 },
+    CactusSpike: { fit: 7 },
+    MechanicProjectile1: { fit: 3, maxRange: 2700 },
+    MechanicProjectile2: { fit: 8, maxRange: 2000 },
+    MechanicProjectile3: { fit: 8, maxRange: 2000 },
+    MechanicUltiProjectile: { fit: 8, maxRange: 1500 },
+    MechanicOverchargedUltiProjectile: { fit: 8, chargedRange: 1500, speedMul: 1.2 },
+    ShamanProjectile: { fit: 1, maxRange: 1800 },
+    ShamanUltiProjectile: { fit: 8, maxRange: 1500 },
+    ShamanOverchargedProjectile: { fit: 0, flags: 8, maxRange: 2000, chargedRange: 2000, growR: 60, fadeBase: 300.0, fadeK: 0.000338936 },
+    ShamanOverChargedUltiProjectile: { fit: 8, chargedRange: 1500, speedMul: 1.2 },
+    BarkeepProjectile: { fit: 8, flags: 5, maxRange: 2200 },
+    BarkeepUltiProjectile: { fit: 8, flags: 5, maxRange: 2800 },
+    TntDudeProjectile: { fit: 8, flags: 5, maxRange: 2200 },
+    TntDudeOverchargedClusterProjectile: { fit: 8, flags: 5 },
+    TntDudeUltiProjectile: { fit: 8, flags: 5, maxRange: 2200 },
+    TntDudeOverchargedUltiProjectile: { fit: 8, flags: 5, chargedRange: 2200, speedMul: 1.2 },
+    TntDudeNanoChainProjectile: { fit: 8, flags: 5 },
+    BoneThrowerProjectile: { fit: 8, maxRange: 2700 },
+    BoneThrowerUltiProjectile: { fit: 8, maxRange: 2700 },
+    DummyProjectileForLaserBall: { fit: 8, flags: 2, maxRange: 4800 },
+    DummyProjectileForLaserBallBurning: { fit: 8, maxRange: 3600 },
+    MechanicTurretProjectile: { fit: 8 },
+    MechanicOverchargedTurretProjectile: { fit: 8 },
+    UndertakerAfterChargeOverchargedProjectile: { fit: 0 },
+    UndertakerUltiProjectile: { fit: 0, maxRange: 3000 },
+    UndertakerOverchargedUltiProjectile: { fit: 0, flags: 2, chargedRange: 3000, speedMul: 1.2 },
+    UndertakerOverchargedUltiProjectileReturn: { fit: 0 },
+    CrowProjectile: { fit: 7, maxRange: 2600 },
+    CrowOverchargedProjectile: { fit: 7, flags: 2, maxRange: 2600, chargedRange: 2600 },
+    CrowOverchargedProjectile2: { fit: 7, flags: 2 },
+    CrowUltiProjectile: { fit: 7 },
+    CrowThrowPoisonDaggerSkillProjectile: { fit: 4, maxRange: 2500 },
+    CrowThrowPoisonDaggerSkillProjectileBuddy: { fit: 4, maxRange: 2500 },
+    CrowThrowPoisonDaggerSkillProjectileBuddyChain: { fit: 4 },
+    DeadMariachiProjectile: { fit: 3, maxRange: 2100 },
+    DeadMariachiOverchargedProjectile: { fit: 3, maxRange: 2100 },
+    DeadMariachiUltiProjectile: { fit: 0, maxRange: 2800 },
+    DeadMariachiOverchargedUltiProjectile: { fit: 0, chargedRange: 2800, speedMul: 1.2 },
+    DeadMariachi_CleanseProjectile: { fit: 8, flags: 5, maxRange: 1500 },
+    DeadMariachi_CleanseProjectileBuddy: { fit: 8, flags: 5, maxRange: 1500 },
+    BowDudeSpawnMineProjectile: { fit: -1, flags: 4, maxRange: 2600 },
+    BowDudeProjectile: { fit: 5, maxRange: 2600 },
+    SniperProjectile: { fit: 1, maxRange: 3000 },
+    MinigunDudeProjectile: { fit: 7, maxRange: 2700 },
+    MinigunDudeUltiProjectile: { fit: 8, maxRange: 1500 },
+    MinigunDudeProjectileNano: { fit: 7, flags: 16, maxRange: 2700 },
+    PrimoDefProjectile: { fit: 3, flags: 8, maxRange: 900, growR: 120, fadeBase: 30.0, fadeK: 0.00583153 },
+    BlackHoleProjectile: { fit: 4, maxRange: 2400 },
+    BlackHoleUltiProjectile: { fit: 8, flags: 5, maxRange: 2000 },
+    BarrelBotProjectile: { fit: 8, maxRange: 1800 },
+    BarrelBotOverchargedProjectile: { fit: 8, chargedRange: 1800, speedMul: 1.2 },
+    ArtilleryDudeProjectile: { fit: 3, maxRange: 2600 },
+    ArtilleryDudeProjectile2: { fit: 7 },
+    ArtilleryDudeUltiProjectile: { fit: 3, flags: 1, maxRange: 1500 },
+    ArtilleryDudeTurretProjectile: { fit: -1, flags: 4 },
+    ArtilleryDudeOverchargedUltiProjectile: { fit: 3, flags: 1, chargedRange: 1500 },
+    ArtilleryDudeOverchargedTurretProjectile: { fit: -1, flags: 4 },
+    ShotgunGirlPetProjectile: { fit: 8 },
+    BlackHolePetProjectile: { fit: 7 },
+    HammerDudeProjectile: { fit: 3, maxRange: 1800 },
+    HammerDudeUltiProjectile: { fit: 0, maxRange: 2100 },
+    HookProjectile: { fit: 1, maxRange: 1700 },
+    HookProjectile2: { fit: -1, flags: 4 },
+    HookUltiProjectile: { fit: 2, maxRange: 2300 },
+    HookUltiProjectile2: { fit: 2 },
+    ClusterBombProjectile: { fit: 8, flags: 5, maxRange: 2600 },
+    ClusterBombProjectile2: { fit: 8, flags: 5 },
+    ClusterBombSummonProjectile: { fit: 8, maxRange: 1000 },
+    ArcadeProjectile: { fit: 7, maxRange: 3000 },
+    ArcadeUltiProjectile: { fit: 8, maxRange: 1500 },
+    ArcadeUltiOverchargedProjectile: { fit: 8, chargedRange: 1500, speedMul: 1.2 },
+    ArcadeOverchargedBuddyProjectile: { fit: 7, maxRange: 3000 },
+    ArcadeItemDispenserProjectile: { fit: 8 },
+    ArcadeDoubleBonusSkillProjectile: { fit: 7 },
+    ArcadeDoubleBonusSkillBuddyProjectile: { fit: 7 },
+    ArcadeDoubleBonusSkillBuddyProjectile2: { fit: 7 },
+    ArcadeDoubleBonusSkillBuddyProjectile3: { fit: 7 },
+    LeonDefProjectile: { fit: 4, maxRange: 2900 },
+    LeonDefProjectileMutation: { fit: 4 },
+    RosaProjectile: { fit: 3, maxRange: 1100 },
+    CoopRangedEnemyProjectile: { fit: -1, maxRange: 2500 },
+    BossProjectile: { fit: 3, maxRange: 4000 },
+    RaidBossRangedEnemyProjectile: { fit: 4 },
+    RaidBossProjectileRed: { fit: 3, maxRange: 6000 },
+    RaidBossProjectileRedDestroyEnv: { fit: 3, maxRange: 6000 },
+    RaidBossProjectileGold: { fit: 3, maxRange: 6000 },
+    RaidBossRocketProjectile: { fit: 8, flags: 5 },
+    ShamanStarPowerProjectile: { fit: 8, flags: 16 },
+    UndertakerStarPowerProjectile: { fit: 8, flags: 16 },
+    HammerDudeStarPowerProjectile: { fit: 8, flags: 16 },
+    RoboWarsBaseProjectile: { fit: 8, flags: 21 },
+    WhirlwindProjectile: { fit: 1, flags: 2, reachAdj: -250, maxRange: 2500, growR: 250 },
+    WhirlwindProjectile2: { fit: -1, flags: 16, growR: 250 },
+    BaseballUltiProjectile: { fit: 0, flags: 2, maxRange: 12000 },
+    BaseballOverchargedUltiProjectile: { fit: 0, flags: 2, chargedRange: 12000, speedMul: 1.2 },
+    BaseballOverchargedUltiProjectileChain: { fit: 0, flags: 2 },
+    TurretElecProj: { fit: 8 },
+    TurretElecProj2: { fit: 8 },
+    TurretElecProj3: { fit: 8 },
+    BlackHolePet2Projectile: { fit: 8, flags: 16 },
+    BeeSniperProjectile: { fit: 7, maxRange: 3000 },
+    BeeSniperChargedProjectile: { fit: 1, maxRange: 3000 },
+    BeeSniperUltiProjectile: { fit: 0, flags: 1, maxRange: 2700 },
+    BeeProjectile: { fit: 8 },
+    SandstormProjectile: { fit: 2, maxRange: 1800 },
+    SandstormUltiProjectile: { fit: 8, flags: 5, maxRange: 2200 },
+    MummyProjectile: { fit: 1, flags: 8, reachAdj: -750, maxRange: 2000, growR: 150, fadeBase: 4461.04, fadeK: -0.000971 },
+    BossRaceBossProjectile: { fit: 3, maxRange: 6000 },
+    BossRaceBossLightningProjectile1: { fit: 0, maxRange: 6000 },
+    BossRaceBossLightningProjectile2: { fit: 0 },
+    BossRaceBossLightningProjectile3: { fit: 0 },
+    BossRaceBossRocketProjectile: { fit: 8, flags: 5, maxRange: 6000 },
+    SpawnerDudeProjectile: { fit: 1, maxRange: 2100, growR: 250 },
+    SpawnerDudeIndirectProjectile: { fit: 3, flags: 1 },
+    SpawnerDudeUltiProjectile: { fit: 3, flags: 1, maxRange: 1500 },
+    SpeedyProjectile: { fit: 7, maxRange: 2500 },
+    SpeedyOverchargedBuddyProjectile: { fit: 7, maxRange: 2500 },
+    SpeedyRewindProjectile: { fit: 8, flags: 5, maxRange: 800 },
+    DummyProjectileForCTF: { fit: 8, maxRange: 2000 },
+    DummyProjectileForBasketBrawl: { fit: 8, maxRange: 2000 },
+    SpawnerPetProjectile: { fit: 4 },
+    SpawnerOverchargedPetProjectile: { fit: 4 },
+    BlowerProjectile: { fit: 7, maxRange: 2500 },
+    BlowerUltiProjectile: { fit: 3, maxRange: 3000 },
+    WallyProjectile: { fit: 7, maxRange: 1500 },
+    WallySecondaryProjectile: { fit: 6, flags: 2, reachAdj: 1000 },
+    WallyUltiProjectile: { fit: 8, flags: 5, maxRange: 2300 },
+    WallyOverchargedUltiProjectile: { fit: 8, flags: 5, chargedRange: 2300, speedMul: 1.2 },
+    BarrelBotSpinProjectile: { fit: 4 },
+    PiperHandgunProjectile: { fit: 4, maxRange: 2200 },
+    ControllerUltiProjectile: { fit: -1, flags: 4, maxRange: 1000 },
+    ControllerUltiOverchargedProjectile: { fit: -1, flags: 4, chargedRange: 1000 },
+    ControllerProjectile: { fit: 3, reachAdj: 600, maxRange: 2600, growR: 150 },
+    CactusSpikeGadget: { fit: 7, maxRange: 2300 },
+    TrickshotDudeGadgetProjectile: { fit: 4, flags: 2, reachAdj: 1500 },
+    TrickshotDudeNanoProjectile: { fit: 4, flags: 2, reachAdj: 1500 },
+    PowerLevelerProjectile: { fit: 3, maxRange: 2000 },
+    PowerLevelerProjectile2: { fit: 3 },
+    PowerLevelerOverchargedProjectile: { fit: 3, chargedRange: 2000, speedMul: 1.2 },
+    PowerLevelerOverchargedProjectile2: { fit: 3 },
+    PowerLevelerOverchargedProjectileBuddy: { fit: 3, chargedRange: 2000 },
+    PowerLevelerOverchargedProjectile2Buddy: { fit: 3 },
+    PowerLevelerOverchargedUltiProjectile: { fit: 3 },
+    RaidBossTCBasicAttackProjectile: { fit: 2 },
+    BarkeepHealingProjectile: { fit: 8, flags: 5 },
+    SniperHomingProjectile: { fit: 1, maxRange: 3500, growR: 100 },
+    PercenterProjectile: { fit: 1, flags: 2, maxRange: 2600 },
+    PercenterOverchargedProjectile: { fit: 1, flags: 2, maxRange: 2600 },
+    PercenterOverchargedProjectileSecondary: { fit: 3 },
+    PercenterCharmSkillProjectile: { fit: 3, maxRange: 2500 },
+    PercenterCharmSkillBuddyProjectile: { fit: 3, maxRange: 2500 },
+    FireDudeProjectile: { fit: 2, flags: 8, maxRange: 2500, growR: 180, fadeBase: 20.0, fadeK: 0.00322362 },
+    FireDudeOverchargedProjectile: { fit: 2, flags: 8, maxRange: 2500, growR: 180, fadeBase: 20.0, fadeK: 0.00322362 },
+    FireDudeUltiProjectile: { fit: 8, flags: 5, maxRange: 2200 },
+    FireDudeOverchargedUltiProjectile: { fit: 8, flags: 5, chargedRange: 2200, speedMul: 1.2 },
+    ArcadeStarPowerProjectileSelf: { fit: 8, flags: 16 },
+    ArcadeStarPowerProjectileAllies: { fit: 8, flags: 16 },
+    BeeSniperCirclingProjectile: { fit: 0, flags: 1 },
+    RocketGirlGadgetProjectile: { fit: 3, maxRange: 3000 },
+    GunslingerBigProjectile: { fit: 4 },
+    IceDudeUltiProjectile: { fit: 8, flags: 5, maxRange: 2300 },
+    IceDudeOverchargedUltiProjectile: { fit: 8, flags: 5, chargedRange: 2300, speedMul: 1.2 },
+    IceDudeProjectile: { fit: 7, maxRange: 2800 },
+    SnakeOilProjectile: { fit: 1, maxRange: 3000 },
+    SnakeOilUltiProjectile: { fit: 3, flags: 1, maxRange: 2200 },
+    SnakeOilHyperUltiProjectile: { fit: 3, flags: 1, chargedRange: 2200 },
+    SnakeOilHyperExplodedProjectile: { fit: 3 },
+    EnragerProjectile: { fit: 0, maxRange: 600 },
+    EnragerOverchargedLongRangeProjectile: { fit: 0, maxRange: 600 },
+    RuffsProjectile: { fit: 7, flags: 2, reachAdj: 500, maxRange: 2700 },
+    RuffsUltiProjectile: { fit: 8, flags: 5, maxRange: 2300 },
+    RuffsOverchargedUltiProjectile: { fit: 8, flags: 5, chargedRange: 2300, speedMul: 1.2 },
+    GeneHomingProjectile: { fit: 7, flags: 16 },
+    GeneHomingNanoProjectile: { fit: 7, flags: 16 },
+    NaniBounceProjectile: { fit: 8, flags: 21 },
+    NaniBounceProjectileSmall: { fit: 8, flags: 21 },
+    RollerProjectile: { fit: 3, maxRange: 2300 },
+    RollerOverchargedProjectile: { fit: 3, chargedRange: 2300, speedMul: 1.2 },
+    ElectroSniperProjectile: { fit: 1, maxRange: 3000 },
+    ElectroSniperSecondaryProjectile_001: { fit: 4 },
+    ElectroSniperUltiProjectile: { fit: 3, maxRange: 3200 },
+    ElectroSniperOverchargedUltiProjectile: { fit: 3, chargedRange: 3200 },
+    StickyBombProjectile: { fit: 7, maxRange: 2300 },
+    StickyBombUltiProjectile: { fit: 8, flags: 5, maxRange: 2500 },
+    StickyBombUltiProjectile2: { fit: 4 },
+    CrossBomberProjectile: { fit: 8, flags: 5, maxRange: 2300 },
+    CrossBomberProjectile2: { fit: 5 },
+    CrossBomberUltiProjectile: { fit: 8, flags: 5, maxRange: 2500 },
+    CrossBomberUltiProjectile2: { fit: 0 },
+    OverchargedCrossBomberUltiProjectile: { fit: 8, flags: 5, chargedRange: 2500, speedMul: 1.2 },
+    OverchargedCrossBomberUltiProjectile2: { fit: 0 },
+    RopeDudeUltiProjectile: { fit: 3, maxRange: 3000 },
+    RopeDudeOverchargedUltiProjectile: { fit: 3, chargedRange: 3000, speedMul: 1.2 },
+    RopeDudeProjectile: { fit: 0, maxRange: 800 },
+    AssaultShotgunProjectile: { fit: 7, maxRange: 2500 },
+    AssaultShotgunProjectileSp1Buddy: { fit: 7, maxRange: 2500 },
+    AssaultShotgunOverchargedProjectile: { fit: 7, maxRange: 2500 },
+    AssaultShotgunOverchargedProjectileSp1Buddy: { fit: 7, maxRange: 2500 },
+    AssaultShotgunUltiProjectile: { fit: 3, flags: 10, maxRange: 2700, growR: 75, fadeBase: 120.0, fadeK: 0.000575417 },
+    AssaultShotgunUltiProjectile2: { fit: 3, flags: 2 },
+    AssaultShotgunGadgetProjectile: { fit: 8, maxRange: 2200 },
+    AssaultShotgunGadgetProjectile2: { fit: 8, flags: 1 },
+    AssaultShotgunGadgetProjectileBuddy: { fit: 8, maxRange: 2200 },
+    AssaultShotgunOverchargedUltiProjectile: { fit: 3, flags: 10, chargedRange: 2700, growR: 75, speedMul: 1.2, fadeBase: 120.0, fadeK: 0.000485508 },
+    AssaultShotgunOverchargedUltiProjectile2: { fit: 3, flags: 2 },
+    AssaultShotgunOverchargedUltiProjectile3: { fit: 3, flags: 2 },
+    HoldBallResetTrail: { fit: 7 },
+    RollerGadgetProjectile: { fit: 5 },
+    KnightProjectile1: { fit: 2, maxRange: 1400 },
+    KnightProjectile2: { fit: 2 },
+    KnightProjectile3: { fit: 2 },
+    KnightUltiProjectile: { fit: 2, maxRange: 1500 },
+    KnightOverchargedUltiProjectile: { fit: 8, chargedRange: 1500, speedMul: 1.2 },
+    MechaDudeProjectile: { fit: 3, maxRange: 2700 },
+    MechaDudeBigProjectile: { fit: 4, maxRange: 2200 },
+    DuplicatorProjectile: { fit: 1, maxRange: 2700 },
+    DuplicatorUltiProjectile: { fit: 3, flags: 1, maxRange: 1500 },
+    OverchargedDuplicatorUltiProjectile: { fit: 3, flags: 1, chargedRange: 1500 },
+    OverchargedDuplicatorProjectile: { fit: 1, maxRange: 2700 },
+    KickerDudeProjectile: { fit: 0, flags: 8, maxRange: 800, growR: 150, fadeBase: 150.0, fadeK: 0.00277259 },
+    KickerDudeProjectile2: { fit: 8, maxRange: 2200 },
+    KickerDudeMinesProjectile: { fit: 8, flags: 5 },
+    FleaUltiProjectile: { fit: 8, maxRange: 1500 },
+    FleaSpawnProjectile: { fit: 8 },
+    FleaOverchargedSpawnProjectile: { fit: 8, chargedRange: 1500, speedMul: 1.2 },
+    FleaProjectile1: { fit: 4, maxRange: 2800 },
+    FleaProjectile2: { fit: 3, maxRange: 2800 },
+    FleaProjectile3: { fit: 2, maxRange: 2800 },
+    FleaProjectileNano4: { fit: 0 },
+    PercenterLifestealProjectile: { fit: 3, maxRange: 2500 },
+    BaseballStickyProjectile: { fit: 0, flags: 2 },
+    MummyAcidProjectile: { fit: 2, flags: 8, growR: 180, fadeBase: 70.0, fadeK: 0.00127297 },
+    ElectroSniperBounceProjectile: { fit: 4 },
+    JetpackGirlUltiProjectile: { fit: 8, flags: 5, maxRange: 700 },
+    JetpackGirlOverchargedUltiProjectile: { fit: 8, flags: 5, chargedRange: 700, speedMul: 1.2 },
+    JetpackGirlProjectile: { fit: 4, flags: 8, maxRange: 1200, growR: 50, fadeBase: 50.0, fadeK: 0.00210832 },
+    CannonGirlProjectile: { fit: 1, maxRange: 2700 },
+    CannonGirlSmallProjectile: { fit: 3, maxRange: 1500 },
+    CannonGirlChainProjectile: { fit: 4 },
+    CannonGirlExplosionProjectileOvercharged: { fit: 1, flags: 1 },
+    FireDudeCirclingProjectile: { fit: 2 },
+    SilencerProjectile: { fit: 4, maxRange: 2700 },
+    SilencerBigProjectile: { fit: 2 },
+    SilencerUltiProjectile: { fit: 2, maxRange: 2700 },
+    SilencerOverchargedUltiProjectile: { fit: 2, chargedRange: 2700, speedMul: 1.2 },
+    WeaponThrowerProjectile: { fit: 3, maxRange: 900 },
+    WeaponThrowerProjectile2: { fit: 3, flags: 8, maxRange: 900, growR: 120, fadeBase: 30.0, fadeK: 0.00583153 },
+    WeaponThrowerUltiProjectile: { fit: 0, maxRange: 2600 },
+    WeaponThrowerUltiProjectile2: { fit: 4, flags: 16, maxRange: 2600 },
+    WeaponThrowerOverchargedUltiProjectile: { fit: 0, chargedRange: 2600, speedMul: 1.2 },
+    WeaponThrowerOverchargedUltiProjectile2: { fit: 4, flags: 16, chargedRange: 2600 },
+    SoulCollectorProjectile: { fit: 5, maxRange: 2800 },
+    SoulCollectorUltiProjectile: { fit: 3, flags: 1, maxRange: 2800 },
+    ShieldTankProjectile: { fit: 0, maxRange: 1600 },
+    ShieldTankUltiProjectile: { fit: 7, maxRange: 20000 },
+    ShieldTankOverchargedUltiProjectile: { fit: 7, chargedRange: 20000, speedMul: 1.2 },
+    JesterProjectile: { fit: 4, maxRange: 2500 },
+    JesterUltiProjectileExploding: { fit: 8, flags: 5, maxRange: 1900 },
+    JesterUltiProjectileStunning: { fit: 3, maxRange: 2600 },
+    JesterUltiProjectilePoisoning: { fit: 2, flags: 8, maxRange: 1700, growR: 180, fadeBase: 70.0, fadeK: 0.00149761 },
+    ChesterOverchargedUltiProjectilePoisoning: { fit: 2, flags: 8, growR: 180, fadeBase: 70.0, fadeK: 0.00127297 },
+    JesterProjectileSP: { fit: 4, maxRange: 2500 },
+    DoorManProjectile: { fit: 7, maxRange: 3300 },
+    DoorManCaneGadgetProjectile: { fit: 8, maxRange: 3000 },
+    DoorManCaneGadgetProjectile2: { fit: 2 },
+    BeamerProjectile: { fit: 6, maxRange: 2700, chargedRange: 3900, speedMul: 1.15 },
+    BeamerUltiProjectile: { fit: 0, maxRange: 12000 },
+    SplitterProjectile: { fit: 1, maxRange: 3000 },
+    SplitterCirclingProjectile: { fit: 4 },
+    PuppeteerProjectile: { fit: 8, flags: 5, maxRange: 2200 },
+    PuppeteerUltiProjectile: { fit: 3, maxRange: 2500 },
+    OverchargedPuppeteerUltiProjectile: { fit: 3, chargedRange: 2500, speedMul: 1.2 },
+    MaisieProjectile: { fit: 1, flags: 10, reachAdj: 900, maxRange: 2600, fadeBase: 786.63, fadeK: 0.001231 },
+    MaisieOverchargedProjectile: { fit: 4 },
+    FishTankUltiProjectile: { fit: 3 },
+    FishTankUltiProjectileSmall: { fit: 3 },
+    DuelistProjectile: { fit: 4, maxRange: 1600 },
+    DuelistUltiProjectile: { fit: 2, maxRange: 2700 },
+    DuelistOverchargedUltiProjectile: { fit: 2, chargedRange: 2700, speedMul: 1.2 },
+    DuelistSilenceProjectile: { fit: 2 },
+    ReviverUltiProjectile: { fit: 2, flags: 16, maxRange: 2800 },
+    ReviverOverchargedUltiProjectile: { fit: 2, flags: 16, chargedRange: 2800, speedMul: 1.2 },
+    CookerProjectile: { fit: 1, reachAdj: -450, maxRange: 2700 },
+    ConductorProjectile: { fit: 2, flags: 8, maxRange: 1800, growR: 160, fadeBase: 40.0, fadeK: 0.00241416 },
+    ConductorOverchargedProjectile: { fit: 2, flags: 8, maxRange: 1800, growR: 160, fadeBase: 40.0, fadeK: 0.00241416 },
+    ConductorUltiProjectile: { fit: 8, maxRange: 3000 },
+    CocoonerProjectile: { fit: 1, reachAdj: -150, maxRange: 2700, growR: 150 },
+    CocoonerProjectile2: { fit: 1, flags: 16, growR: 150 },
+    CocoonerUltiProjectile: { fit: 3, flags: 1, maxRange: 2700 },
+    CocoonerOverchargedUltiProjectile: { fit: 3, flags: 1, chargedRange: 2700 },
+    MechanicOverchargedTurretElecProj: { fit: 8 },
+    MechanicOverchargedTurretElecProj2: { fit: 8 },
+    MechanicOverchargedTurretElecProj3: { fit: 8 },
+    CrowOverchargedUltiProjectile: { fit: 7, flags: 2 },
+    CrowOverchargedUltiProjectile2: { fit: 7, flags: 2 },
+    LeaperShotgunProjectile: { fit: 8 },
+    TwinsThrowerProjectile: { fit: 8, flags: 5, maxRange: 2200 },
+    TwinsShotgunProjectile: { fit: 8, maxRange: 2000 },
+    TwinsUltiProjectile: { fit: 8, maxRange: 1500 },
+    TwinsHCUltiProjectile: { fit: 8, maxRange: 1500, chargedRange: 1500 },
+    AttacherProjectile: { fit: 8, flags: 5, maxRange: 2200 },
+    AttacherProjectileOvercharged: { fit: 8, flags: 5, maxRange: 3000 },
+    AxeJugglerProjectile: { fit: 3, reachAdj: 200, maxRange: 2400 },
+    AxeJugglerProjectile2: { fit: 1 },
+    AxeJugglerOverchargedProjectile2: { fit: 1 },
+    MosquitoProjectile: { fit: 7, maxRange: 3000 },
+    MosquitoProjectilePoison: { fit: 1, maxRange: 3000 },
+    SandstormOverchargedUltiProjectile: { fit: 8, flags: 5, chargedRange: 2200, speedMul: 1.2 },
+    ClusterBombOverchargedSummonProjectile: { fit: 8, chargedRange: 1000, speedMul: 1.2 },
+    RocketGirlUltiOverchargedProjectile: { fit: 2, chargedRange: 2500, growR: 280 },
+    SpeedyOverchargedProjectile: { fit: 7 },
+    HookUltiOverchargedProjectile: { fit: 2, chargedRange: 2300, speedMul: 1.2 },
+    HookUltiOverchargedProjectile2: { fit: 2 },
+    ElectroSniperMutantProjectile: { fit: 1 },
+    DragonRiderProjectile: { fit: 2, maxRange: 1200 },
+    DragonRiderDragonProjectile: { fit: 0, flags: 8, maxRange: 1700, growR: 225, fadeBase: 25.0, fadeK: 0.00474062 },
+    DragonRiderDragonOverchargedProjectile: { fit: 0, flags: 8, chargedRange: 1700, growR: 225, fadeBase: 25.0, fadeK: 0.00230259 },
+    AmbusherProjectile: { fit: 2, maxRange: 600 },
+    AmbusherUltiProjectile: { fit: 1, maxRange: 2700 },
+    AmbusherUltiProjectile2: { fit: 1, maxRange: 2700, chargedRange: 2700 },
+    AmbusherOverchargedUltiProjectile: { fit: 1, chargedRange: 2700 },
+    GodzillaUltiProjectile: { fit: 7 },
+    GodzillaClawsProjectile: { fit: 0 },
+    BlowerUltiOverchargedProjectile: { fit: 3, chargedRange: 3000, speedMul: 1.2 },
+    BarkeepOverchargedUltiProjectile: { fit: 8, flags: 5, chargedRange: 2800, speedMul: 1.2 },
+    HammerDudeOverchargedUltiProjectile: { fit: 0, chargedRange: 4000, speedMul: 1.2 },
+    PainterProjectile: { fit: 8, flags: 5, maxRange: 1900 },
+    PainterUltiProjectile: { fit: 0, flags: 8, growR: 450, fadeBase: 50.0, fadeK: 0.00230259 },
+    CrabProjectile: { fit: 1, maxRange: 2300 },
+    CrabUltiProjectile: { fit: 3, maxRange: 2500 },
+    CrabOverchargedUltiProjectile: { fit: 3, chargedRange: 2500 },
+    CrabOverchargedUltiReturnProjectile: { fit: 3 },
+    MummyOverchargedProjectile: { fit: 2, flags: 8, growR: 180, fadeBase: 70.0, fadeK: 0.00127297 },
+    SupportArchetypeProjectile: { fit: 8, flags: 5 },
+    ArtilleryArchetypeCollabClusterProjectile: { fit: 4 },
+    ControllerArchetypeCollabProjectileLvl1: { fit: 5 },
+    ControllerArchetypeCollabProjectileLvl2: { fit: 5 },
+    ControllerArchetypeCollabProjectileLvl3: { fit: 5 },
+    DamageDealerArchetypeCollabProjectileLvl1: { fit: 7 },
+    DamageDealerArchetypeCollabProjectileLvl3: { fit: 7, flags: 2 },
+    DamageDealerArchetypeCollabProjectileLvl3Return: { fit: 7, flags: 2 },
+    DiggerProjectile: { fit: 3, maxRange: 1500 },
+    DiggerProjectileBounce: { fit: 3 },
+    DiggerProjectileBounceSP: { fit: 3 },
+    DiggerProjectileShrapnel: { fit: 4 },
+    SamuraiUltiProjectile: { fit: 8, flags: 5, maxRange: 2200 },
+    SamuraiOverchargedUltiProjectile: { fit: 8, flags: 5, chargedRange: 2200, speedMul: 1.2 },
+    StickyBombOverchargedUltiProjectile: { fit: 8, flags: 5, chargedRange: 2500, speedMul: 1.2 },
+    StickyBombOverchargedUltiProjectileBounce: { fit: 8 },
+    StickyBombOverchargedUltiProjectile2: { fit: 4 },
+    BlackHoleOverchargedUltiProjectile: { fit: 8, flags: 5, chargedRange: 2000, speedMul: 1.2 },
+    DiggerDrillProjectile: { fit: 2, maxRange: 500 },
+    DiggerDrillOverchargedProjectile: { fit: 2, chargedRange: 500, speedMul: 1.2 },
+    DemonicSoulCollectorProjectile: { fit: 4, flags: 16 },
+    WrathOfAnAngelProjectile: { fit: 3 },
+    ArcadeOverchargedTurretProjectile: { fit: 7 },
+    VoodooUltiProjectile: { fit: 8, maxRange: 1500 },
+    VoodooOverchargedUltiProjectile: { fit: 8, chargedRange: 1500, speedMul: 1.2 },
+    VoodooPetProjectile: { fit: 4 },
+    VoodooPetOverchargedProjectile: { fit: 4 },
+    DemonicPowerProjectile: { fit: 8, flags: 5 },
+    VoodooProjectileEarth: { fit: 8, flags: 5, maxRange: 1900 },
+    VoodooProjectileForest: { fit: 8, flags: 5, maxRange: 2700 },
+    VoodooProjectileWater: { fit: 8, flags: 5, maxRange: 1900 },
+    VoodooPetSlowProjectile: { fit: 4 },
+    VoodooOverchargedPetSlowProjectile: { fit: 0 },
+    VoodooProjectileAll: { fit: 8, flags: 5, maxRange: 2700 },
+    LightyearLaserProjectile: { fit: 4, maxRange: 2700 },
+    LightyearLaserUltiProjectile: { fit: 4, maxRange: 2500 },
+    LightyearFlightProjectile: { fit: 4, maxRange: 2000 },
+    LightyearFlightUltiProjectile: { fit: 8, flags: 5, maxRange: 2700 },
+    MeepleProjectile: { fit: 5, reachAdj: 200, maxRange: 2300, growR: 150 },
+    MeepleUltiProjectile: { fit: 3, flags: 1, maxRange: 1500 },
+    MeepleOverchargedUltiProjectile: { fit: 3, flags: 1, chargedRange: 1500 },
+    MeepleWallProjectile: { fit: -1, flags: 4, maxRange: 2300 },
+    SkaterProjectile: { fit: 4, maxRange: 1900 },
+    SkaterProjectileTaunt: { fit: 4 },
+    hankOverchargedUltiProjectile: { fit: 4, flags: 16 },
+    BeameOverchargedUltiProjectile: { fit: 0, maxRange: 12000 },
+    BeaOverchargedUltiProjectile: { fit: 3, chargedRange: 2700, speedMul: 1.2 },
+    BeaOverchargedUltiProjectile2: { fit: 4 },
+    BowDudeSpawnOverchargedMineProjectile: { fit: -1, flags: 4, chargedRange: 2600 },
+    MinigunDudeOverchargedUltiProjectile: { fit: 8, flags: 5, chargedRange: 1500, speedMul: 1.2 },
+    SpawnerDudeOverchargedUltiProjectile: { fit: 3, flags: 1, chargedRange: 1500 },
+    ChesterOverchargedUltiProjectile: { fit: 8, flags: 5, maxRange: 1900 },
+    MorningstarProjectile: { fit: -1, maxRange: 2400, growR: 150 },
+    MorningstarProjectileRecall: { fit: -1, flags: 16, growR: 150 },
+    MorningstarProjectileRecallFrozenSP: { fit: 1, flags: 16 },
+    MorningstarUltiProjectile1: { fit: 8, flags: 1, maxRange: 2200 },
+    MorningstarUltiProjectile2: { fit: 8, flags: 1, maxRange: 2200 },
+    MorningstarUltiProjectile3: { fit: 8, flags: 1, maxRange: 2200 },
+    MorningstarUltiProjectileOvercharged1: { fit: 8, flags: 1 },
+    MorningstarUltiProjectileOvercharged2: { fit: 8, flags: 1 },
+    MorningstarUltiProjectileOvercharged3: { fit: 8, flags: 1 },
+    ChronomancerProjectile: { fit: 4, maxRange: 4500 },
+    ChronomancerProjectileSecondary: { fit: 7, maxRange: 4500 },
+    ChronomancerUltiProjectile: { fit: 8, flags: 5, maxRange: 2200 },
+    ChronomancerUltiHyperProjectile: { fit: 8, flags: 5, chargedRange: 2200, speedMul: 1.2 },
+    ChronomancerProjectileStasis: { fit: 4 },
+    ChronomancerProjectileStasisSecondary: { fit: 7 },
+    GusOverchargedUltiProjectile: { fit: 2, chargedRange: 2800, speedMul: 1.2 },
+    GusOverchargedAreaEffectProjectile: { fit: 3 },
+    MtowerProjectile: { fit: 4, flags: 16 },
+    ArenaXPProjectile: { fit: 7, flags: 16 },
+    MobaKaijuProjectile: { fit: 4, flags: 16 },
+    MobaBigKaijuProjectile: { fit: 4, flags: 16 },
+    AlternatorHealProjectile: { fit: 8, maxRange: 2500 },
+    AlternatorSpeedProjectile: { fit: 0, maxRange: 2500 },
+    AlternatorDamageProjectile: { fit: 8, maxRange: 2500 },
+    AlternatorSlowProjectile: { fit: 0, maxRange: 2500 },
+    GeishaUltiProjectile: { fit: 8, flags: 5, maxRange: 2200 },
+    GeishaUltiProjectileOvercharged: { fit: 8, flags: 5, chargedRange: 2200, speedMul: 1.2 },
+    GeishaTransformedProjectile: { fit: 4, maxRange: 2000 },
+    SpawnerDudeMutantProjectile: { fit: 1 },
+    ArenaBaseProjectile: { fit: 2, flags: 8, growR: 100, fadeBase: 100.0, fadeK: 0.000693147 },
+    MegaKenjiProjectileSlowBounce: { fit: 8, flags: 2, maxRange: 10000 },
+    MegaKenjiProjectileSpawnRobot: { fit: 8, maxRange: 3000 },
+    MegaKenjiProjectileFast360: { fit: 8 },
+    MegaKenjiProjectileDeath: { fit: 8, maxRange: 3000 },
+    SamuraiRangedEnemyProjectile: { fit: 4 },
+    BaseballOverchargedUltiProjectileSticky: { fit: 0, flags: 2 },
+    BaseballOverchargedUltiProjectileStickyChain: { fit: 0, flags: 2 },
+    AngelicProjectile: { fit: 4 },
+    DemonicProjectile: { fit: 4 },
+    DemonicProjectileBoomerang: { fit: 4, flags: 2 },
+    BrawlersMagnetProjectile1_lvl1: { fit: 2, maxRange: 1800 },
+    BrawlersMagnetProjectile2_lvl1: { fit: 2 },
+    BrawlersMagnetProjectile1_lvl3: { fit: 2, maxRange: 1800 },
+    BrawlersMagnetProjectile2_lvl3: { fit: 2 },
+    SignalStrikeProjectile: { fit: 0, maxRange: 3000 },
+    SignalStrikeProjectile_lvl3: { fit: 0, maxRange: 3000 },
+    EndOfLineProjectile: { fit: 8, flags: 5, maxRange: 2300 },
+    BoomBoxProjectile: { fit: 8, flags: 5, maxRange: 2200 },
+    BoomBoxProjectile_lvl2: { fit: 8, flags: 5, maxRange: 2200 },
+    BoomBoxProjectile_lvl3: { fit: 8, flags: 5, maxRange: 2200 },
+    HookTimeProjectile_lvl1: { fit: 3, maxRange: 3000 },
+    HookTimeProjectile_lvl3: { fit: 3, maxRange: 3000 },
+    JetpackProjectileDamage: { fit: 2, flags: 5, maxRange: 700 },
+    JetpackProjectileDamageAndSlow: { fit: 2, flags: 5, maxRange: 700 },
+    EndOfLineProjectile_lvl3: { fit: 8, flags: 5, maxRange: 2300 },
+    DancerProjectileSingle: { fit: 8, maxRange: 2400 },
+    DancerProjectileDouble: { fit: 8, maxRange: 1800 },
+    DancerProjectileTriple: { fit: 8, maxRange: 1400 },
+    DancerProjectileUlti: { fit: 0, maxRange: 2100 },
+    DancerOverchargedProjectileUlti: { fit: 0, flags: 2, reachAdj: 1500, maxRange: 2100 },
+    FuryProjectile: { fit: 8, flags: 5, maxRange: 2200 },
+    FuryProjectileCrit: { fit: 8, flags: 5, maxRange: 2200 },
+    FuryUltiProjectile: { fit: 0, maxRange: 4000 },
+    FuryOverchargedUltiProjectile: { fit: 0, flags: 2, chargedRange: 4000, speedMul: 1.2 },
+    FuryOverchargedUltiProjectileReturn: { fit: 0, flags: 2 },
+    MegaBossCrowProjectile: { fit: 7, maxRange: 4000 },
+    MegaBossCactusProjectile: { fit: 2, maxRange: 3000 },
+    MegaBossCactusFrag: { fit: 7 },
+    MegaBossCactusUltiProjectile: { fit: 8, flags: 5, maxRange: 2500 },
+    MegaBossCactusPushAwayFrag: { fit: 7 },
+    MegaBossCactusProjectileSecond: { fit: 2, maxRange: 3000 },
+    MegaTickProjectile: { fit: 8, flags: 5, maxRange: 1500 },
+    MegaTickSummonProjectile: { fit: 8, maxRange: 1500 },
+    MegaTickSummonProjectileMid: { fit: 8, maxRange: 1500 },
+    MegaTickSummonProjectileLarge: { fit: 8, maxRange: 2500 },
+    MegaTickSecondProjectile: { fit: 8, flags: 5, maxRange: 3000 },
+    MegaBossTrickshotDudeProjectile: { fit: 7, flags: 2, reachAdj: 1500, maxRange: 2500 },
+    MegaBossTrickshotDudeUltiProjectile: { fit: 7, flags: 2, reachAdj: 1500, maxRange: 2500 },
+    MegaBossTrickshotDudeProjectileLarge: { fit: 3, flags: 2, reachAdj: 1500, maxRange: 2500 },
+    MegaBossTrickshotDudeProjectileLargeExtra: { fit: 0, flags: 2, reachAdj: 1500, maxRange: 4000 },
+    MegaBossCrowJumpProjectile: { fit: 7 },
+    MegaBossCrowSwampProjectile: { fit: 8, flags: 5 },
+    MegaBossCrowSwampProjectileLarge: { fit: 8, flags: 5, maxRange: 5000 },
+    MegaBossCrowJumpProjectileChain: { fit: 4, flags: 2 },
+    MegaBossSplitterProjectileSlow: { fit: 7 },
+    MegaBossSplitterProjectile: { fit: 7, maxRange: 3000 },
+    MegaBossSplitterProjectilePierce: { fit: 3, flags: 2, reachAdj: 1500, maxRange: 20000 },
+    MegaBossSplitterSpawnRobotsThrow: { fit: 8, maxRange: 6000 },
+    MegaBossSplitterSpawnRobotsShoot: { fit: 8, maxRange: 6000 },
+    MegaBossTwinsThrowerProjectile: { fit: 8, flags: 5 },
+    MegaBossTwinsShotgunProjectile: { fit: 8 },
+    MegaKenjiProjectileSpawnKenji: { fit: 8, flags: 5, maxRange: 3000 },
+    MegaBossSpikeSummonPet: { fit: 8, maxRange: 6000 },
+    MegaBossCactusPetShoot: { fit: 7 },
+    MegaSamuraiRangedEnemyProjectile: { fit: 4 },
+    ActorPlaceholderProjectile: { fit: 7, maxRange: 2400 },
+    BulletstormProjectile: { fit: 4, maxRange: 3000 },
+    BulletstormLastShotProjectile: { fit: 1, maxRange: 3000 },
+    BulletstormUltiProjectile: { fit: 8, flags: 5, maxRange: 2500 },
+    BulletstormUltiOverchargedProjectile: { fit: 8, flags: 5, chargedRange: 2500, speedMul: 1.2 },
+    BulletstormShellProjectile: { fit: 8 },
+    BulletstormOnShellPickedUpProjectile: { fit: 5, maxRange: 3300 },
+    BulletstormUltiMarkedProjectile: { fit: 7, flags: 16 },
+    BulletstormUltiOverchargedMarkedProjectile: { fit: 7, flags: 16 },
+    MegaBossDgProjectile: { fit: 8, maxRange: 1000 },
+    MegaBossDgSpawn: { fit: 8, flags: 5, maxRange: 3000 },
+    MegaBossDgSpawnProjectile: { fit: 8 },
+    MegaBossVecProjectileDropClock: { fit: 8, flags: 5 },
+    MegaBossVecProjectileLong: { fit: 8 },
+    MegaBossVecProjectileFreeze: { fit: 8, flags: 5, maxRange: 3000 },
+    RogueliteCirclingProjectileClose: { fit: 2 },
+    RogueliteCirclingProjectileFar: { fit: 2 },
+    RogueliteCirclingProjectile3: { fit: 2 },
+    EnragerPullProjectile: { fit: 3, maxRange: 2000 },
+    EnragerPullProjectileBuddy: { fit: 3, maxRange: 2000 },
+    MegaBossFrankProjectile: { fit: 3, maxRange: 3500 },
+    MegaBossFrankUltiProjectile: { fit: 2, maxRange: 4000 },
+    MegaBossFrankSpawnAdd: { fit: 8, flags: 5, maxRange: 3000 },
+    MegaBossFrankGroundSpikeProjectile: { fit: 8, flags: 5, maxRange: 3000 },
+    RogueliteLCardSqueakProjectile2: { fit: 4 },
+    MegaBossVecProjectileRockExplosion: { fit: 8, flags: 5, maxRange: 1500 },
+    MegaBossVecProjectileRockExplosionProjectiles: { fit: 7 },
+    MegaBossVecProjectileBlackholeDistance: { fit: 8, flags: 5, maxRange: 1500 },
+    MegaBossVecAttackSlowProjectile: { fit: 0, maxRange: 5500 },
+    MegaBossVecTeleport: { fit: 2, maxRange: 5000 },
+    MegaBossFrankCreateDemon: { fit: 8 },
+    ShellyOverchargedProjectile: { fit: 8, maxRange: 2300, chargedRange: 2300 },
+    SpikeOverchargedProjectile: { fit: 3, maxRange: 2300, chargedRange: 2300 },
+    SpikeOverchargedFrag: { fit: 7 },
+    GunslingerOverchargedProjectile: { fit: 7, maxRange: 2700, chargedRange: 2700 },
+    MenderProjectile: { fit: 3, maxRange: 2200 },
+    MenderUltiProjectile: { fit: 0, maxRange: 1700 },
+    MenderUltiOverchargedProjectile: { fit: 0, chargedRange: 1700, speedMul: 1.2 },
+    ShadowdemonProjectileDirect: { fit: 7, maxRange: 2200 },
+    ShadowdemonProjectileIndirect: { fit: 8, flags: 5, maxRange: 2200 },
+    ShadowdemonUltiProjectile: { fit: 8, flags: 5, maxRange: 3000 },
+    ShadowdemonCloneBulletProjectile: { fit: 7, maxRange: 2700 },
+    HammerDudeWeaponOverchargedProjectile: { fit: 3, maxRange: 1800, chargedRange: 1800 },
+    MummyWeaponOverchargedProjectile: { fit: 0, flags: 8, maxRange: 2000, chargedRange: 2000, growR: 225, fadeBase: 87.5, fadeK: 0.000954724 },
+    CactusBonusSkillCoverProjectile: { fit: 8, maxRange: 2200 },
+    CactusBonusSkillCoverProjectileBuddy: { fit: 8, maxRange: 2200 },
+    CactusSpikeGadgetBuddy: { fit: 7, maxRange: 2300 },
+    ShotgunGirlProjectileGadgetSkill: { fit: 8, maxRange: 3000 },
+    GunslingerDoubleShotProjectile: { fit: 4, maxRange: 3300 },
+    GunslingerDoubleShotProjectileBuddy: { fit: 4, maxRange: 3300 },
+    GunslingerSilverBulletProjectileBuddy: { fit: 5, maxRange: 3300 },
+    GunslingerSilverBulletProjectile: { fit: 4, maxRange: 3300 },
+    DummyProjectileForLoveBomb: { fit: 8, flags: 5, maxRange: 2400 },
+    MummyGadgetSkillAcidSprayProjectile: { fit: 2, flags: 8, maxRange: 2000, growR: 180, fadeBase: 70.0, fadeK: 0.000954724 },
+    MummyGadgetSkillAcidSprayProjectileBuddy: { fit: 2, flags: 8, maxRange: 2000, growR: 180, fadeBase: 70.0, fadeK: 0.000954724 },
+    MummyGadgetSkillFriendzonerProjectile: { fit: 7, maxRange: 1200 },
+    MummyGadgetSkillFriendzonerProjectileBuddy: { fit: 7, maxRange: 1200 },
+    HammerDudeGadgetSkillNoiseCancelBuddyProjectile: { fit: 3, maxRange: 1800 },
+    HammerDudeGadgetSkillAttractionBuddyProjectile: { fit: 3, maxRange: 2200 },
+    HammerDudeGadgetSkillNoiseCancelProjectile: { fit: 3, maxRange: 1800 },
+    HammerDudeGadgetSkillAttractionProjectile: { fit: 3, maxRange: 2200 },
+    UndertakerGadgetSkillComboSpinnerProjectile: { fit: 8, maxRange: 800 },
+    UndertakerGadgetSkillComboSpinnerProjectileBuddy: { fit: 8, maxRange: 800 },
+    MegaBossStickyBombProjectile: { fit: 3, maxRange: 3500 },
+    MegaBossStickyBombUltiProjectile: { fit: 8, flags: 5, maxRange: 3000 },
+    MegaBossStickyBombOverchargedUltiProjectile: { fit: 8, flags: 5, maxRange: 3000 },
+    MegaBossStickyBombOverchargedUltiProjectileBounce1: { fit: 8 },
+    MegaBossStickyBombOverchargedUltiProjectileBounce2: { fit: 8 },
+    MegaBossStickyBombOverchargedUltiProjectileBounce3: { fit: 8 },
+    MegaBossStickyBombOverchargedUltiProjectileBounce4: { fit: 8 },
+    MegaBossStickyBombProjectileLarge: { fit: 2, maxRange: 5500 },
+    MegaBossStickyBombUltiBulletExplodeProjectileLarge: { fit: 4 },
+    MegaBossStickyBombUltiBulletExplodeProjectile: { fit: 4 },
+    MegaBossMosquitoProjectile: { fit: 4, maxRange: 10000 },
+    MegaBossMosquitoProjectileLarge: { fit: 1, flags: 2, reachAdj: 1500, maxRange: 10000 },
+    UndertakerGadgetSkillBatsProjectile: { fit: 4, maxRange: 1500 },
+    UndertakerGadgetSkillBatsProjectileBuddy: { fit: 4, maxRange: 1500 },
+    MegaBossGhostProjectile: { fit: 4, flags: 2, reachAdj: 1500 },
+    ShotgunGirlProjectileGadgetSkillBuddy: { fit: 8, maxRange: 3000 },
+    MegaBossTrickshotDude2Projectile: { fit: 7, flags: 2, reachAdj: 1500, maxRange: 2500 },
+    MegaBossTrickshotDude2UltiProjectile: { fit: 7, flags: 2, reachAdj: 1500, maxRange: 2500 },
+    MegaBossTrickshotDude2ProjectileLarge: { fit: 3, flags: 2, reachAdj: 1500, maxRange: 2500 },
+    MegaBossTrickshotDude2ProjectileLargeExtra: { fit: 0, flags: 2, reachAdj: 1500, maxRange: 4000 },
+    RedirecterProjectile: { fit: 4, maxRange: 1800 },
+    RedirecterProjectileSecondary: { fit: 7, maxRange: 2000 },
+    RedirecterUltiProjectile: { fit: 8, flags: 5, maxRange: 1600 },
+    RedirecterUltiProjectileOvercharged: { fit: 8, flags: 5, maxRange: 1600 },
+    MegaBossMaisieProjectile: { fit: 4, maxRange: 4500 },
+    MegaBossMaisieBigProjectile: { fit: 2, maxRange: 5500 },
+    MegaBossMaisieCreateExplosion: { fit: 8, flags: 5, maxRange: 3500 },
+    MegaBossMaisieExplosionProjectile: { fit: 4 },
+    MegaBossShamanProjectile: { fit: 0, maxRange: 8000 },
+    MegaBossShamanUltiProjectile: { fit: 8, maxRange: 4200 },
+    MegaBossCrossBomberProjectile: { fit: 8, flags: 5, maxRange: 3200 },
+    MegaBossCrossBomberSecondProjectile: { fit: 8, flags: 5, maxRange: 3200 },
+    MegaBossCrossBomberProjectile2: { fit: 4 },
+    MegaBossCrossBomberUltiProjectile: { fit: 8, flags: 5, maxRange: 3200 },
+    MegaBossCrossBomberUltiProjectile2: { fit: 3 },
+    MegaBossCrossBomberSummonPet: { fit: 8, maxRange: 3200 },
+    MegaBossOverchargedCrossBomberUltiProjectile: { fit: 8, flags: 5, maxRange: 3200 },
+    MegaBossOverchargedCrossBomberUltiProjectile2: { fit: 0 },
+    MegaBossAssaultShotgunProjectileCoin: { fit: 7 },
+    MegaBossAssaultShotgunProjectile: { fit: 7, maxRange: 5000 },
+    MegaBossAssaultShotgunProjectileBig: { fit: 7, maxRange: 5000 },
+    MegaBossAssaultShotgunProjectileExtraBig: { fit: 4 },
+    MegaBossAssaultShotgunUltiProjectile: { fit: 2, flags: 10, maxRange: 3500, growR: 100, fadeBase: 160.0, fadeK: 0.000346791 },
+    MegaBossAssaultShotgunUltiProjectile2: { fit: 2, flags: 2 },
+    MegaBossAssaultShotgunOverchargedUltiProjectile: { fit: 1, flags: 10, maxRange: 5000, growR: 90, fadeBase: 144.0, fadeK: 0.000271884 },
+    MegaBossAssaultShotgunOverchargedUltiProjectile2: { fit: 1, flags: 2 },
+    MegaBossAssaultShotgunOverchargedUltiProjectile3: { fit: 1, flags: 2 },
+    MegaBossAssaultShotgunGadgetProjectile: { fit: 0, flags: 5, maxRange: 800 },
+    MegaBossAssaultShotgunBombExplosion: { fit: 1, flags: 5, maxRange: 2200 },
+    BowDudeGadgetSkillProjectile: { fit: -1, maxRange: 2200 },
+    BowDudeGadgetSkillProjectileBuddy: { fit: -1, maxRange: 2200 },
+    BowDudeProjectileTripWire: { fit: 1, flags: 1 },
+    BaseballGadgetSkillStickyProjectile: { fit: 8, flags: 5, maxRange: 1700 },
+    BaseballGadgetSkillStickyProjectileBuddy: { fit: 8, flags: 5, maxRange: 1700 },
+    BullDudeOverchargedProjectile: { fit: 0, maxRange: 1400 },
+    BullDudeGadgetSkillMarkEnemyProjectile: { fit: 0, maxRange: 1800 },
+    NinjaBonusSkillInvisibleAreaProjectile: { fit: 8, maxRange: 2200 },
+    NinjaBonusSkillInvisibleAreaProjectileBuddy: { fit: 8, maxRange: 2200 },
+    MegaBossDragonCrowProjectile: { fit: 7 },
+    MegaBossDragonCrowUltiProjectile: { fit: 7 },
+    MegaBossDragonCrowBoomrangProjectile: { fit: 7, flags: 2, maxRange: 3000 },
+    MegaBossDragonCrowBoomrangProjectile2: { fit: 7, flags: 2 },
+    MegaBossDragonFireProjectile: { fit: 3, flags: 8, maxRange: 4200, growR: 105, fadeBase: 45.0, fadeK: 0.000487322 },
+    MegaBossDragonFireAreaExplosionProjectile: { fit: 8, flags: 5, maxRange: 3500 },
+    MegaBossDragonCrowSummon: { fit: 8, maxRange: 2500 },
+    MegaBossDragonCirclingProjectile: { fit: 7 },
+    BullDudeGadgetSkillMarkEnemyProjectileBuddy: { fit: 0, maxRange: 1800 },
+    LeonDefOverchargedProjectile: { fit: 4, maxRange: 2900 },
+    BowDudeOverchargedProjectile: { fit: 5, maxRange: 2600 },
+    MegaBossMaisieSummonTurret: { fit: 8, maxRange: 3500 },
+    MegaBossMaisieTurretProjectile: { fit: 7 },
+    BowDudeProjectileTripWireBuddy: { fit: 1, flags: 1 },
+    SandstormModifierProjectile: { fit: 0 },
+    MegaBossShamanBearUltiProjectile: { fit: 8, maxRange: 2500 },
+    MegaBossDragonFireProjectileBig: { fit: 0, flags: 8, maxRange: 2400, growR: 157, fadeBase: 67.5, fadeK: 0.000702317 },
+    GladiatorProjectile: { fit: 0, flags: 8, maxRange: 800, growR: 240, fadeBase: 60.0, fadeK: 0.010059 },
+    GladiatorProjectileFire: { fit: 0, flags: 8, maxRange: 800, growR: 240, fadeBase: 60.0, fadeK: 0.010059 },
+    GladiatorUltiProjectile: { fit: 8, flags: 5 },
+    GladiatorOverchargedUltiProjectile: { fit: 8, flags: 5 },
+    AssaultShotgunGadgetProjectileCoinShower: { fit: 8, flags: 5, maxRange: 2200 },
+    AssaultShotgunGadgetProjectileCoinShowerBuddy: { fit: 8, flags: 5, maxRange: 2200 },
+    SuperNovaCactusProjectile: { fit: 3, maxRange: 1100 },
+    SuperNovaCactusUltiProjectile: { fit: 8, flags: 5, maxRange: 1700 },
+    SuperNovaCactusSpikeChain: { fit: 7 },
+    SuperNovaCactusSpike: { fit: 7 },
+    SuperNovaCactusSpikeCurve: { fit: 7 },
+    SuperNovaBeeSniperProjectile: { fit: 4, maxRange: 2800 },
+    SuperNovaBeeSniperChargedProjectile: { fit: 2, maxRange: 4000 },
+    SuperNovaBeeSniperUltiProjectile: { fit: 3, maxRange: 2000 },
+    SuperNovaVoodooProjectileEarth: { fit: 7, flags: 5, maxRange: 1000 },
+    SuperNovaVoodooProjectileEarthChain1: { fit: 7, flags: 5 },
+    SuperNovaVoodooProjectileEarthChain2: { fit: 7, flags: 5 },
+    SuperNovaVoodooProjectileForest: { fit: 7, flags: 5, maxRange: 1000 },
+    SuperNovaVoodooProjectileForestChain1: { fit: 7, flags: 5 },
+    SuperNovaVoodooProjectileForestChain2: { fit: 7, flags: 5 },
+    SuperNovaVoodooProjectileWater: { fit: 7, flags: 5, maxRange: 1000 },
+    SuperNovaVoodooProjectileWaterChain1: { fit: 7, flags: 5 },
+    SuperNovaVoodooProjectileWaterChain2: { fit: 7, flags: 5 },
+    SuperNovaVoodooUltiProjectile: { fit: 8, maxRange: 1500 },
+    SuperNovaVoodooPetProjectile: { fit: 3, maxRange: 1600 },
+    SuperNovaFireDudeProjectile: { fit: 2, flags: 8, maxRange: 1700, growR: 180, fadeBase: 20.0, fadeK: 0.00379249 },
+    SuperNovaFireDudeUltiProjectile: { fit: 8, flags: 5, maxRange: 2600 },
+    MagicalGirlProjectile: { fit: 0, maxRange: 1700 },
+    MagicalGirlProjectile2: { fit: 0, maxRange: 1700 },
+    MagicalGirlProjectileHealingSP: { fit: 0 },
+    MagicalGirlProjectile2HealingSP: { fit: 0 },
+    MagicalGirlBonusSkillFlyAreaProjectile: { fit: 8, maxRange: 2200 },
+    MagicalGirlBonusSkillProjectileHealing: { fit: 0, maxRange: 2200 },
+    MegaBossFinxTimebendProjectile: { fit: 8, flags: 5, maxRange: 3500 },
+    MegaBossFinxTimeStopProjectile: { fit: 2 },
+    MegaBossFinxProjectile: { fit: 4 },
+    MegaBossFinxProjectileSecondary: { fit: 7 },
+    MegaBossFinxTimeRiftProjectile: { fit: 0 },
+    MegaBossFinxSpawnKittensProjectile: { fit: 8, flags: 5, maxRange: 3500 },
+    MegaBossFinxReturnChronomancerProjectile: { fit: 4, maxRange: 5000 },
+    MegaBossFinxReturnChronomancerProjectileSecondary: { fit: 7, maxRange: 5000 },
+    GladiatorGadgetSkillProjectileAmp: { fit: 8, maxRange: 2200 },
+    GladiatorGadgetSkillProjectileWall: { fit: 8, flags: 5, maxRange: 2200 },
+    NanoPercenterProjectile: { fit: 3 },
+    MegaBossFinxCreateKit: { fit: 8 },
+    MegaBossPercenterProjectile: { fit: 3, maxRange: 3500 },
+    MegaBossPercenterProjectileSmall: { fit: 4 },
+    MegaBossPercenterThrowProjectile: { fit: 8, flags: 5, maxRange: 3000 },
+    MegaBossPercenterProjectileLarge: { fit: 0, maxRange: 10000 },
+    MegaBossPercenterSpawnTurrentProjectile: { fit: 8, maxRange: 4800 },
+    MegaBossPercenterTurrentPetProjectile: { fit: 8, maxRange: 100 },
+    KatanaKidProjectile: { fit: 3, maxRange: 800 },
+    KatanaKidFullChargeProjectile: { fit: 3, maxRange: 800 },
+    KatanaKidGadgetSkillFishNetProjectile: { fit: 5, maxRange: 2200 },
+    FutureGirlProjectile: { fit: 0, maxRange: 2400 },
+    FutureGirlUltiProjectile: { fit: 8, maxRange: 1500 },
+    FutureGirlOverchargedUltiProjectile: { fit: 8, chargedRange: 1500, speedMul: 1.2 },
+    FutureGirlTurretTetherProjectile: { fit: 8, flags: 16 },
+    FutureGirlTurretTetherOverchargedProjectile: { fit: 8, flags: 16 },
+    FutureGirlGadgetProjectile: { fit: 8, flags: 5, maxRange: 3000 },
+    MegaBossBlackHoleProjectile: { fit: 4, flags: 2, maxRange: 5000 },
+    MegaBossBlackHoleShieldPetProjectile: { fit: 4, flags: 16, maxRange: 2000 },
+    MegaBossBlackHoleUltiShieldPetProjectile: { fit: 8, flags: 5, maxRange: 4500 },
+    MegaBossBlackHoleUltiExplodingPetProjectile: { fit: 8, flags: 5, maxRange: 4500 },
+    MegaBossBlackHoleExplosionPetProjectile: { fit: 4 },
+    MechaDudeSendItProjectile: { fit: 2, maxRange: 2000 },
+    MechaDudeSendItProjectileBuddy: { fit: 2, maxRange: 2200 },
+    MegaBossBlackholeSpreadProjectile: { fit: 3, flags: 10, maxRange: 2700, growR: 75, fadeBase: 120.0, fadeK: 0.000314681 },
+    MegaBossBlackholeSpreadProjectileReturn: { fit: 3, flags: 2 },
+    MegaBossRocketGirlProjectileBasic: { fit: 4, maxRange: 4500 },
+    MegaBossRocketGirlUltiProjectile: { fit: 8, flags: 5, maxRange: 4500 },
+    MegaBossRocketGirlStreamProjectile: { fit: 7, maxRange: 4500 },
+    MegaBossBlackHoleGravityWellProjectile: { fit: 8, flags: 5, maxRange: 4000 },
+    MegaBossBlackHoleBoomerangWellProjectile: { fit: 8, flags: 2, maxRange: 4000 },
+    MegaBossBlackHoleBoomerangWellChainProjectile: { fit: 7 },
+    MegaBossRocketGirlMatryoshkaProjectile: { fit: 8, flags: 5, maxRange: 4000 },
+    MegaBossRocketGirlRainProjectile: { fit: 8, flags: 5, maxRange: 4000 },
+    MegaBossRocketGirlClusterProjectile: { fit: 7 },
+    MechaDudeProjectileHyperCharged: { fit: 3, flags: 16, chargedRange: 2700 },
+    MechaDudeBigProjectileHyperChargedBuddy: { fit: 4, chargedRange: 2200 },
+    TrickShotGadgetSkillContainerProjectile: { fit: 8 },
+    TrickshotDudeGadgetSkillSplitterShotProjectile: { fit: 3, maxRange: 2900 },
+    TrickshotDudeGadgetSkillSplitterShotProjectile2: { fit: 4 },
+    TrickShotGadgetSkillContainerProjectileBuddy: { fit: 8 },
+    TrickshotDudeGadgetSkillSplitterShotProjectileBuddy: { fit: 3, maxRange: 2900 },
+    TrickshotDudeProjectileBigBulletSplit: { fit: 4, flags: 2, reachAdj: 1500 },
+    TrickshotDudeProjectileBigBulletSplitBuddy: { fit: 4, flags: 2, reachAdj: 1500 },
+    TrickshotDudeGadgetSkillProjectile: { fit: 8, maxRange: 2200 },
+    RocketGirlGadgetSkillMegaRocketProjectile: { fit: 3, maxRange: 2700 },
+    RocketGirlGadgetSkillMegaRocketProjectileBuddy: { fit: 3, maxRange: 2700 },
+    RocketGirlGadgetSplittingProjectile: { fit: 4 },
+    RocketGirlProjectileSecondary: { fit: 7, maxRange: 2700 },
+    RocketGirlProjectileSecondaryOvercharged: { fit: 7, chargedRange: 2700 },
+    MegaKatanaKidHookProjectile: { fit: 0, maxRange: 5000 },
+    MegaKatanaKidHookProjectile2: { fit: 0 },
+    MegaKatanaKidProjectile: { fit: 0, maxRange: 4000 },
+    MegaKatanaKidFishProjectile: { fit: 4, flags: 2, reachAdj: 600 },
+    TrickshotDudeGadgetSkillProjectileBuddy: { fit: 8, maxRange: 2200 },
+    TrickshotDudeProjectileOverchargeBuddy: { fit: 4, flags: 2, reachAdj: 1500, maxRange: 2900 },
+    MechaVanMeleeNinjaStabProjectile: { fit: 0, maxRange: 600 },
+    MechaVanSniperPiercingProjectile: { fit: 4, maxRange: 3000 },
+    MechaVanSniperLongRangeProjectile: { fit: 0, maxRange: 12000 },
+    MegaBossKatanaKidLobbedFishProjectile: { fit: 7, flags: 5 },
+    RocketGirlProjectileOvercharged: { fit: 4, chargedRange: 2700, speedMul: 1.2 },
+    StackerProjectile: { fit: 3, maxRange: 2500 },
+    StackerUltiProjectile: { fit: 3, maxRange: 2700 },
+    StackerCollectProjectile: { fit: 8, flags: 16 },
+    StackerGadgetProjectile: { fit: 8, flags: 5, maxRange: 2800 },
+    AttractorOrbiterProjectile: { fit: 3, flags: 8, growR: 112, fadeBase: 60.0, fadeK: 0.00105605 },
+    AttractorOrbiterProjectile2: { fit: 3, flags: 8, growR: 112, fadeBase: 60.0, fadeK: 0.00105605 },
+    AttractorOrbiterProjectile3: { fit: 3, flags: 8, growR: 112, fadeBase: 60.0, fadeK: 0.00105605 },
+    AttractorCarrierProjectile: { fit: 4, maxRange: 2700 },
+    AttractorSuperProjectileMagnet: { fit: 1, maxRange: 2800 },
+    AttractorGadgetPushbackProjectile: { fit: 8, flags: 5, maxRange: 2200 },
+    AttractorGadgetGroundedProjectile: { fit: 8, flags: 5, maxRange: 2200 },
+    PrimoDefOverchargedProjectile: { fit: 0, flags: 8, maxRange: 1000, chargedRange: 1000, growR: 240, fadeBase: 60.0, fadeK: 0.00524838 },
+    SoulCollectorKnockbackSoulProjectile: { fit: 2, maxRange: 2000 },
+    SoulCollectorOverchargedProjectile: { fit: 0, maxRange: 2800 },
+    FireDudeBonusSkillSpillProjectile: { fit: 8, maxRange: 1500 },
+    SoulCollectorKnockbackSoulProjectileBuddy: { fit: 2, maxRange: 2000 },
+    MegaBossDuoAlphabetProjectile: { fit: 7, maxRange: 10000 },
+    MegaBossDuoAlphabetProjectileBig: { fit: 5, maxRange: 10000 },
 };
 
 export function kindOf(name)
 {
-    return name && KINDS[name] || null;
+    if (!name) return null;
+    return KINDS[name] || null;
 }
 
 export function fitOf(name)
 {
-    const spec = kindOf(name);
-    if (spec && spec.fit && FITS[spec.fit]) return FITS[spec.fit];
-    return FITS.fallback;
+    const kind = kindOf(name);
+    if (kind && kind.fit >= 0 && kind.fit < FITS.length) return FITS[kind.fit];
+    return FITS[FIT_FALLBACK];
+}
+
+export function projRadius(projectile)
+{
+    if (!projectile) return 0;
+    return projectile.radius > 0 ? projectile.radius : 0;
 }

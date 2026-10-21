@@ -26,19 +26,18 @@ import
 from "../utils/flags.js";
 import
 {
-    logInfo,
     logWarn
 }
 from "../utils/logger.js";
 import
 {
-    canonBrawlerName
-}
-from "../utils/brawlerName.js";
-import
-{
+    K_BLOB,
+    K_DROP,
+    K_FADE,
+    K_LOCKPATH,
     fitOf,
-    kindOf
+    kindOf,
+    projRadius
 }
 from "../helpers/dodge_kinds.js";
 import
@@ -53,614 +52,976 @@ import
 {
     BLOCKS_MOVEMENT,
     BLOCKS_PROJECTILES,
+    TILE_SIZE,
     getWallCacheH,
     getWallCacheW,
+    isBlockedAt,
     isBlockedWide,
     losCheck,
-    TILE_SIZE
+    traceWallHit
 }
 from "../utils/wallCache.js";
 
 const MOVE_INPUT_TYPE = 2;
-var TUNE = {
-    AWARE: 3200,
-    RANGE_FALLBACK: 2800,
-    TICK_MS: 16,
-    DIR_COUNT: 48,
-    SKIN: 50,
-    LOCK_MS: 130,
-    REACH: 600,
-    HORIZON_S: 1,
-    KEEP_BAND: 120,
-    MOMENTUM: 100,
-    ENGAGE: 40,
-    RELEASE_GRACE_MS: 120,
-    WALL_HIT: 9000,
-    PROBE_N: 3,
-    PROBE_T: 0.35,
-    WALL_BODY: 240
-};
 
-var _heading = null;
-var _headingIdx = -1;
-var _holdUntil = 0;
-var _lastDangerTs = 0;
-var _lastTick = 0;
-var _muted = new Set();
+const DODGE_CHAR_SPEED = 720;
+const DODGE_SPEED_MIN = 300;
+const DODGE_SPEED_MAX = 8500;
+
+const AD_AWARE = 3200;
+const AD_FALLBACK_RANGE = 2800;
+const AD_DIR_COUNT = 64;
+const AD_SKIN = 50;
+const AD_SPAWN_MARGIN = 60;
+const AD_REACH = 600;
+const AD_TICK_MS = 16;
+const AD_TICK_MAX_MS = 250;
+const AD_WALL_BODY = 240;
+const AD_HAZARD_MAX = 96;
+const AD_CAP_MAX = 16;
+
+const BD_SAFETY_MARGIN = 28;
+const BD_T_FIELD = 1.8;
+const BD_INTENT_DEAD_SQ = 900;
+const BD_THREAT_MAX = 160;
+
+const BDC_EXTRA = 12;
+const BDC_DANGER = 1000000;
+const BDC_T_FIELD = 2.4;
+const BDC_T_URGENT = 0.9;
+const BDC_KEEP = 0.15;
+const BDC_KEEP_IMPACT = 0.9;
+const BDC_TIE = 1.05;
+const BDC_WALL_HIT = 200000;
+const BDC_WALL_BAND = 170;
+const BDC_WALL_PROBE = 3;
+const BDC_EXTRA_BLEND = 120;
+const BDC_HIT_GATE = 1.15;
+const BDC_FAR = 1.0e18;
+const BDC_EPS = 1;
+const BDC_DIR_MAX = AD_DIR_COUNT + BDC_EXTRA;
+
+const PROJ_RADIUS_DEFAULT = 150;
+const OWN_RADIUS_MIN = 40;
+const OWN_RADIUS_MAX = 200;
+
 var _ring = [];
-var _scoreBuf = [];
-var _skip = new Set();
-var _options = {
-    reactionSpeed: 50,
-    directionPrecision: 48,
-    safetyMargin: 25
-};
+var _dirBuilt = false;
+
+var _hazards = [];
+var _hazardN = 0;
+
+var _threats = [];
+var _threatN = 0;
+
+var _bdcDirs = [];
+var _bdcScores = [];
+var _bdcImpacts = [];
+var _bdcSel = [];
+var _bdcSelN = 0;
+var _bdcLastX = 0;
+var _bdcLastY = 0;
+var _bdcHaveLast = false;
+
+var _lastTick = 0;
+var _active = false;
+
+function _ok(v, lo, hi)
+{
+    return v >= lo && v <= hi;
+}
+
+function _nowMs()
+{
+    return Date.now();
+}
 
 function _buildRing()
 {
-    _ring.length = 0;
-    const n = TUNE.DIR_COUNT;
-    for (let i = 0; i < n; i++)
+    if (_dirBuilt) return;
+    for (let i = 0; i < AD_DIR_COUNT; i++)
     {
-        const a = Math.PI * 2 * i / n;
-        _ring.push(
-        {
-            x: Math.cos(a),
-            y: Math.sin(a)
+        const a = Math.PI * 2 * i / AD_DIR_COUNT;
+        _ring.push({ x: Math.cos(a), y: Math.sin(a) });
+    }
+    for (let i = 0; i < BDC_DIR_MAX; i++)
+    {
+        _bdcDirs.push({ x: 0, y: 0 });
+        _bdcScores.push(0);
+        _bdcImpacts.push(0);
+    }
+    for (let i = 0; i < BD_THREAT_MAX; i++)
+    {
+        _bdcSel.push(0);
+        _threats.push({ x: 0, y: 0, vx: 0, vy: 0, rad: 0 });
+    }
+    for (let i = 0; i < AD_HAZARD_MAX; i++)
+    {
+        _hazards.push({
+            x: 0, y: 0, vx: 0, vy: 0, rad: 0, age: 0,
+            fadeBase: 0, fadeK: 0, ax: 0, ay: 0, bx: 0, by: 0,
+            hasSegment: false, name: null
         });
     }
-    _scoreBuf = new Array(n).fill(0);
-    _headingIdx = -1;
+    _dirBuilt = true;
 }
-_buildRing();
 
-function _syncTuning()
+function _speed()
 {
-    const t = Math.max(0, Math.min(100, _options.reactionSpeed)) / 100;
-    TUNE.TICK_MS = Math.max(16, Math.round(32 - t * 16));
-    TUNE.LOCK_MS = Math.max(80, Math.round(260 - t * 180));
-    const n = Math.max(8, Math.min(128, _options.directionPrecision | 0));
-    if (n !== TUNE.DIR_COUNT)
-    {
-        TUNE.DIR_COUNT = n;
-        _buildRing();
-    }
-    TUNE.SKIN = Math.max(0, Math.min(120, _options.safetyMargin)) * 2;
+    const s = scanData.mySpeed | 0;
+    if (s < DODGE_SPEED_MIN || s > DODGE_SPEED_MAX) return DODGE_CHAR_SPEED;
+    return s;
 }
-_syncTuning();
 
-export function getDodgeDir()
+function _ownRadius()
 {
-    return _heading;
+    const r = scanData.myRadius;
+    if (r > 1)
+    {
+        if (r > OWN_RADIUS_MAX) return OWN_RADIUS_MAX;
+        if (r < OWN_RADIUS_MIN) return OWN_RADIUS_MIN;
+        return r;
+    }
+    return 120;
 }
 
-export function setAutododgeOptions(opts)
+function _projectileVel(p)
 {
-    if (!opts || typeof opts !== "object") return;
-    if (typeof opts.reactionSpeed === "number" && isFinite(opts.reactionSpeed))
-    {
-        _options.reactionSpeed = Math.max(0, Math.min(100, opts.reactionSpeed));
-    }
-    if (typeof opts.directionPrecision === "number" && isFinite(opts.directionPrecision))
-    {
-        _options.directionPrecision = Math.max(8, Math.min(128, opts.directionPrecision | 0));
-    }
-    if (typeof opts.safetyMargin === "number" && isFinite(opts.safetyMargin))
-    {
-        _options.safetyMargin = Math.max(0, Math.min(120, opts.safetyMargin));
-    }
-    if (Array.isArray(opts.ignoredBrawlers))
-    {
-        _skip = new Set();
-        for (const name of opts.ignoredBrawlers)
-        {
-            const id = canonBrawlerName(name);
-            if (id) _skip.add(id);
-        }
-        _muted.clear();
-    }
-    _syncTuning();
+    if (!p || !p.hasVelocitySample) return null;
+    let dt = p.lastTs && p.spawnedAt ? _nowMs() - p.lastTs : 0;
+    if (!(dt >= AD_TICK_MS && dt <= AD_TICK_MAX_MS)) dt = AD_TICK_MS;
+    return {
+        vx: (p.x - p.lastX) * 1000 / dt,
+        vy: (p.y - p.lastY) * 1000 / dt
+    };
 }
 
-function _ballR(p)
+function _ballRadius(p)
 {
     if (p.radius > 0) return p.radius;
-    return 100;
+    const r = projRadius(p);
+    if (r > 0) return r;
+    return PROJ_RADIUS_DEFAULT;
 }
 
 function _traveled(p)
 {
-    const sx = p.spawnX,
-        sy = p.spawnY;
-    if (!isFinite(sx) || !isFinite(sy)) return 0;
-    return Math.hypot(p.x - sx, p.y - sy);
+    if (!p.spawnX && !p.spawnY) return 0;
+    const dx = p.x - p.spawnX;
+    const dy = p.y - p.spawnY;
+    return Math.sqrt(dx * dx + dy * dy);
 }
 
-function _kindReach(p, spec, spd)
+function _isMine(p)
 {
-    let r = spec && spec.maxRange > 0 ? spec.maxRange : 0;
-    if (spec && spec.chargedRange > 0 && spd > 3500) r = spec.chargedRange;
-    if (r <= 0 && p.castRange > 0) r = p.castRange;
-    if (r <= 0 && p.isThrower && (p.targetX || p.targetY) && isFinite(p.spawnX) && isFinite(p.spawnY))
-    {
-        const td = Math.hypot(p.targetX - p.spawnX, p.targetY - p.spawnY);
-        if (td > 0) r = td;
-    }
-    if (r <= 0) r = TUNE.RANGE_FALLBACK;
-    if (spec && spec.reachAdj) r += spec.reachAdj;
-    if (r > 0 && r < 70000) return r;
-    return TUNE.RANGE_FALLBACK;
+    const team = p.ownerTeam | 0;
+    if (team < 0) return false;
+    return team === (scanData.myTeamId | 0);
 }
 
-function _homePos(p)
+function _myShot(p, mx, my, bodyR)
 {
-    if (isFinite(p.ownerX) && isFinite(p.ownerY) && (p.ownerX || p.ownerY))
-    {
-        return {
-            x: p.ownerX,
-            y: p.ownerY
-        };
-    }
-    if (p.targetX || p.targetY)
-    {
-        return {
-            x: p.targetX,
-            y: p.targetY
-        };
-    }
-    return null;
+    if (!p.spawnX && !p.spawnY) return false;
+    const sx = p.spawnX - mx;
+    const sy = p.spawnY - my;
+    const nx = p.x - mx;
+    const ny = p.y - my;
+    const dSpawn = sx * sx + sy * sy;
+    const dNow = nx * nx + ny * ny;
+    const r = bodyR + AD_SPAWN_MARGIN;
+    if (dSpawn > r * r) return false;
+    return dNow > dSpawn;
 }
 
-function _lifeLeft(p, spec, spd, nowMs)
+function _shielded(p, mx, my)
 {
-    const maxR = _kindReach(p, spec, spd);
-    if (spec && spec.fade)
-    {
-        const age = Math.max(0, nowMs - (p.spawnedAt || nowMs));
-        return Math.max(0, maxR * (1 - age / 1000));
-    }
-    if (spec && spec.home)
-    {
-        const home = _homePos(p);
-        if (home) return Math.hypot(home.x - p.x, home.y - p.y);
-    }
-    const flown = _traveled(p);
-    return Math.max(0, maxR - flown);
-}
-
-function _inAware(myX, myY, hazard, zoneSq)
-{
-    if (hazard.segment)
-    {
-        const d = _segDist(myX, myY, hazard.segment.ax, hazard.segment.ay, hazard.segment.bx, hazard.segment.by);
-        return d * d <= zoneSq;
-    }
-    const dx = hazard.x - myX,
-        dy = hazard.y - myY;
-    return dx * dx + dy * dy <= zoneSq;
-}
-
-function _collectLive(myX, myY, myRadius, nowMs)
-{
-    const out = [];
-    const live = new Set();
-    const shots = scanData.projectiles;
-    if (!shots || shots.length === 0)
-    {
-        if (_muted.size > 0) _muted.clear();
-        return out;
-    }
-    const zoneSq = TUNE.AWARE * TUNE.AWARE;
-    const bodyPad = myRadius + TUNE.SKIN;
-    const deaths = scanData.destroyed;
-    if (deaths && deaths.length)
-    {
-        for (let d = 0; d < deaths.length; d++) noteBurstDeath(deaths[d]);
-    }
-    for (let i = 0; i < shots.length; i++)
-    {
-        const p = shots[i];
-        const gid = p.gid;
-        if (!gid) continue;
-        live.add(gid);
-        const owner = p.ownerName;
-        if (owner && _skip.has(canonBrawlerName(owner) || owner)) _muted.add(gid);
-        if (_muted.has(gid)) continue;
-        const shaped = shapeHazards(p, nowMs);
-        if (shaped)
-        {
-            for (let c = 0; c < shaped.length; c++)
-            {
-                const cap = shaped[c];
-                const until = (cap.t1 - nowMs) / 1e3;
-                if (until <= 0) continue;
-                const hazard = {
-                    rad: cap.radius + bodyPad,
-                    blob: cap.ax === void 0,
-                    until,
-                    name: p.name || cap.name || ""
-                };
-                if (cap.ax === void 0)
-                {
-                    hazard.x = cap.x;
-                    hazard.y = cap.y;
-                    hazard.vx = 0;
-                    hazard.vy = 0;
-                }
-                else
-                {
-                    hazard.segment = cap;
-                }
-                if (_inAware(myX, myY, hazard, zoneSq)) out.push(hazard);
-            }
-        }
-        if (shaped && blocksLinear(p.name)) continue;
-        const name = p.name || "";
-        const spec = kindOf(name);
-        if (spec && spec.drop) continue;
-        const dx = p.x - myX,
-            dy = p.y - myY;
-        if (dx * dx + dy * dy > zoneSq) continue;
-        let vx = p.vx,
-            vy = p.vy;
-        if (!isFinite(vx) || !isFinite(vy))
-        {
-            vx = 0;
-            vy = 0;
-        }
-        const flown = _traveled(p);
-        if (spec && spec.lockPath && flown > 120 && isFinite(p.spawnX) && isFinite(p.spawnY))
-        {
-            vx = (p.x - p.spawnX) / flown * (p.speed || 1);
-            vy = (p.y - p.spawnY) / flown * (p.speed || 1);
-        }
-        let spd = Math.hypot(vx, vy);
-        if (spec && spec.speedMul > 0 && spd > 3500)
-        {
-            vx *= spec.speedMul;
-            vy *= spec.speedMul;
-            spd *= spec.speedMul;
-        }
-        const slow = (p.speed || 0) > 0 && p.speed < 1600;
-        const lockPath = !!(spec && spec.lockPath) || !!p.isBeam;
-        const blob = !!(spec && spec.blob) || !lockPath && (p.isThrower || slow);
-        const bodyR = myRadius + TUNE.SKIN;
-        const fit = fitOf(name);
-        const growR = spec && spec.growR || 0;
-        const shotR = _ballR(p) + growR;
-        const rad = shotR + bodyR + fit.pad + shotR * fit.grow;
-        let ux = 0,
-            uy = 0;
-        let playerAlong = 0;
-        if (spd >= 1)
-        {
-            ux = vx / spd;
-            uy = vy / spd;
-        }
-        if (!blob && spd >= 1)
-        {
-            playerAlong = (myX - p.x) * ux + (myY - p.y) * uy;
-            if (playerAlong < -50) continue;
-            if (!p.isThrower)
-            {
-                const hitX = p.x + ux * Math.max(playerAlong, 0);
-                const hitY = p.y + uy * Math.max(playerAlong, 0);
-                if (!losCheck(p.x, p.y, hitX, hitY, BLOCKS_PROJECTILES)) continue;
-            }
-        }
-        const left = _lifeLeft(p, spec, spd, nowMs);
-        if (left <= 10) continue;
-        const gap = Math.hypot(p.x - myX, p.y - myY) - bodyR - shotR;
-        if (left < 0.85 * Math.max(0, gap)) continue;
-        if (!blob && spd >= 1 && playerAlong > left + shotR) continue;
-        out.push(
-        {
-            x: p.x,
-            y: p.y,
-            vx: blob ? 0 : vx,
-            vy: blob ? 0 : vy,
-            rad,
-            pathLen: left + shotR,
-            left,
-            name,
-            blob,
-            owner: owner ? canonBrawlerName(owner) || owner : "",
-            castRange: p.castRange || 0,
-            age: spec && spec.fade ? Math.max(0, nowMs - (p.spawnedAt || nowMs)) : 0,
-            fadeBase: spec && spec.fadeBase || 0,
-            fadeK: spec && spec.fadeK || 0
-        });
-    }
-    for (const k of _muted)
-    {
-        if (!live.has(k)) _muted.delete(k);
-    }
-    return out;
+    const dx = p.x - mx;
+    const dy = p.y - my;
+    const d = Math.sqrt(dx * dx + dy * dy);
+    if (d <= 1) return false;
+    if (isBlockedAt(mx, my, BLOCKS_PROJECTILES)) return false;
+    return traceWallHit(mx, my, dx / d, dy / d, d, BLOCKS_PROJECTILES) < d;
 }
 
 function _segDist(px, py, ax, ay, bx, by)
 {
-    const dx = bx - ax,
-        dy = by - ay;
+    const dx = bx - ax;
+    const dy = by - ay;
     const lenSq = dx * dx + dy * dy;
-    let t = lenSq < 1e-6 ? 0 : ((px - ax) * dx + (py - ay) * dy) / lenSq;
+    let t = lenSq < 0.000001 ? 0 : ((px - ax) * dx + (py - ay) * dy) / lenSq;
     if (t < 0) t = 0;
     else if (t > 1) t = 1;
-    return Math.hypot(px - (ax + dx * t), py - (ay + dy * t));
+    const cx = px - (ax + dx * t);
+    const cy = py - (ay + dy * t);
+    return Math.sqrt(cx * cx + cy * cy);
 }
 
-function _fadeVel(t, dt)
+function _fadeVel(h, dt, out)
 {
-    let vx = t.vx || 0;
-    let vy = t.vy || 0;
-    if (t.fadeBase && t.fadeK)
+    let vx = h.vx;
+    let vy = h.vy;
+    if (h.fadeBase && h.fadeK)
     {
-        const now = Math.max(0, t.age || 0);
-        const later = now + (dt || 0) * 1000;
-        const cur = t.fadeBase * Math.exp(t.fadeK * now);
-        const nxt = t.fadeBase * Math.exp(t.fadeK * later);
-        if (cur > 1e-6)
+        const nowAge = h.age > 0 ? h.age : 0;
+        const laterAge = nowAge + dt * 1000;
+        const cur = h.fadeBase * Math.exp(h.fadeK * nowAge);
+        const nxt = h.fadeBase * Math.exp(h.fadeK * laterAge);
+        if (cur > 0.000001)
         {
             const r = nxt / cur;
             vx *= r;
             vy *= r;
         }
     }
-    return {
-        x: vx,
-        y: vy
-    };
+    out.vx = vx;
+    out.vy = vy;
+    return out;
 }
 
-function _clearanceFor(threats, myX, myY, mvx, mvy)
+function _inAware(h, mx, my, zoneSq)
 {
-    let minClear = Infinity;
-    const horizon = TUNE.HORIZON_S;
-    for (let i = 0; i < threats.length; i++)
+    if (h.hasSegment)
     {
-        const t = threats[i];
-        if (t.segment)
+        const d = _segDist(mx, my, h.ax, h.ay, h.bx, h.by);
+        return d * d <= zoneSq;
+    }
+    const dx = h.x - mx;
+    const dy = h.y - my;
+    return dx * dx + dy * dy <= zoneSq;
+}
+
+function _kindReach(p, spec, spd)
+{
+    let r = 0;
+    if (spec && spec.maxRange > 0) r = spec.maxRange;
+    if (spec && spec.chargedRange > 0 && spd > 3500) r = spec.chargedRange;
+    if (r <= 0 && p.castRange > 0) r = p.castRange;
+    if (r <= 0 && p.isThrower && (p.targetX || p.targetY) && p.spawnX && p.spawnY)
+    {
+        const dx = p.targetX - p.spawnX;
+        const dy = p.targetY - p.spawnY;
+        const td = Math.sqrt(dx * dx + dy * dy);
+        if (td > 0) r = td;
+    }
+    if (r <= 0) r = AD_FALLBACK_RANGE;
+    if (spec && spec.reachAdj) r += spec.reachAdj;
+    if (r > 0 && r < 70000) return r;
+    return AD_FALLBACK_RANGE;
+}
+
+function _lifeLeft(p, spec, spd, nowMs)
+{
+    const maxR = _kindReach(p, spec, spd);
+    if (spec && (spec.flags & K_FADE))
+    {
+        const spawned = p.spawnedAt ? p.spawnedAt : nowMs;
+        let age = nowMs - spawned;
+        if (age < 0) age = 0;
+        const left = maxR * (1 - age / 1000);
+        return left > 0 ? left : 0;
+    }
+    const left = maxR - _traveled(p);
+    return left > 0 ? left : 0;
+}
+
+function _pushHazard()
+{
+    const h = _hazards[_hazardN];
+    h.x = 0; h.y = 0; h.vx = 0; h.vy = 0; h.rad = 0; h.age = 0;
+    h.fadeBase = 0; h.fadeK = 0; h.ax = 0; h.ay = 0; h.bx = 0; h.by = 0;
+    h.hasSegment = false; h.name = null;
+    _hazardN++;
+    return h;
+}
+
+function _collect(mx, my, myRadius, nowMs)
+{
+    const zoneSq = AD_AWARE * AD_AWARE;
+    const bodyR = myRadius + AD_SKIN;
+    const list = scanData.projectiles || [];
+    const vel = { vx: 0, vy: 0 };
+
+    _hazardN = 0;
+
+    for (let i = 0; i < list.length && i < 16; i++)
+    {
+        const p = list[i];
+        if (!p) continue;
+        if (_isMine(p)) continue;
+        if (_myShot(p, mx, my, bodyR)) continue;
+        if (_shielded(p, mx, my)) continue;
+
+        const caps = shapeHazards(p, nowMs);
+        for (let c = 0; c < caps.length && c < AD_CAP_MAX; c++)
         {
-            const maxT = t.until > 0 ? Math.min(horizon, t.until) : horizon;
-            for (let step = 0; step <= 4; step++)
+            const cap = caps[c];
+            const until = (cap.t1 - nowMs) / 1000;
+            if (until <= 0) continue;
+            if (_hazardN >= AD_HAZARD_MAX) break;
+            const h = _pushHazard();
+            h.rad = cap.radius;
+            h.hasSegment = !!cap.hasSegment;
+            h.name = p.name || cap.name;
+            if (cap.hasSegment)
             {
-                const ts = maxT * (step / 4);
-                const d = _segDist(myX + mvx * ts, myY + mvy * ts, t.segment.ax, t.segment.ay, t.segment.bx, t.segment.by) - t.rad;
-                if (d < minClear) minClear = d;
+                h.ax = cap.ax; h.ay = cap.ay; h.bx = cap.bx; h.by = cap.by;
             }
+            else
+            {
+                h.x = cap.x; h.y = cap.y;
+            }
+            if (!_inAware(h, mx, my, zoneSq)) _hazardN--;
+        }
+
+        if (caps.length > 0 && blocksLinear(p.name)) continue;
+
+        const name = p.name || "";
+        const spec = kindOf(name);
+        if (spec && (spec.flags & K_DROP)) continue;
+
+        const dx = p.x - mx;
+        const dy = p.y - my;
+        if (dx * dx + dy * dy > zoneSq) continue;
+
+        let vx = p.vx || 0;
+        let vy = p.vy || 0;
+        if (vx === 0 && vy === 0)
+        {
+            const est = _projectileVel(p);
+            if (est)
+            {
+                vx = est.vx;
+                vy = est.vy;
+            }
+            else
+            {
+                vx = 0;
+                vy = 0;
+            }
+        }
+        if (!_ok(vx, -1e8, 1e8) || !_ok(vy, -1e8, 1e8))
+        {
+            vx = 0;
+            vy = 0;
+        }
+
+        const flown = _traveled(p);
+        if (spec && (spec.flags & K_LOCKPATH) && flown > 120 && p.spawnX && p.spawnY)
+        {
+            let base = Math.sqrt(vx * vx + vy * vy);
+            if (base < 1) base = 1;
+            vx = (p.x - p.spawnX) / flown * base;
+            vy = (p.y - p.spawnY) / flown * base;
+        }
+
+        let spd = Math.sqrt(vx * vx + vy * vy);
+        if (spec && spec.speedMul > 0 && spd > 3500)
+        {
+            vx *= spec.speedMul;
+            vy *= spec.speedMul;
+            spd *= spec.speedMul;
+        }
+
+        const lockPath = !!(spec && (spec.flags & K_LOCKPATH)) || !!p.isBeam;
+        const blob = !!(spec && (spec.flags & K_BLOB)) || (!lockPath && !!p.isThrower);
+        const fit = fitOf(name);
+        const shotR = _ballRadius(p) + (spec ? (spec.growR | 0) : 0);
+        const rad = shotR + fit.pad + shotR * fit.grow;
+
+        let ux = 0;
+        let uy = 0;
+        if (spd >= 1)
+        {
+            ux = vx / spd;
+            uy = vy / spd;
+        }
+
+        let playerAlong = 0;
+        if (!blob && spd >= 1)
+        {
+            playerAlong = (mx - p.x) * ux + (my - p.y) * uy;
+            if (playerAlong < -50) continue;
+            if (!p.isThrower)
+            {
+                const tHit = playerAlong > 0 ? playerAlong : 0;
+                const hitX = p.x + ux * tHit;
+                const hitY = p.y + uy * tHit;
+                if (!losCheck(p.x, p.y, hitX, hitY, BLOCKS_PROJECTILES)) continue;
+            }
+        }
+
+        const left = _lifeLeft(p, spec, spd, nowMs);
+        if (left <= 10) continue;
+
+        const gap = Math.sqrt(dx * dx + dy * dy) - bodyR - shotR;
+        if (left < 0.85 * (gap > 0 ? gap : 0)) continue;
+        if (!blob && spd >= 1 && playerAlong > left + shotR) continue;
+        if (_hazardN >= AD_HAZARD_MAX) break;
+
+        const h = _pushHazard();
+        h.x = p.x;
+        h.y = p.y;
+        h.vx = vx;
+        h.vy = vy;
+        h.rad = rad;
+        h.name = p.name;
+        h.age = (spec && (spec.flags & K_FADE))
+            ? nowMs - (p.spawnedAt ? p.spawnedAt : nowMs)
+            : 0;
+        if (h.age < 0) h.age = 0;
+        h.fadeBase = spec ? spec.fadeBase : 0;
+        h.fadeK = spec ? spec.fadeK : 0;
+    }
+}
+
+function _bdNorm(x, y, out)
+{
+    const len = Math.sqrt(x * x + y * y);
+    if (len < 0.000001)
+    {
+        out.x = 1;
+        out.y = 0;
+        return out;
+    }
+    out.x = x / len;
+    out.y = y / len;
+    return out;
+}
+
+function _bdPush(x, y, vx, vy, rad)
+{
+    if (_threatN >= BD_THREAT_MAX) return;
+    const t = _threats[_threatN];
+    t.x = x;
+    t.y = y;
+    t.vx = vx;
+    t.vy = vy;
+    t.rad = rad;
+    _threatN++;
+}
+
+function _bdBuildThreats()
+{
+    const vel = { vx: 0, vy: 0 };
+    _threatN = 0;
+    for (let i = 0; i < _hazardN; i++)
+    {
+        const h = _hazards[i];
+        if (h.hasSegment)
+        {
+            _bdPush(h.ax, h.ay, 0, 0, h.rad);
+            _bdPush(h.bx, h.by, 0, 0, h.rad);
             continue;
         }
-        const vel = _fadeVel(t, 0);
-        const spd = Math.hypot(vel.x, vel.y);
-        let maxT = horizon;
-        if (spd > 1)
-        {
-            if (t.left > 0) maxT = Math.min(maxT, t.left / spd);
-            if (t.pathLen > 0) maxT = Math.min(maxT, t.pathLen / spd);
-        }
-        if (t.until > 0) maxT = Math.min(maxT, t.until);
-        const relx = t.x - myX,
-            rely = t.y - myY;
-        const vrx = vel.x - mvx,
-            vry = vel.y - mvy;
-        const vv = vrx * vrx + vry * vry;
-        let cx, cy;
-        if (vv < 1e-6)
-        {
-            cx = relx;
-            cy = rely;
-        }
-        else
-        {
-            let ts = -(relx * vrx + rely * vry) / vv;
-            if (ts < 0) ts = 0;
-            else if (ts > maxT) ts = maxT;
-            cx = relx + vrx * ts;
-            cy = rely + vry * ts;
-        }
-        const clear = Math.sqrt(cx * cx + cy * cy) - t.rad;
-        if (clear < minClear) minClear = clear;
+        _fadeVel(h, 0, vel);
+        _bdPush(h.x, h.y, vel.vx, vel.vy, h.rad);
     }
-    return minClear;
 }
 
-function _wallAhead(myX, myY, dir, speed, bodyR)
+function _bdIntent()
 {
-    const step = speed * TUNE.PROBE_T;
-    let raw = 0;
-    for (let s = 1; s <= TUNE.PROBE_N; s++)
+    return { x: 0, y: 0 };
+}
+
+function _bdDanger(mx, my, myR)
+{
+    for (let i = 0; i < _threatN; i++)
     {
-        const px = myX + dir.x * step * s;
-        const py = myY + dir.y * step * s;
-        if (isBlockedWide(px, py, bodyR, BLOCKS_MOVEMENT))
+        const p = _threats[i];
+        const r = myR + p.rad + BD_SAFETY_MARGIN * 2.5;
+        const dx = mx - p.x;
+        const dy = my - p.y;
+        const distSq = dx * dx + dy * dy;
+        if (distSq <= r * r) return true;
+        const c1 = dx * p.vx + dy * p.vy;
+        if (c1 <= 0) continue;
+        const c2 = p.vx * p.vx + p.vy * p.vy;
+        if (c2 <= 0) continue;
+        const tHit = c1 / c2;
+        if (tHit > BD_T_FIELD) continue;
+        const cx = p.x + p.vx * tHit;
+        const cy = p.y + p.vy * tHit;
+        if ((mx - cx) * (mx - cx) + (my - cy) * (my - cy) <= r * r) return true;
+    }
+    return false;
+}
+
+function _clampToMap(v, maxTiles)
+{
+    const maxV = maxTiles * TILE_SIZE - 1;
+    if (maxV <= 0) return v;
+    if (v < 0) return 0;
+    if (v > maxV) return maxV;
+    return v;
+}
+
+function _sendMove(tx, ty)
+{
+    const w = getWallCacheW();
+    const h = getWallCacheH();
+    if (w > 0 && h > 0)
+    {
+        tx = _clampToMap(tx, w);
+        ty = _clampToMap(ty, h);
+    }
+    const battle = scanData.battleModeClient;
+    if (!battle || battle.isNull()) return false;
+    try
+    {
+        const fns = getFunctions();
+        const ix = Math.round(tx);
+        const iy = Math.round(ty);
+        fns.LogicBattleModeClient_setClientPredictionMoveTo(battle, ix, iy, 1);
+        return sendCommand(MOVE_INPUT_TYPE, (ci) =>
         {
-            raw += TUNE.WALL_HIT * (TUNE.PROBE_N - s + 1);
+            ci.add(offsets.ClientInput_x).writeS32(ix);
+            ci.add(offsets.ClientInput_y).writeS32(iy);
+        });
+    }
+    catch (e)
+    {
+        logWarn("autododge send failed", { err: String(e && e.message || e) });
+        return false;
+    }
+}
+
+function _bdcForget()
+{
+    _bdcHaveLast = false;
+    _bdcLastX = 0;
+    _bdcLastY = 0;
+}
+
+function _bdcAimedOne(p, mx, my, myR)
+{
+    const r = myR + p.rad + BD_SAFETY_MARGIN;
+    const vx = p.vx;
+    const vy = p.vy;
+    const px = p.x - mx;
+    const py = p.y - my;
+    const a = vx * vx + vy * vy;
+    const b = 2 * (px * vx + py * vy);
+    const c = px * px + py * py;
+    let minD2 = c;
+    if (a > 0.000001)
+    {
+        let tm = -b / (2 * a);
+        if (tm < 0) tm = 0;
+        if (tm > BDC_T_FIELD) tm = BDC_T_FIELD;
+        minD2 = c + b * tm + a * tm * tm;
+    }
+    const gate = r * BDC_HIT_GATE;
+    return minD2 <= gate * gate;
+}
+
+function _bdcWallCost(mx, my, dx, dy)
+{
+    let raw = 0;
+    for (let s = 1; s <= BDC_WALL_PROBE; s++)
+    {
+        const d = BDC_WALL_BAND * s / BDC_WALL_PROBE;
+        if (isBlockedWide(mx + dx * d, my + dy * d, AD_WALL_BODY, BLOCKS_MOVEMENT))
+        {
+            raw += BDC_WALL_HIT * (BDC_WALL_PROBE - s + 1);
         }
     }
     return raw;
 }
 
-function _wallR()
+function _bdcScoreDir(dx, dy, mx, my, myR, speed)
 {
-    return TUNE.WALL_BODY;
-}
-
-export function clampMoveTarget(tx, ty)
-{
-    return _clampTarget(tx, ty);
-}
-
-export function sendBattleMove(logic, tx, ty)
-{
-    return _sendMove(logic, tx, ty);
-}
-
-function _clampToMap(v, maxTiles)
-{
-    const max = maxTiles * TILE_SIZE - 1;
-    if (max <= 0) return v;
-    if (v < 0) return 0;
-    if (v > max) return max;
-    return v;
-}
-
-function _clampTarget(tx, ty)
-{
-    const w = getWallCacheW(),
-        h = getWallCacheH();
-    if (w <= 0 || h <= 0) return {
-        x: tx,
-        y: ty
-    };
-    return {
-        x: _clampToMap(tx, w),
-        y: _clampToMap(ty, h)
-    };
-}
-
-function _sendMove(logic, tx, ty)
-{
-    if (!logic || logic.isNull()) return false;
-    try
+    let score = 0;
+    for (let i = 0; i < _bdcSelN; i++)
     {
-        const fns = getFunctions();
-        fns.LogicBattleModeClient_setClientPredictionMoveTo(logic, tx, ty, 1);
-        return sendCommand(MOVE_INPUT_TYPE, (ci) =>
+        const p = _threats[_bdcSel[i]];
+        const r = myR + p.rad + BD_SAFETY_MARGIN;
+        const vx = p.vx - dx * speed;
+        const vy = p.vy - dy * speed;
+        const px = p.x - mx;
+        const py = p.y - my;
+        const a = vx * vx + vy * vy;
+        const b = 2 * (px * vx + py * vy);
+        const c = px * px + py * py;
+        let minD2 = c;
+        if (a > 0.000001)
         {
-            ci.add(offsets.ClientInput_x).writeS32(tx);
-            ci.add(offsets.ClientInput_y).writeS32(ty);
-        });
+            let tm = -b / (2 * a);
+            if (tm < 0) tm = 0;
+            if (tm > BDC_T_FIELD) tm = BDC_T_FIELD;
+            minD2 = c + b * tm + a * tm * tm;
+        }
+        if (minD2 < BDC_EPS) minD2 = BDC_EPS;
+        score += BDC_DANGER * (r * r) / minD2;
     }
-    catch (e)
+    return score;
+}
+
+function _bdcImpactDir(dx, dy, mx, my, myR, speed)
+{
+    let best = BDC_FAR;
+    for (let i = 0; i < _bdcSelN; i++)
     {
-        logWarn("autododge send failed",
+        const p = _threats[_bdcSel[i]];
+        const r = myR + p.rad + BD_SAFETY_MARGIN;
+        const vx = p.vx - dx * speed;
+        const vy = p.vy - dy * speed;
+        const px = p.x - mx;
+        const py = p.y - my;
+        const a = vx * vx + vy * vy;
+        const b = 2 * (px * vx + py * vy);
+        const c = px * px + py * py - r * r;
+        if (c < 0) return 0;
+        if (a > 0.000001)
         {
-            err: String(e && e.message || e)
-        });
+            const disc = b * b - 4 * a * c;
+            if (disc >= 0)
+            {
+                const t1 = (-b - Math.sqrt(disc)) / (2 * a);
+                if (t1 > 0 && t1 < best) best = t1;
+            }
+        }
+    }
+    return best;
+}
+
+function _bdcThreatD2(k, mx, my)
+{
+    const p = _threats[_bdcSel[k]];
+    const dx = p.x - mx;
+    const dy = p.y - my;
+    return dx * dx + dy * dy;
+}
+
+function _bdcExtraDirs(mx, my)
+{
+    let first = -1;
+    let second = -1;
+    let at = AD_DIR_COUNT;
+
+    for (let i = 0; i < _bdcSelN; i++)
+    {
+        const p = _threats[_bdcSel[i]];
+        const dx = p.x - mx;
+        const dy = p.y - my;
+        const d2 = dx * dx + dy * dy;
+        if (first < 0)
+        {
+            first = i;
+            continue;
+        }
+        const f2 = _bdcThreatD2(first, mx, my);
+        if (d2 < f2)
+        {
+            second = first;
+            first = i;
+            continue;
+        }
+        if (second < 0)
+        {
+            second = i;
+            continue;
+        }
+        const s2 = _bdcThreatD2(second, mx, my);
+        if (d2 < s2) second = i;
+    }
+
+    for (let j = 0; j < 2; j++)
+    {
+        const k = j === 0 ? first : second;
+        if (k < 0 || at + 3 > BDC_DIR_MAX) continue;
+        const p = _threats[_bdcSel[k]];
+        let pxv = -p.vy;
+        let pyv = p.vx;
+        let len = Math.sqrt(pxv * pxv + pyv * pyv);
+        if (len < 0.000001) continue;
+        const px = pxv / len;
+        const py = pyv / len;
+        _bdcDirs[at].x = px;
+        _bdcDirs[at].y = py;
+        _bdcDirs[at + 1].x = -px;
+        _bdcDirs[at + 1].y = -py;
+        pxv = (mx - p.x) + px * BDC_EXTRA_BLEND;
+        pyv = (my - p.y) + py * BDC_EXTRA_BLEND;
+        len = Math.sqrt(pxv * pxv + pyv * pyv);
+        if (len < 0.000001)
+        {
+            pxv = -px;
+            pyv = -py;
+            len = 1;
+        }
+        _bdcDirs[at + 2].x = pxv / len;
+        _bdcDirs[at + 2].y = pyv / len;
+        at += 3;
+    }
+
+    return at - AD_DIR_COUNT;
+}
+
+function _bdcPick(mx, my, myR, ix, iy, speed)
+{
+    let rx = ix;
+    let ry = iy;
+    let hasRef = ix !== 0 || iy !== 0;
+    let best = 0;
+    let cand;
+    let keptPrev = false;
+    let leastBad = false;
+    let bestScore = BDC_FAR;
+    let impactBest;
+    let fence;
+    let tBest;
+
+    for (let i = 0; i < AD_DIR_COUNT; i++)
+    {
+        _bdcDirs[i].x = _ring[i].x;
+        _bdcDirs[i].y = _ring[i].y;
+    }
+
+    _bdcSelN = 0;
+    for (let i = 0; i < _threatN; i++)
+    {
+        if (_bdcAimedOne(_threats[i], mx, my, myR))
+        {
+            _bdcSel[_bdcSelN] = i;
+            _bdcSelN++;
+        }
+    }
+
+    if (_bdcSelN === 0)
+    {
+        let ox;
+        let oy;
+        if (!hasRef && _threatN > 0)
+        {
+            let nearest = 0;
+            let nd = BDC_FAR;
+            for (let i = 0; i < _threatN; i++)
+            {
+                const dx = _threats[i].x - mx;
+                const dy = _threats[i].y - my;
+                const d2 = dx * dx + dy * dy;
+                if (d2 < nd)
+                {
+                    nd = d2;
+                    nearest = i;
+                }
+            }
+            rx = mx - _threats[nearest].x;
+            ry = my - _threats[nearest].y;
+            hasRef = true;
+        }
+        if (hasRef && (rx !== 0 || ry !== 0))
+        {
+            const len = Math.sqrt(rx * rx + ry * ry);
+            ox = rx / len;
+            oy = ry / len;
+        }
+        else if (_bdcHaveLast)
+        {
+            ox = _bdcLastX;
+            oy = _bdcLastY;
+        }
+        else
+        {
+            ox = 0;
+            oy = 0;
+        }
+        _bdcLastX = ox;
+        _bdcLastY = oy;
+        _bdcHaveLast = true;
+        if (_threatN > 0 && (ox !== 0 || oy !== 0))
+        {
+            let nearest = 0;
+            let nd = BDC_FAR;
+            for (let i = 0; i < _threatN; i++)
+            {
+                const dx = _threats[i].x - mx;
+                const dy = _threats[i].y - my;
+                const d2 = dx * dx + dy * dy;
+                if (d2 < nd)
+                {
+                    nd = d2;
+                    nearest = i;
+                }
+            }
+            const tdx = _threats[nearest].x - mx;
+            const tdy = _threats[nearest].y - my;
+            const tl = Math.sqrt(tdx * tdx + tdy * tdy);
+            if (tl > 0.001 && (ox * tdx + oy * tdy) / tl > 0.9)
+            {
+                const px = -tdy / tl;
+                const py = tdx / tl;
+                if (ox * px + oy * py >= 0)
+                {
+                    ox = px;
+                    oy = py;
+                }
+                else
+                {
+                    ox = -px;
+                    oy = -py;
+                }
+            }
+        }
+        return { x: ox, y: oy };
+    }
+
+    const count = AD_DIR_COUNT + _bdcExtraDirs(mx, my);
+
+    for (let i = 0; i < count; i++)
+    {
+        const d = _bdcDirs[i];
+        _bdcScores[i] = _bdcScoreDir(d.x, d.y, mx, my, myR, speed) + _bdcWallCost(mx, my, d.x, d.y);
+        _bdcImpacts[i] = _bdcImpactDir(d.x, d.y, mx, my, myR, speed);
+        if (_bdcScores[i] < bestScore)
+        {
+            bestScore = _bdcScores[i];
+            best = i;
+        }
+    }
+
+    cand = best;
+    impactBest = _bdcImpacts[best];
+
+    if (_bdcHaveLast && best < AD_DIR_COUNT)
+    {
+        let pi = 0;
+        let a = Math.atan2(_bdcLastY, _bdcLastX);
+        const len = Math.sqrt(_bdcLastX * _bdcLastX + _bdcLastY * _bdcLastY);
+        if (len > 0.000001)
+        {
+            if (a < 0) a += Math.PI * 2;
+            pi = Math.round(a / (Math.PI * 2) * AD_DIR_COUNT);
+            if (pi >= AD_DIR_COUNT) pi = 0;
+        }
+        if (_bdcScores[pi] <= bestScore * (1 + BDC_KEEP) &&
+            _bdcImpacts[pi] >= impactBest * BDC_KEEP_IMPACT)
+        {
+            cand = pi;
+            keptPrev = true;
+        }
+    }
+
+    if (_bdcImpacts[cand] <= BDC_T_URGENT)
+    {
+        let s = -1;
+        let sScore = BDC_FAR;
+        keptPrev = false;
+        for (let i = 0; i < count; i++)
+        {
+            if (_bdcImpacts[i] > BDC_T_URGENT && _bdcScores[i] < sScore)
+            {
+                sScore = _bdcScores[i];
+                s = i;
+            }
+        }
+        if (s >= 0)
+        {
+            cand = s;
+        }
+        else
+        {
+            let tMax = _bdcImpacts[cand];
+            let lb = cand;
+            leastBad = true;
+            fence = _bdcScores[cand] * BDC_TIE + BDC_EPS;
+            for (let i = 0; i < count; i++)
+            {
+                if (_bdcScores[i] <= fence && _bdcImpacts[i] > tMax * 1.1)
+                {
+                    tMax = _bdcImpacts[i];
+                    lb = i;
+                }
+            }
+            cand = lb;
+        }
+    }
+
+    if (!leastBad)
+    {
+        fence = _bdcScores[cand] * BDC_TIE + BDC_EPS;
+        tBest = _bdcImpacts[cand];
+        for (let i = 0; i < count; i++)
+        {
+            const sameClass = (_bdcImpacts[i] > BDC_T_URGENT) === (_bdcImpacts[cand] > BDC_T_URGENT);
+            if (!sameClass || _bdcScores[i] > fence) continue;
+            if (_bdcImpacts[i] > tBest * 1.1)
+            {
+                tBest = _bdcImpacts[i];
+                cand = i;
+            }
+        }
+    }
+
+    const out = { x: _bdcDirs[cand].x, y: _bdcDirs[cand].y };
+    _bdcLastX = out.x;
+    _bdcLastY = out.y;
+    _bdcHaveLast = true;
+    return out;
+}
+
+function _adUpdate(mx, my)
+{
+    const now = _nowMs();
+
+    if (!_ok(mx, -1e8, 1e8)) return false;
+    if (!_ok(my, -1e8, 1e8)) return false;
+
+    _buildRing();
+
+    const speed = _speed();
+    const myR = _ownRadius();
+
+    _collect(mx, my, myR, now);
+    _bdBuildThreats();
+
+    if (_threatN === 0)
+    {
+        _bdcForget();
         return false;
     }
+
+    if (!_bdDanger(mx, my, myR)) return false;
+
+    const intent = _bdIntent();
+    const dir = _bdcPick(mx, my, myR, intent.x, intent.y, speed);
+
+    const tx = Math.round(mx + dir.x * AD_REACH);
+    const ty = Math.round(my + dir.y * AD_REACH);
+
+    _sendMove(tx, ty);
+    return true;
 }
 
-function _clearHeading()
+export function setupAutododge()
 {
-    _heading = null;
-    _headingIdx = -1;
-    _holdUntil = 0;
+    enableProjectileTracking();
+}
+
+export function resetAutododge()
+{
+    _bdcForget();
+    resetProfiles();
 }
 
 export function updateAutododge()
 {
     if (!state.autododge) return;
     if (scanData.lastUpdate === 0) return;
-    const now = Date.now();
-    if (now - _lastTick < TUNE.TICK_MS) return;
+    const now = _nowMs();
+    if (now - _lastTick < AD_TICK_MS) return;
     _lastTick = now;
-    const myX = scanData.myX;
-    const myY = scanData.myY;
-    const speed = scanData.mySpeed || 720;
-    const myRadius = scanData.myRadius || 60;
-    const hazards = _collectLive(myX, myY, myRadius, now);
-    if (hazards.length === 0)
+
+    const destroyed = scanData.destroyed;
+    if (destroyed)
     {
-        if (_heading && now - _lastDangerTs > TUNE.RELEASE_GRACE_MS) _clearHeading();
-        return;
+        for (let i = 0; i < destroyed.length && i < 16; i++) noteBurstDeath(destroyed[i]);
     }
-    const stayClear = _clearanceFor(hazards, myX, myY, 0, 0);
-    const inDanger = stayClear < TUNE.ENGAGE;
-    if (inDanger) _lastDangerTs = now;
-    if (!inDanger && (!_heading || now - _lastDangerTs > TUNE.RELEASE_GRACE_MS))
-    {
-        if (_heading) _clearHeading();
-        return;
-    }
-    const prevIdx = _headingIdx >= 0 && _headingIdx < _ring.length ? _headingIdx : -1;
-    const prevDir = prevIdx >= 0 ? _ring[prevIdx] : null;
-    const bodyR = _wallR();
-    let bestIdx = 0,
-        bestScore = -Infinity;
-    for (let i = 0; i < _ring.length; i++)
-    {
-        const d = _ring[i];
-        let s = _clearanceFor(hazards, myX, myY, speed * d.x, speed * d.y);
-        s -= _wallAhead(myX, myY, d, speed, bodyR);
-        if (prevDir) s += TUNE.MOMENTUM * (d.x * prevDir.x + d.y * prevDir.y);
-        _scoreBuf[i] = s;
-        if (s > bestScore)
-        {
-            bestScore = s;
-            bestIdx = i;
-        }
-    }
-    let chosenIdx = bestIdx;
-    if (prevIdx >= 0 && now < _holdUntil && chosenIdx !== prevIdx)
-    {
-        if (_scoreBuf[prevIdx] + TUNE.KEEP_BAND >= _scoreBuf[chosenIdx])
-        {
-            chosenIdx = prevIdx;
-        }
-        else
-        {
-            _holdUntil = now + TUNE.LOCK_MS;
-        }
-    }
-    else if (now >= _holdUntil)
-    {
-        _holdUntil = now + TUNE.LOCK_MS;
-    }
-    if (_scoreBuf[chosenIdx] <= stayClear)
-    {
-        if (_heading) _clearHeading();
-        return;
-    }
-    const chosen = _ring[chosenIdx];
-    _headingIdx = chosenIdx;
-    _heading = chosen;
-    const target = {
-        x: Math.round(myX + chosen.x * TUNE.REACH),
-        y: Math.round(myY + chosen.y * TUNE.REACH)
-    };
-    const ok = state.speedhack ? true : _sendMove(scanData.battleModeClient, target.x, target.y);
-    if (chosenIdx !== prevIdx)
-    {
-        const names = [];
-        for (let i = 0; i < hazards.length && names.length < 4; i++)
-        {
-            if (hazards[i].name) names.push(hazards[i].name);
-        }
-        logInfo("autododge dodge",
-        {
-            names,
-            id: names[0] || "",
-            x: target.x,
-            y: target.y,
-            myX: myX | 0,
-            myY: myY | 0,
-            dist: Math.hypot(target.x - myX, target.y - myY) | 0,
-            threats: hazards.length,
-            sent: ok
-        });
-    }
+
+    _active = _adUpdate(scanData.myX, scanData.myY);
 }
 
-export function resetAutododge()
+export function isDodgeActive()
 {
-    if (_muted.size > 0 || _heading)
-    {
-        logInfo("autododge reset",
-        {
-            tracks: _muted.size,
-            heading: !!_heading,
-            headingIdx: _headingIdx
-        });
-    }
-    _muted.clear();
-    resetProfiles();
-    _clearHeading();
-    _lastDangerTs = 0;
-    _lastTick = 0;
-}
-
-export function setupAutododge()
-{
-    enableProjectileTracking();
+    return _active;
 }

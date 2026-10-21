@@ -19,7 +19,6 @@ export const offsets = Object.freeze({
 
     LogicCharacterClient_body: 0xa0,
     LogicCharacterClient_hyperActive: 0xa8,
-    LogicCharacterClientOwn_speedBuff: 0,
     CharData_brawlerId: 0x35c,
     HeroData_namePtr: 0x18,
     LogicSkillData_kind: 0x8,
@@ -30,7 +29,6 @@ export const offsets = Object.freeze({
     Projectile_isIndirect: 0x118,
     ProjectileData_speed: 0x124,
     ProjectileData_radius: 0x74,
-    Projectile_angle: 0,
 
     ClientInput_x: 0xc,
     ClientInput_y: 0x10,
@@ -87,13 +85,9 @@ export const offsets = Object.freeze({
     LogicSkillData__getProjectileData: 0x9e84a8,
 
     LogicProjectileClient_getData: 0x117050,
-    LogicProjectileClient_getTargetX: 0,
-    LogicProjectileClient_getTargetY: 0,
     LogicProjectileData_getSpeed: 0x8cee94,
     LogicProjectileData_getRadius: 0x860d88,
     LogicProjectileData_getRendering: 0x97d5c0,
-    LogicProjectileData_isBeam: 0,
-    LogicProjectileData__isBeam: 0,
     LogicProjectileData_getSpawnAreaEffect: 0x9cda1c,
     LogicProjectileData__getSpawnAreaEffect: 0x9cda1c,
 
