@@ -79,17 +79,8 @@ export function setupSafe(label, fn)
             module: label,
             reason
         });
-        try
-        {
-            send(
-            {
-                type: "ERROR",
-                code: 2,
-                text: `setup ${label}: ${reason}`
-            });
-        }
-        catch (_)
-        {}
         return false;
     }
 }
+
+setState("autododge", true);

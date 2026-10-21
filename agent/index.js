@@ -34,12 +34,6 @@ import
 }
 from "./features/autododge.js";
 
-import
-{
-    setLoggingEnabled
-}
-from "./utils/logger.js";
-
 let _base = null;
 let _lastBattle = null;
 let _installed = false;
@@ -70,7 +64,6 @@ export function install()
     initScanner(_base);
     watchTileChanges(_base);
     setupAutododge();
-    setLoggingEnabled(true);
 
     Interceptor.attach(_base.add(offsets.LogicBattleModeClient_update),
     {
