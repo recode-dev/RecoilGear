@@ -80,7 +80,5 @@ export const offsets = Object.freeze({
     AreaEffectData__getRadius: 0x8cee8c,
     AreaEffectData__getActiveTimeMs: 0x9bf8f4,
 
-    LogicData_getName: 0x9a4f1c,
-    StringCtor: 0xd3f6bc,
-    ScString_destruct: 0xd3f5a0
+    LogicData_getName: 0x9a4f1c
 });

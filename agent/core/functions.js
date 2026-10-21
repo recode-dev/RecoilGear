@@ -53,8 +53,6 @@ export function initFunctions(baseIn)
         LogicSkillData_getProjectileData: _nf("LogicSkillData__getProjectileData", "pointer", ["pointer", "int"]),
         LogicSkillClient_getData: _nf("LogicSkillClient__getData", "pointer", ["pointer", "int"]),
         LogicData_getName: _nf("LogicData_getName", "pointer", ["pointer"]),
-        StringCtor: _nf("StringCtor", "pointer", ["pointer", "pointer"]),
-        ScString_destruct: _nf("ScString_destruct", "pointer", ["pointer"]),
         LogicCharacterClient_getSkillAt: _nf("LogicCharacterClient__getSkillAt", "pointer", ["pointer", "int"]),
         operator_new: _nf("operator_new", "pointer", ["ulong"]),
     };
