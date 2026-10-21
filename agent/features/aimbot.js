@@ -23,6 +23,7 @@ from "../utils/flags.js";
 const RANGE = 20000;
 const SPEED_FALLBACK = 3000;
 const SPEED_REFRESH_MS = 500;
+const SKIP_NAME_PARTS = ["BALL"];
 
 var _target = null;
 var _aimX = 0;
@@ -68,6 +69,16 @@ function _ownProjectileSpeed()
     return _projectileSpeed;
 }
 
+function _isSkipped(name)
+{
+    if (!name) return true;
+    for (let i = 0; i < SKIP_NAME_PARTS.length; i++)
+    {
+        if (name.indexOf(SKIP_NAME_PARTS[i]) >= 0) return true;
+    }
+    return false;
+}
+
 function _pickTarget(now)
 {
     const list = scanData.enemies || [];
@@ -82,7 +93,7 @@ function _pickTarget(now)
         const e = list[i];
         if (!e || !e.ptr || e.ptr.isNull()) continue;
         if (e.kind !== "player") continue;
-        if (!e.brawlerName) continue;
+        if (_isSkipped(e.brawlerName)) continue;
         if ((e.teamId | 0) === myTeam) continue;
         const dx = e.x - mx;
         const dy = e.y - my;
