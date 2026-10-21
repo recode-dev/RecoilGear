@@ -81,6 +81,8 @@ function _pickTarget(now)
     {
         const e = list[i];
         if (!e || !e.ptr || e.ptr.isNull()) continue;
+        if (e.kind !== "player") continue;
+        if (!e.brawlerName) continue;
         if ((e.teamId | 0) === myTeam) continue;
         const dx = e.x - mx;
         const dy = e.y - my;
