@@ -67,14 +67,15 @@ function ptrFromU32(lo, hi)
     return ptr("0x" + (hi >>> 0).toString(16).padStart(8, "0") + (lo >>> 0).toString(16).padStart(8, "0"));
 }
 
-function _readHeroIconName(data)
+function _readDataName(data)
 {
     try
     {
         const namePtr = data.add(offsets.HeroData_namePtr).readPointer();
         if (!_validPtr(namePtr)) return null;
-        const str = namePtr.readCString();
-        if (str && str.startsWith("hero_icon_")) return str.substring(10).toUpperCase();
+        const name = readScString(namePtr, 128);
+        if (!name) return null;
+        return (name.indexOf("hero_icon_") === 0 ? name.substring(10) : name).toUpperCase();
     }
     catch (_)
     {}
@@ -186,23 +187,6 @@ function _readAngle(projectile, rendering)
     {
         return null;
     }
-}
-
-function _readTarget(fns, projectile)
-{
-    let targetX = 0;
-    let targetY = 0;
-    try
-    {
-        if (fns.LogicProjectileClient_getTargetX) targetX = fns.LogicProjectileClient_getTargetX(projectile) | 0;
-        if (fns.LogicProjectileClient_getTargetY) targetY = fns.LogicProjectileClient_getTargetY(projectile) | 0;
-    }
-    catch (_)
-    {}
-    return {
-        targetX,
-        targetY
-    };
 }
 
 function _noteCastRange(name, units)
@@ -350,17 +334,8 @@ function _captureProjectile(projectile, data, ownerTeamOverride)
             : (fns.LogicProjectileData_getRadius ? fns.LogicProjectileData_getRadius(data) | 0 : 0));
         const rendering = fns.LogicProjectileData_getRendering ? fns.LogicProjectileData_getRendering(data) | 0 : 0;
         const angle = _readAngle(projectile, rendering);
-        const target = _readTarget(fns, projectile);
         const isThrower = projectile.add(offsets.Projectile_isIndirect).readU32() | 0;
-        let isBeam = false;
-        try
-        {
-            isBeam = !!(fns.LogicProjectileData_isBeam && fns.LogicProjectileData_isBeam(data));
-        }
-        catch (_)
-        {
-            isBeam = false;
-        }
+        const isBeam = false;
         let ownerTeam = ownerTeamOverride === void 0 ? 0 : ownerTeamOverride | 0;
         if (ownerTeamOverride === void 0)
         {
@@ -407,8 +382,8 @@ function _captureProjectile(projectile, data, ownerTeamOverride)
             y,
             spawnX: x,
             spawnY: y,
-            targetX: target.targetX,
-            targetY: target.targetY,
+            targetX: 0,
+            targetY: 0,
             speed,
             radius,
             rendering,
@@ -517,12 +492,6 @@ function _updateLiveProjectiles(now)
             }
             const x = fns.LogicGameObjectClient_getX(projectile.ptr) | 0;
             const y = fns.LogicGameObjectClient_getY(projectile.ptr) | 0;
-            if (projectile.targetX === 0 && projectile.targetY === 0)
-            {
-                const target = _readTarget(fns, projectile.ptr);
-                projectile.targetX = target.targetX;
-                projectile.targetY = target.targetY;
-            }
             const dt = (now - projectile.lastTs) / 1000;
             const dx = x - projectile.lastX;
             const dy = y - projectile.lastY;
@@ -656,7 +625,7 @@ export function updateScanner(bm, now)
             }
             catch (_)
             {}
-            const nameRead = _readHeroIconName(ownData);
+            const nameRead = _readDataName(ownData);
             if (nameRead) scanData.myBrawlerName = nameRead;
         }
         const enemies = [];
@@ -714,7 +683,7 @@ export function updateScanner(bm, now)
                         let brawlerName = _brawlerNameCache.get(gid);
                         if (brawlerName === void 0)
                         {
-                            brawlerName = _readHeroIconName(data);
+                            brawlerName = _readDataName(data);
                             _brawlerNameCache.set(gid, brawlerName);
                         }
                         let radius = 0;
