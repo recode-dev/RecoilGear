@@ -144,15 +144,6 @@ export function setupAimbot()
                 }
                 catch (_)
                 {}
-                try
-                {
-                    const screen = args[0];
-                    screen.add(offsets.BattleScreen_aimTargetId).writeU32(Number(_target.gid) >>> 0);
-                    screen.add(offsets.BattleScreen_aimX).writeS32(_aimX | 0);
-                    screen.add(offsets.BattleScreen_aimY).writeS32(_aimY | 0);
-                }
-                catch (_)
-                {}
             }
         });
     }

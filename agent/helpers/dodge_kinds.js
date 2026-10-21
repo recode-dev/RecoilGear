@@ -1,4 +1,4 @@
-export const FITS = [
+const FITS = [
     { grow: 0.65, pad: 120.0 },
     { grow: 0.55, pad: 90.0 },
     { grow: 0.6, pad: 100.0 },

@@ -3,15 +3,9 @@ import
     offsets
 }
 from "./offsets.js";
-import
-{
-    getFunctions
-}
-from "./functions.js";
 
 const INLINE_MAX_LENGTH = 7;
 const DEFAULT_MAX_LENGTH = 256;
-const SCSTRING_SIZE = 32;
 
 export function readScString(value, maxLength = DEFAULT_MAX_LENGTH)
 {
@@ -29,21 +23,5 @@ export function readScString(value, maxLength = DEFAULT_MAX_LENGTH)
     catch (_)
     {
         return null;
-    }
-}
-
-export function withScString(text, fn)
-{
-    const fns = getFunctions();
-    if (!fns.StringCtor || !fns.ScString_destruct) return null;
-    const sc = Memory.alloc(SCSTRING_SIZE);
-    fns.StringCtor(sc, Memory.allocUtf8String(text));
-    try
-    {
-        return fn(sc);
-    }
-    finally
-    {
-        fns.ScString_destruct(sc);
     }
 }

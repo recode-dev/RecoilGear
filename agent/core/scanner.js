@@ -49,15 +49,10 @@ export var scanData = {
     myY: 0,
     myRadius: 60,
     mySpeed: 720,
-    hackSpeed: 0,
-    myBrawlerId: 0,
     myBrawlerName: null,
-    hasCarryable: false,
-    throwsOverWalls: false,
     enemies: [],
     projectiles: [],
     destroyed: [],
-    liveProjectiles: 0,
     lastUpdate: 0
 };
 
@@ -84,36 +79,6 @@ function _readHeroIconName(data)
     catch (_)
     {}
     return null;
-}
-
-function _readThrowsOverWalls(fns, own)
-{
-    if (!fns.LogicCharacterClient_getWeaponSkill || !fns.LogicSkillData_getProjectileData) return false;
-    try
-    {
-        const skill = fns.LogicCharacterClient_getWeaponSkill(own);
-        if (!_validPtr(skill)) return false;
-        const projectile = fns.LogicSkillData_getProjectileData(skill, 0);
-        if (!_validPtr(projectile)) return false;
-        return (projectile.add(offsets.Projectile_isIndirect).readU32() | 0) !== 0;
-    }
-    catch (_)
-    {
-        return false;
-    }
-}
-
-function _readHasCarryable(fns, own, bm)
-{
-    if (!fns.LogicCharacterClient_getLinkedCarryable) return false;
-    try
-    {
-        return _validPtr(fns.LogicCharacterClient_getLinkedCarryable(own, bm));
-    }
-    catch (_)
-    {
-        return false;
-    }
 }
 
 function _readProjectileName(data)
@@ -655,8 +620,6 @@ export function updateScanner(bm, now)
         {
             scanData.ownCharacter = null;
             scanData.battleModeClient = null;
-            scanData.hasCarryable = false;
-            scanData.throwsOverWalls = false;
             scanData.lastUpdate = 0;
             return;
         }
@@ -679,19 +642,11 @@ export function updateScanner(bm, now)
             scanData.myX = functions.LogicGameObjectClient_getX(own) | 0;
             scanData.myY = functions.LogicGameObjectClient_getY(own) | 0;
         }
-        scanData.hasCarryable = _readHasCarryable(functions, own, bm);
-        scanData.throwsOverWalls = _readThrowsOverWalls(functions, own);
         scanData.mySpeed = 720;
         const ownData = functions.LogicGameObjectClient_getData(own);
         if (_validPtr(ownData))
         {
             scanData.myRadius = functions.LogicCharacterData_getCollisionRadius(ownData) || 60;
-            try
-            {
-                scanData.myBrawlerId = ownData.add(offsets.CharData_brawlerId).readU8() | 0;
-            }
-            catch (_)
-            {}
             try
             {
                 const baseSpeed = functions.LogicCharacterData_getSpeed ? functions.LogicCharacterData_getSpeed(ownData) | 0 : 0;
@@ -832,7 +787,6 @@ export function updateScanner(bm, now)
             if (_liveProjectiles.size) _liveProjectiles.clear();
             scanData.projectiles = [];
         }
-        scanData.liveProjectiles = _liveProjectiles.size;
         scanData.lastUpdate = now;
     }
     catch (_)
@@ -849,8 +803,6 @@ export function resetScannerCache()
     _destroyed.length = 0;
     scanData.projectiles = [];
     scanData.destroyed = [];
-    scanData.liveProjectiles = 0;
-    scanData.hackSpeed = 0;
 }
 
 export function initScanner(base)

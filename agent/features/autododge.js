@@ -82,7 +82,6 @@ const AD_CAP_MAX = 16;
 
 const BD_SAFETY_MARGIN = 28;
 const BD_T_FIELD = 1.8;
-const BD_INTENT_DEAD_SQ = 900;
 const BD_THREAT_MAX = 160;
 
 const BDC_EXTRA = 12;
@@ -124,7 +123,6 @@ var _bdcLastY = 0;
 var _bdcHaveLast = false;
 
 var _lastTick = 0;
-var _active = false;
 
 function _ok(v, lo, hi)
 {
@@ -339,7 +337,6 @@ function _collect(mx, my, myRadius, nowMs)
     const zoneSq = AD_AWARE * AD_AWARE;
     const bodyR = myRadius + AD_SKIN;
     const list = scanData.projectiles || [];
-    const vel = { vx: 0, vy: 0 };
 
     _hazardN = 0;
 
@@ -474,20 +471,6 @@ function _collect(mx, my, myRadius, nowMs)
     }
 }
 
-function _bdNorm(x, y, out)
-{
-    const len = Math.sqrt(x * x + y * y);
-    if (len < 0.000001)
-    {
-        out.x = 1;
-        out.y = 0;
-        return out;
-    }
-    out.x = x / len;
-    out.y = y / len;
-    return out;
-}
-
 function _bdPush(x, y, vx, vy, rad)
 {
     if (_threatN >= BD_THREAT_MAX) return;
@@ -516,11 +499,6 @@ function _bdBuildThreats()
         _fadeVel(h, 0, vel);
         _bdPush(h.x, h.y, vel.vx, vel.vy, h.rad);
     }
-}
-
-function _bdIntent()
-{
-    return { x: 0, y: 0 };
 }
 
 function _bdDanger(mx, my, myR)
@@ -764,7 +742,6 @@ function _bdcPick(mx, my, myR, ix, iy, speed)
     let hasRef = ix !== 0 || iy !== 0;
     let best = 0;
     let cand;
-    let keptPrev = false;
     let leastBad = false;
     let bestScore = BDC_FAR;
     let impactBest;
@@ -898,7 +875,6 @@ function _bdcPick(mx, my, myR, ix, iy, speed)
             _bdcImpacts[pi] >= impactBest * BDC_KEEP_IMPACT)
         {
             cand = pi;
-            keptPrev = true;
         }
     }
 
@@ -906,7 +882,6 @@ function _bdcPick(mx, my, myR, ix, iy, speed)
     {
         let s = -1;
         let sScore = BDC_FAR;
-        keptPrev = false;
         for (let i = 0; i < count; i++)
         {
             if (_bdcImpacts[i] > BDC_T_URGENT && _bdcScores[i] < sScore)
@@ -983,8 +958,7 @@ function _adUpdate(mx, my)
 
     if (!_bdDanger(mx, my, myR)) return false;
 
-    const intent = _bdIntent();
-    const dir = _bdcPick(mx, my, myR, intent.x, intent.y, speed);
+    const dir = _bdcPick(mx, my, myR, 0, 0, speed);
 
     const tx = Math.round(mx + dir.x * AD_REACH);
     const ty = Math.round(my + dir.y * AD_REACH);
@@ -1018,10 +992,5 @@ export function updateAutododge()
         for (let i = 0; i < destroyed.length && i < 16; i++) noteBurstDeath(destroyed[i]);
     }
 
-    _active = _adUpdate(scanData.myX, scanData.myY);
-}
-
-export function isDodgeActive()
-{
-    return _active;
+    _adUpdate(scanData.myX, scanData.myY);
 }

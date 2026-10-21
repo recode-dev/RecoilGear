@@ -1,14 +1,10 @@
 const LEVEL_DEBUG = "debug";
-const LEVEL_INFO = "info";
 const LEVEL_WARN = "warn";
-const LEVEL_ERROR = "error";
 const FILE_NAME = "recoilgear.log";
 
 var _enabled = false;
 var _file = null;
 var _failed = false;
-var _repeatCounts = Object.create(null);
-var _repeatAt = Object.create(null);
 
 function _objcString(ptrValue)
 {
@@ -112,53 +108,10 @@ export function setLoggingEnabled(value)
     const next = !!value;
     if (next === _enabled) return;
     _enabled = next;
-    if (_enabled)
-    {
-        _emit(LEVEL_DEBUG, "logging enabled");
-    }
-    else
-    {
-        _repeatCounts = Object.create(null);
-        _repeatAt = Object.create(null);
-    }
-}
-
-export function isLoggingEnabled()
-{
-    return _enabled;
-}
-
-export function logInfo(message, data)
-{
-    _emit(LEVEL_INFO, message, data);
+    if (_enabled) _emit(LEVEL_DEBUG, "logging enabled");
 }
 
 export function logWarn(message, data)
 {
     _emit(LEVEL_WARN, message, data);
-}
-
-export function logError(message, data)
-{
-    _emit(LEVEL_ERROR, message, data);
-}
-
-export function logEvery(interval, message, data)
-{
-    if (!_enabled) return;
-    const key = String(message || "");
-    const count = (_repeatCounts[key] || 0) + 1;
-    _repeatCounts[key] = count;
-    const every = interval | 0 || 1;
-    if (count % every !== 0) return;
-    const now = Date.now();
-    if (now - (_repeatAt[key] || 0) < 100) return;
-    _repeatAt[key] = now;
-    _emit(LEVEL_DEBUG, message, data);
-}
-
-export function resetLogCounters()
-{
-    _repeatCounts = Object.create(null);
-    _repeatAt = Object.create(null);
 }

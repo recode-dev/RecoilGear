@@ -232,18 +232,3 @@ export function isBlockedWide(wx, wy, radius, checkBit)
     if (r <= 0) return false;
     return isBlockedAt(wx + r, wy, checkBit) || isBlockedAt(wx - r, wy, checkBit) || isBlockedAt(wx, wy + r, checkBit) || isBlockedAt(wx, wy - r, checkBit);
 }
-
-export function traceWallHitWide(wx, wy, dirX, dirY, maxDist, radius, checkBit)
-{
-    const grid = walls;
-    if (!grid || maxDist <= 0) return maxDist;
-    if (wallsWidth <= 0 || wallsHeight <= 0) return maxDist;
-    let dist = 0;
-    while (dist < maxDist)
-    {
-        dist += TRACE_STEP;
-        if (dist > maxDist) dist = maxDist;
-        if (isBlockedWide(wx + dirX * dist, wy + dirY * dist, radius, checkBit)) return Math.max(0, dist - TRACE_BACKOFF);
-    }
-    return maxDist;
-}
