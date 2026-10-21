@@ -67,6 +67,22 @@ function ptrFromU32(lo, hi)
     return ptr("0x" + (hi >>> 0).toString(16).padStart(8, "0") + (lo >>> 0).toString(16).padStart(8, "0"));
 }
 
+function _readBattleScreen(bm)
+{
+    try
+    {
+        if (!bm || bm.isNull()) return null;
+        const screen = bm.add(offsets.BattleMode_battleScreenPtr).readPointer();
+        if (!screen || screen.isNull()) return null;
+        const vtable = screen.readPointer();
+        if (!vtable || vtable.isNull()) return null;
+        return screen;
+    }
+    catch (_)
+    {}
+    return null;
+}
+
 function _earlyTicks(fns, data)
 {
     try
@@ -599,6 +615,7 @@ export function updateScanner(bm, now)
         }
         scanData.ownCharacter = own;
         scanData.battleModeClient = bm;
+        scanData.battleScreen = _readBattleScreen(bm);
         scanData.myTeamId = functions.LogicBattleModeClient_getOwnPlayerTeam(bm);
         scanData.myPlayerIndex = functions.LogicBattleModeClient_getOwnPlayerIndex ? functions.LogicBattleModeClient_getOwnPlayerIndex(bm) | 0 : _readOwnerIndex(own);
         _friendlyIdx.clear();
