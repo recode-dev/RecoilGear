@@ -705,6 +705,7 @@ export function updateScanner(bm, now)
                             y: functions.LogicGameObjectClient_getY(body) | 0,
                             brawlerId,
                             brawlerName,
+                            body,
                             teamId: team,
                             playerIndex,
                             moveSpeed,

@@ -19,6 +19,12 @@ import
     state
 }
 from "../utils/flags.js";
+import
+{
+    BLOCKS_PROJECTILES,
+    losCheck
+}
+from "../utils/wallCache.js";
 
 const SPEED_FALLBACK = 3000;
 const SPEED_REFRESH_MS = 500;
@@ -42,6 +48,8 @@ var _aimY = 0;
 var _track = new Map();
 var _projectileSpeed = SPEED_FALLBACK;
 var _speedAt = 0;
+var _rangeCache = 0;
+var _rangeAt = 0;
 var _hooks = false;
 
 function _isSkipped(name)
@@ -148,6 +156,9 @@ function _ownProjectileSpeed()
 
 function _ownRange(speed)
 {
+    const now = Date.now();
+    if (now - _rangeAt < SPEED_REFRESH_MS) return _rangeCache > 0 ? _rangeCache : speed * RANGE_FLIGHT_S * RANGE_MARGIN;
+    _rangeAt = now;
     let tiles = 0;
     try
     {
@@ -161,39 +172,35 @@ function _ownRange(speed)
     }
     catch (_)
     {}
-    if (tiles > 0 && tiles <= 40) return tiles * RANGE_UNIT * RANGE_MARGIN;
-    return speed * RANGE_FLIGHT_S * RANGE_MARGIN;
+    if (tiles > 0 && tiles <= 40) _rangeCache = tiles * RANGE_UNIT * RANGE_MARGIN;
+    else _rangeCache = 0;
+    return _rangeCache > 0 ? _rangeCache : speed * RANGE_FLIGHT_S * RANGE_MARGIN;
 }
 
 function _aimAt(enemy, now)
 {
     if (!enemy || !enemy.ptr || enemy.ptr.isNull()) return null;
     const fns = getFunctions();
+    const target = _validEnemyPtr(enemy.body) ? enemy.body : enemy.ptr;
     let ex = enemy.x;
     let ey = enemy.y;
-    let mx = scanData.myX;
-    let my = scanData.myY;
     try
     {
-        ex = fns.LogicGameObjectClient_getX(enemy.ptr) | 0;
-        ey = fns.LogicGameObjectClient_getY(enemy.ptr) | 0;
+        ex = fns.LogicGameObjectClient_getX(target) | 0;
+        ey = fns.LogicGameObjectClient_getY(target) | 0;
     }
     catch (_)
     {}
-    try
-    {
-        const own = scanData.ownCharacter;
-        if (own && !own.isNull())
-        {
-            mx = fns.LogicGameObjectClient_getX(own) | 0;
-            my = fns.LogicGameObjectClient_getY(own) | 0;
-        }
-    }
-    catch (_)
-    {}
+    const mx = scanData.myX;
+    const my = scanData.myY;
     const speed = _ownProjectileSpeed();
     const pred = _sample(enemy.gid, ex, ey, enemy.moveSpeed, now);
     return _solve(mx, my, pred, speed, _ownRange(speed));
+}
+
+function _validEnemyPtr(p)
+{
+    return p && !p.isNull();
 }
 
 function _pickTarget(now)
@@ -216,6 +223,7 @@ function _pickTarget(now)
         if (e.kind !== "player") continue;
         if (_isSkipped(e.brawlerName)) continue;
         if ((e.teamId | 0) === myTeam) continue;
+        if (losCheck(mx, my, e.x, e.y, BLOCKS_PROJECTILES) === false) continue;
         const dx = e.x - mx;
         const dy = e.y - my;
         const d = Math.sqrt(dx * dx + dy * dy);
