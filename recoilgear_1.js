@@ -1,4 +1,4 @@
-// RecoilGear — single-file build (ES modules inlined)
+// RecoilGear v1 — single-file build
 var __mods = {};
 __mods["core/offsets.js"] = (function(){
 const offsets = Object.freeze({
@@ -86,296 +86,6 @@ const offsets = Object.freeze({
     LogicData_getName: 0x9a4f1c
 });
 return { offsets };
-})();
-__mods["utils/crypto.js"] = (function(){
-const K = [
-    0x428a2f98, 0x71374491, 0xb5c0fbcf, 0xe9b5dba5,
-    0x3956c25b, 0x59f111f1, 0x923f82a4, 0xab1c5ed5,
-    0xd807aa98, 0x12835b01, 0x243185be, 0x550c7dc3,
-    0x72be5d74, 0x80deb1fe, 0x9bdc06a7, 0xc19bf174,
-    0xe49b69c1, 0xefbe4786, 0x0fc19dc6, 0x240ca1cc,
-    0x2de92c6f, 0x4a7484aa, 0x5cb0a9dc, 0x76f988da,
-    0x983e5152, 0xa831c66d, 0xb00327c8, 0xbf597fc7,
-    0xc6e00bf3, 0xd5a79147, 0x06ca6351, 0x14292967,
-    0x27b70a85, 0x2e1b2138, 0x4d2c6dfc, 0x53380d13,
-    0x650a7354, 0x766a0abb, 0x81c2c92e, 0x92722c85,
-    0xa2bfe8a1, 0xa81a664b, 0xc24b8b70, 0xc76c51a3,
-    0xd192e819, 0xd6990624, 0xf40e3585, 0x106aa070,
-    0x19a4c116, 0x1e376c08, 0x2748774c, 0x34b0bcb5,
-    0x391c0cb3, 0x4ed8aa4a, 0x5b9cca4f, 0x682e6ff3,
-    0x748f82ee, 0x78a5636f, 0x84c87814, 0x8cc70208,
-    0x90befffa, 0xa4506ceb, 0xbef9a3f7, 0xc67178f2,
-];
-
-function rotr(x, n)
-{
-    return (x >>> n) | (x << (32 - n));
-}
-
-function sha256(bytes)
-{
-    const len = bytes.length;
-    const bitLenHi = Math.floor((len * 8) / 0x100000000);
-    const bitLenLo = (len * 8) >>> 0;
-    const totalLen = (((len + 9 + 63) >> 6) << 6);
-    const msg = new Uint8Array(totalLen);
-    msg.set(bytes);
-    msg[len] = 0x80;
-    const view = new DataView(msg.buffer);
-    view.setUint32(totalLen - 8, bitLenHi, false);
-    view.setUint32(totalLen - 4, bitLenLo, false);
-
-    let h0 = 0x6a09e667,
-        h1 = 0xbb67ae85,
-        h2 = 0x3c6ef372,
-        h3 = 0xa54ff53a;
-    let h4 = 0x510e527f,
-        h5 = 0x9b05688c,
-        h6 = 0x1f83d9ab,
-        h7 = 0x5be0cd19;
-    const w = new Uint32Array(64);
-
-    for (let off = 0; off < totalLen; off += 64)
-    {
-        for (let i = 0; i < 16; i++) w[i] = view.getUint32(off + i * 4, false);
-        for (let i = 16; i < 64; i++)
-        {
-            const s0 = (rotr(w[i - 15], 7) ^ rotr(w[i - 15], 18) ^ (w[i - 15] >>> 3)) >>> 0;
-            const s1 = (rotr(w[i - 2], 17) ^ rotr(w[i - 2], 19) ^ (w[i - 2] >>> 10)) >>> 0;
-            w[i] = (w[i - 16] + s0 + w[i - 7] + s1) >>> 0;
-        }
-        let a = h0,
-            b = h1,
-            c = h2,
-            d = h3,
-            e = h4,
-            f = h5,
-            g = h6,
-            h = h7;
-        for (let i = 0; i < 64; i++)
-        {
-            const S1 = (rotr(e, 6) ^ rotr(e, 11) ^ rotr(e, 25)) >>> 0;
-            const ch = ((e & f) ^ (~e & g)) >>> 0;
-            const t1 = (h + S1 + ch + K[i] + w[i]) >>> 0;
-            const S0 = (rotr(a, 2) ^ rotr(a, 13) ^ rotr(a, 22)) >>> 0;
-            const maj = ((a & b) ^ (a & c) ^ (b & c)) >>> 0;
-            const t2 = (S0 + maj) >>> 0;
-            h = g;
-            g = f;
-            f = e;
-            e = (d + t1) >>> 0;
-            d = c;
-            c = b;
-            b = a;
-            a = (t1 + t2) >>> 0;
-        }
-        h0 = (h0 + a) >>> 0;
-        h1 = (h1 + b) >>> 0;
-        h2 = (h2 + c) >>> 0;
-        h3 = (h3 + d) >>> 0;
-        h4 = (h4 + e) >>> 0;
-        h5 = (h5 + f) >>> 0;
-        h6 = (h6 + g) >>> 0;
-        h7 = (h7 + h) >>> 0;
-    }
-
-    const out = new Uint8Array(32);
-    const outView = new DataView(out.buffer);
-    [h0, h1, h2, h3, h4, h5, h6, h7].forEach((v, i) => outView.setUint32(i * 4, v, false));
-    return out;
-}
-return { sha256 };
-})();
-__mods["utils/logger.js"] = (function(){
-const LEVEL_DEBUG = "debug";
-const LEVEL_WARN = "warn";
-const FILE_NAME = "recoilgear.log";
-
-var _enabled = false;
-var _file = null;
-var _failed = false;
-
-function _objcString(ptrValue)
-{
-    try
-    {
-        if (!ptrValue || ptrValue.isNull()) return null;
-        if (typeof ObjC !== "undefined") return new ObjC.Object(ptrValue).toString();
-    }
-    catch (_)
-    {}
-    try
-    {
-        const msgSendPtr = Module.findGlobalExportByName("objc_msgSend");
-        const selPtr = Module.findGlobalExportByName("sel_registerName");
-        if (!msgSendPtr || !selPtr) return null;
-        const msgSend = new NativeFunction(msgSendPtr, "pointer", ["pointer", "pointer"]);
-        const selReg = new NativeFunction(selPtr, "pointer", ["pointer"]);
-        const str = msgSend(ptrValue, selReg(Memory.allocUtf8String("UTF8String")));
-        if (!str || str.isNull()) return null;
-        return str.readUtf8String();
-    }
-    catch (_)
-    {
-        return null;
-    }
-}
-
-function _logPath()
-{
-    try
-    {
-        const fn = Module.findGlobalExportByName("NSHomeDirectory");
-        if (fn)
-        {
-            const home = new NativeFunction(fn, "pointer", [])();
-            const path = _objcString(home);
-            if (path) return path.replace(/\/+$/, "") + "/Documents/" + FILE_NAME;
-        }
-    }
-    catch (_)
-    {}
-    return "/tmp/" + FILE_NAME;
-}
-
-function _open()
-{
-    if (_file || _failed) return _file;
-    const paths = [];
-    const primary = _logPath();
-    if (primary) paths.push(primary);
-    const fallback = "/tmp/" + FILE_NAME;
-    if (paths.indexOf(fallback) < 0) paths.push(fallback);
-    for (let i = 0; i < paths.length; i++)
-    {
-        try
-        {
-            _file = new File(paths[i], "a");
-            return _file;
-        }
-        catch (_)
-        {}
-    }
-    _failed = true;
-    return null;
-}
-
-function _stamp()
-{
-    const d = new Date();
-    const p = (n, w) => String(n).padStart(w || 2, "0");
-    return d.getFullYear() + "-" + p(d.getMonth() + 1) + "-" + p(d.getDate()) + " " +
-        p(d.getHours()) + ":" + p(d.getMinutes()) + ":" + p(d.getSeconds()) + "." + p(d.getMilliseconds(), 3);
-}
-
-function _emit(level, message, data)
-{
-    if (!_enabled) return;
-    const f = _open();
-    if (!f) return;
-    let line = _stamp() + " [" + level + "] " + String(message || "");
-    if (data !== void 0)
-    {
-        try
-        {
-            line += " " + JSON.stringify(data);
-        }
-        catch (_)
-        {}
-    }
-    try
-    {
-        f.write(line + "\n");
-        f.flush();
-    }
-    catch (_)
-    {}
-}
-
-function setLoggingEnabled(value)
-{
-    const next = !!value;
-    if (next === _enabled) return;
-    _enabled = next;
-    if (_enabled) _emit(LEVEL_DEBUG, "logging enabled");
-}
-
-function logWarn(message, data)
-{
-    _emit(LEVEL_WARN, message, data);
-}
-return { setLoggingEnabled, logWarn };
-})();
-__mods["utils/flags.js"] = (function(){
-var FEATURE_NAMES = [
-    "aimbot",
-    "autododge",
-    "esp",
-    "spinner",
-    "killaura",
-    "camera",
-    "spray",
-    "pin",
-    "brawltv",
-    "spec",
-    "chatspam",
-    "fps",
-    "fpsunlock",
-    "gradient",
-    "holdshoot",
-    "speedhack"
-];
-
-var state = {};
-FEATURE_NAMES.forEach((name) =>
-{
-    state[name] = false;
-});
-
-function setState(feature, value)
-{
-    if (!(feature in state)) return;
-    state[feature] = !!value;
-}
-
-setState("autododge", true);
-setState("aimbot", true);
-return { setState, state };
-})();
-__mods["utils/brawlerName.js"] = (function(){
-const ALIASES = {
-    "8-BIT": "8BIT",
-    EL_PRIMO: "PRIMO",
-    ELPRIMO: "PRIMO",
-    MR_P: "MRP",
-    "MR.P": "MRP",
-    LARRY_AND_LAWRIE: "TWINS",
-    LOLA: "LOLLA",
-    MELODIE: "MELODY",
-    JESSIE: "JESS",
-    DYNAMIKE: "MIKE",
-    DARRYL: "BARRELBOT",
-    HANK: "FISHTANK",
-    MOE: "DIGGER",
-    GLOWY: "GLOWBERT",
-    BOLT: "BOLDER",
-    KENJI: "SAMURAI",
-    TARA: "TARO",
-    RICO: "RICK",
-    STARR_NOVA: "STELLA",
-    PAM: "MJ",
-    SAM: "BRONSON",
-    "JAE-YONG": "JAE",
-    JAE_YONG: "JAE"
-};
-
-function canonBrawlerName(name)
-{
-    if (!name) return null;
-    const upper = String(name).trim().toUpperCase().replace(/\s+/g, "_");
-    return ALIASES[upper] || upper;
-}
-return { canonBrawlerName };
 })();
 __mods["core/functions.js"] = (function(){
 const { offsets } = __mods["core/offsets.js"];
@@ -475,151 +185,76 @@ function readScString(value, maxLength = DEFAULT_MAX_LENGTH)
 }
 return { readScString };
 })();
-__mods["core/commands.js"] = (function(){
-const { offsets } = __mods["core/offsets.js"];
-const { getBase, getFunctions } = __mods["core/functions.js"];
-const { sha256 } = __mods["utils/crypto.js"];
+__mods["utils/brawlerName.js"] = (function(){
+const ALIASES = {
+    "8-BIT": "8BIT",
+    EL_PRIMO: "PRIMO",
+    ELPRIMO: "PRIMO",
+    MR_P: "MRP",
+    "MR.P": "MRP",
+    LARRY_AND_LAWRIE: "TWINS",
+    LOLA: "LOLLA",
+    MELODIE: "MELODY",
+    JESSIE: "JESS",
+    DYNAMIKE: "MIKE",
+    DARRYL: "BARRELBOT",
+    HANK: "FISHTANK",
+    MOE: "DIGGER",
+    GLOWY: "GLOWBERT",
+    BOLT: "BOLDER",
+    KENJI: "SAMURAI",
+    TARA: "TARO",
+    RICO: "RICK",
+    STARR_NOVA: "STELLA",
+    PAM: "MJ",
+    SAM: "BRONSON",
+    "JAE-YONG": "JAE",
+    JAE_YONG: "JAE"
+};
 
-const CMD_BUF_SIZE = 72;
-const _zeroBuf = new Uint8Array(CMD_BUF_SIZE).buffer;
-
-const MAX_TABLE_TYPE = 0x16;
-const TABLE_ENTRIES = MAX_TABLE_TYPE + 1;
-const MASK_SIZE = 16;
-
-var _typeTable = null;
-var _fallbackType = 0;
-var _innerMask = null;
-var _outerMask = null;
-
-function _loadSigningConstants()
+function canonBrawlerName(name)
 {
-    if (_typeTable) return true;
-    const base = getBase();
-    const raw = base.add(offsets.ClientInput_typeConstantTable).readByteArray(TABLE_ENTRIES * 4);
-    const bytes = new Uint8Array(raw);
-    const table = new Uint32Array(TABLE_ENTRIES);
-    for (let i = 0; i < TABLE_ENTRIES; i++)
-    {
-        table[i] = (bytes[i * 4] | (bytes[i * 4 + 1] << 8) | (bytes[i * 4 + 2] << 16) | (bytes[i * 4 + 3] << 24)) >>> 0;
-    }
-    _innerMask = new Uint8Array(base.add(offsets.ClientInput_hashInnerMask).readByteArray(MASK_SIZE));
-    _outerMask = new Uint8Array(base.add(offsets.ClientInput_hashOuterMask).readByteArray(MASK_SIZE));
-    _typeTable = table;
-    _fallbackType = base.add(offsets.ClientInput_typeFallback).readU32() >>> 0;
-    return true;
+    if (!name) return null;
+    const upper = String(name).trim().toUpperCase().replace(/\s+/g, "_");
+    return ALIASES[upper] || upper;
+}
+return { canonBrawlerName };
+})();
+__mods["utils/flags.js"] = (function(){
+var FEATURE_NAMES = [
+    "aimbot",
+    "autododge",
+    "esp",
+    "spinner",
+    "killaura",
+    "camera",
+    "spray",
+    "pin",
+    "brawltv",
+    "spec",
+    "chatspam",
+    "fps",
+    "fpsunlock",
+    "gradient",
+    "holdshoot",
+    "speedhack"
+];
+
+var state = {};
+FEATURE_NAMES.forEach((name) =>
+{
+    state[name] = false;
+});
+
+function setState(feature, value)
+{
+    if (!(feature in state)) return;
+    state[feature] = !!value;
 }
 
-function _concat(a, b)
-{
-    const out = new Uint8Array(a.length + b.length);
-    out.set(a);
-    out.set(b, a.length);
-    return out;
-}
-
-function _makeHashBlock(key16, mask, padByte)
-{
-    const block = new Uint8Array(64);
-    for (let i = 0; i < 16; i++) block[i] = key16[i] ^ mask[i];
-    block.fill(padByte, 16);
-    return block;
-}
-
-function _computeToken(key16, cmdData16)
-{
-    const typeRaw = (cmdData16[4] | (cmdData16[5] << 8) | (cmdData16[6] << 16) | (cmdData16[7] << 24)) >>> 0;
-    const typeC = typeRaw <= MAX_TABLE_TYPE ? _typeTable[typeRaw] : _fallbackType;
-
-    const msg = new Uint8Array(20);
-    for (let i = 0; i < 16; i++) msg[i] = cmdData16[i];
-    msg[16] = typeC & 0xff;
-    msg[17] = (typeC >>> 8) & 0xff;
-    msg[18] = (typeC >>> 16) & 0xff;
-    msg[19] = (typeC >>> 24) & 0xff;
-
-    const inner = sha256(_concat(_makeHashBlock(key16, _innerMask, 0x36), msg));
-    const digest = sha256(_concat(_makeHashBlock(key16, _outerMask, 0x5c), inner));
-    let token = (digest[0] | ((digest[1] & 0x7f) << 8)) >>> 0;
-    if (token <= 1) token = 1;
-    return token;
-}
-
-const CLIENT_INPUT_TOKEN = 0x34;
-
-function signClientInput(ci, battle)
-{
-    try
-    {
-        if (battle.add(offsets.BattleMode_hashEnabled).readU8() === 0) return 0;
-        _loadSigningConstants();
-    }
-    catch (_)
-    {
-        return 0;
-    }
-
-    let key16;
-    try
-    {
-        key16 = new Uint8Array(battle.add(offsets.BattleMode_hashKey).readByteArray(16));
-    }
-    catch (_)
-    {
-        return 0;
-    }
-    if (!key16 || key16.length < 16) return 0;
-
-    let cmdData16;
-    try
-    {
-        cmdData16 = new Uint8Array(ci.add(4).readByteArray(16));
-    }
-    catch (_)
-    {
-        return 0;
-    }
-    if (!cmdData16 || cmdData16.length < 16) return 0;
-
-    const token = _computeToken(key16, cmdData16);
-    try
-    {
-        ci.add(CLIENT_INPUT_TOKEN).writeU32(token);
-    }
-    catch (_)
-    {
-        return 0;
-    }
-    return token;
-}
-
-function sendCommand(cmdType, fillFn)
-{
-    try
-    {
-        const fns = getFunctions();
-        const battle = fns.BattleMode_getInstance();
-        if (!battle || battle.isNull()) return false;
-
-        const mgr = battle.add(offsets.BattleMode_clientInputManager).readPointer();
-        if (!mgr || mgr.isNull()) return false;
-
-        const ci = fns.operator_new(CMD_BUF_SIZE);
-        if (!ci || ci.isNull()) return false;
-
-        ci.writeByteArray(_zeroBuf);
-        fns.ClientInput_constructor_int(ci, cmdType | 0);
-        if (fillFn) fillFn(ci, battle);
-        signClientInput(ci, battle);
-        fns.ClientInputManager_addInput(mgr, ci);
-        return true;
-    }
-    catch (_)
-    {
-        return false;
-    }
-}
-return { sendCommand };
+setState("autododge", true);
+setState("aimbot", true);
+return { setState, state };
 })();
 __mods["core/scanner.js"] = (function(){
 const { getFunctions } = __mods["core/functions.js"];
@@ -1599,6 +1234,371 @@ function isBlockedWide(wx, wy, radius, checkBit)
     return isBlockedAt(wx + r, wy, checkBit) || isBlockedAt(wx - r, wy, checkBit) || isBlockedAt(wx, wy + r, checkBit) || isBlockedAt(wx, wy - r, checkBit);
 }
 return { notifyBattleModeChanged, maybeRefreshWallCache, watchTileChanges, getWallCacheW, getWallCacheH, losCheck, traceWallHit, isBlockedAt, isBlockedWide, TILE_SIZE, BLOCKS_MOVEMENT, BLOCKS_PROJECTILES };
+})();
+__mods["utils/crypto.js"] = (function(){
+const K = [
+    0x428a2f98, 0x71374491, 0xb5c0fbcf, 0xe9b5dba5,
+    0x3956c25b, 0x59f111f1, 0x923f82a4, 0xab1c5ed5,
+    0xd807aa98, 0x12835b01, 0x243185be, 0x550c7dc3,
+    0x72be5d74, 0x80deb1fe, 0x9bdc06a7, 0xc19bf174,
+    0xe49b69c1, 0xefbe4786, 0x0fc19dc6, 0x240ca1cc,
+    0x2de92c6f, 0x4a7484aa, 0x5cb0a9dc, 0x76f988da,
+    0x983e5152, 0xa831c66d, 0xb00327c8, 0xbf597fc7,
+    0xc6e00bf3, 0xd5a79147, 0x06ca6351, 0x14292967,
+    0x27b70a85, 0x2e1b2138, 0x4d2c6dfc, 0x53380d13,
+    0x650a7354, 0x766a0abb, 0x81c2c92e, 0x92722c85,
+    0xa2bfe8a1, 0xa81a664b, 0xc24b8b70, 0xc76c51a3,
+    0xd192e819, 0xd6990624, 0xf40e3585, 0x106aa070,
+    0x19a4c116, 0x1e376c08, 0x2748774c, 0x34b0bcb5,
+    0x391c0cb3, 0x4ed8aa4a, 0x5b9cca4f, 0x682e6ff3,
+    0x748f82ee, 0x78a5636f, 0x84c87814, 0x8cc70208,
+    0x90befffa, 0xa4506ceb, 0xbef9a3f7, 0xc67178f2,
+];
+
+function rotr(x, n)
+{
+    return (x >>> n) | (x << (32 - n));
+}
+
+function sha256(bytes)
+{
+    const len = bytes.length;
+    const bitLenHi = Math.floor((len * 8) / 0x100000000);
+    const bitLenLo = (len * 8) >>> 0;
+    const totalLen = (((len + 9 + 63) >> 6) << 6);
+    const msg = new Uint8Array(totalLen);
+    msg.set(bytes);
+    msg[len] = 0x80;
+    const view = new DataView(msg.buffer);
+    view.setUint32(totalLen - 8, bitLenHi, false);
+    view.setUint32(totalLen - 4, bitLenLo, false);
+
+    let h0 = 0x6a09e667,
+        h1 = 0xbb67ae85,
+        h2 = 0x3c6ef372,
+        h3 = 0xa54ff53a;
+    let h4 = 0x510e527f,
+        h5 = 0x9b05688c,
+        h6 = 0x1f83d9ab,
+        h7 = 0x5be0cd19;
+    const w = new Uint32Array(64);
+
+    for (let off = 0; off < totalLen; off += 64)
+    {
+        for (let i = 0; i < 16; i++) w[i] = view.getUint32(off + i * 4, false);
+        for (let i = 16; i < 64; i++)
+        {
+            const s0 = (rotr(w[i - 15], 7) ^ rotr(w[i - 15], 18) ^ (w[i - 15] >>> 3)) >>> 0;
+            const s1 = (rotr(w[i - 2], 17) ^ rotr(w[i - 2], 19) ^ (w[i - 2] >>> 10)) >>> 0;
+            w[i] = (w[i - 16] + s0 + w[i - 7] + s1) >>> 0;
+        }
+        let a = h0,
+            b = h1,
+            c = h2,
+            d = h3,
+            e = h4,
+            f = h5,
+            g = h6,
+            h = h7;
+        for (let i = 0; i < 64; i++)
+        {
+            const S1 = (rotr(e, 6) ^ rotr(e, 11) ^ rotr(e, 25)) >>> 0;
+            const ch = ((e & f) ^ (~e & g)) >>> 0;
+            const t1 = (h + S1 + ch + K[i] + w[i]) >>> 0;
+            const S0 = (rotr(a, 2) ^ rotr(a, 13) ^ rotr(a, 22)) >>> 0;
+            const maj = ((a & b) ^ (a & c) ^ (b & c)) >>> 0;
+            const t2 = (S0 + maj) >>> 0;
+            h = g;
+            g = f;
+            f = e;
+            e = (d + t1) >>> 0;
+            d = c;
+            c = b;
+            b = a;
+            a = (t1 + t2) >>> 0;
+        }
+        h0 = (h0 + a) >>> 0;
+        h1 = (h1 + b) >>> 0;
+        h2 = (h2 + c) >>> 0;
+        h3 = (h3 + d) >>> 0;
+        h4 = (h4 + e) >>> 0;
+        h5 = (h5 + f) >>> 0;
+        h6 = (h6 + g) >>> 0;
+        h7 = (h7 + h) >>> 0;
+    }
+
+    const out = new Uint8Array(32);
+    const outView = new DataView(out.buffer);
+    [h0, h1, h2, h3, h4, h5, h6, h7].forEach((v, i) => outView.setUint32(i * 4, v, false));
+    return out;
+}
+return { sha256 };
+})();
+__mods["core/commands.js"] = (function(){
+const { offsets } = __mods["core/offsets.js"];
+const { getBase, getFunctions } = __mods["core/functions.js"];
+const { sha256 } = __mods["utils/crypto.js"];
+
+const CMD_BUF_SIZE = 72;
+const _zeroBuf = new Uint8Array(CMD_BUF_SIZE).buffer;
+
+const MAX_TABLE_TYPE = 0x16;
+const TABLE_ENTRIES = MAX_TABLE_TYPE + 1;
+const MASK_SIZE = 16;
+
+var _typeTable = null;
+var _fallbackType = 0;
+var _innerMask = null;
+var _outerMask = null;
+
+function _loadSigningConstants()
+{
+    if (_typeTable) return true;
+    const base = getBase();
+    const raw = base.add(offsets.ClientInput_typeConstantTable).readByteArray(TABLE_ENTRIES * 4);
+    const bytes = new Uint8Array(raw);
+    const table = new Uint32Array(TABLE_ENTRIES);
+    for (let i = 0; i < TABLE_ENTRIES; i++)
+    {
+        table[i] = (bytes[i * 4] | (bytes[i * 4 + 1] << 8) | (bytes[i * 4 + 2] << 16) | (bytes[i * 4 + 3] << 24)) >>> 0;
+    }
+    _innerMask = new Uint8Array(base.add(offsets.ClientInput_hashInnerMask).readByteArray(MASK_SIZE));
+    _outerMask = new Uint8Array(base.add(offsets.ClientInput_hashOuterMask).readByteArray(MASK_SIZE));
+    _typeTable = table;
+    _fallbackType = base.add(offsets.ClientInput_typeFallback).readU32() >>> 0;
+    return true;
+}
+
+function _concat(a, b)
+{
+    const out = new Uint8Array(a.length + b.length);
+    out.set(a);
+    out.set(b, a.length);
+    return out;
+}
+
+function _makeHashBlock(key16, mask, padByte)
+{
+    const block = new Uint8Array(64);
+    for (let i = 0; i < 16; i++) block[i] = key16[i] ^ mask[i];
+    block.fill(padByte, 16);
+    return block;
+}
+
+function _computeToken(key16, cmdData16)
+{
+    const typeRaw = (cmdData16[4] | (cmdData16[5] << 8) | (cmdData16[6] << 16) | (cmdData16[7] << 24)) >>> 0;
+    const typeC = typeRaw <= MAX_TABLE_TYPE ? _typeTable[typeRaw] : _fallbackType;
+
+    const msg = new Uint8Array(20);
+    for (let i = 0; i < 16; i++) msg[i] = cmdData16[i];
+    msg[16] = typeC & 0xff;
+    msg[17] = (typeC >>> 8) & 0xff;
+    msg[18] = (typeC >>> 16) & 0xff;
+    msg[19] = (typeC >>> 24) & 0xff;
+
+    const inner = sha256(_concat(_makeHashBlock(key16, _innerMask, 0x36), msg));
+    const digest = sha256(_concat(_makeHashBlock(key16, _outerMask, 0x5c), inner));
+    let token = (digest[0] | ((digest[1] & 0x7f) << 8)) >>> 0;
+    if (token <= 1) token = 1;
+    return token;
+}
+
+const CLIENT_INPUT_TOKEN = 0x34;
+
+function signClientInput(ci, battle)
+{
+    try
+    {
+        if (battle.add(offsets.BattleMode_hashEnabled).readU8() === 0) return 0;
+        _loadSigningConstants();
+    }
+    catch (_)
+    {
+        return 0;
+    }
+
+    let key16;
+    try
+    {
+        key16 = new Uint8Array(battle.add(offsets.BattleMode_hashKey).readByteArray(16));
+    }
+    catch (_)
+    {
+        return 0;
+    }
+    if (!key16 || key16.length < 16) return 0;
+
+    let cmdData16;
+    try
+    {
+        cmdData16 = new Uint8Array(ci.add(4).readByteArray(16));
+    }
+    catch (_)
+    {
+        return 0;
+    }
+    if (!cmdData16 || cmdData16.length < 16) return 0;
+
+    const token = _computeToken(key16, cmdData16);
+    try
+    {
+        ci.add(CLIENT_INPUT_TOKEN).writeU32(token);
+    }
+    catch (_)
+    {
+        return 0;
+    }
+    return token;
+}
+
+function sendCommand(cmdType, fillFn)
+{
+    try
+    {
+        const fns = getFunctions();
+        const battle = fns.BattleMode_getInstance();
+        if (!battle || battle.isNull()) return false;
+
+        const mgr = battle.add(offsets.BattleMode_clientInputManager).readPointer();
+        if (!mgr || mgr.isNull()) return false;
+
+        const ci = fns.operator_new(CMD_BUF_SIZE);
+        if (!ci || ci.isNull()) return false;
+
+        ci.writeByteArray(_zeroBuf);
+        fns.ClientInput_constructor_int(ci, cmdType | 0);
+        if (fillFn) fillFn(ci, battle);
+        signClientInput(ci, battle);
+        fns.ClientInputManager_addInput(mgr, ci);
+        return true;
+    }
+    catch (_)
+    {
+        return false;
+    }
+}
+return { sendCommand };
+})();
+__mods["utils/logger.js"] = (function(){
+const LEVEL_DEBUG = "debug";
+const LEVEL_WARN = "warn";
+const FILE_NAME = "recoilgear.log";
+
+var _enabled = false;
+var _file = null;
+var _failed = false;
+
+function _objcString(ptrValue)
+{
+    try
+    {
+        if (!ptrValue || ptrValue.isNull()) return null;
+        if (typeof ObjC !== "undefined") return new ObjC.Object(ptrValue).toString();
+    }
+    catch (_)
+    {}
+    try
+    {
+        const msgSendPtr = Module.findGlobalExportByName("objc_msgSend");
+        const selPtr = Module.findGlobalExportByName("sel_registerName");
+        if (!msgSendPtr || !selPtr) return null;
+        const msgSend = new NativeFunction(msgSendPtr, "pointer", ["pointer", "pointer"]);
+        const selReg = new NativeFunction(selPtr, "pointer", ["pointer"]);
+        const str = msgSend(ptrValue, selReg(Memory.allocUtf8String("UTF8String")));
+        if (!str || str.isNull()) return null;
+        return str.readUtf8String();
+    }
+    catch (_)
+    {
+        return null;
+    }
+}
+
+function _logPath()
+{
+    try
+    {
+        const fn = Module.findGlobalExportByName("NSHomeDirectory");
+        if (fn)
+        {
+            const home = new NativeFunction(fn, "pointer", [])();
+            const path = _objcString(home);
+            if (path) return path.replace(/\/+$/, "") + "/Documents/" + FILE_NAME;
+        }
+    }
+    catch (_)
+    {}
+    return "/tmp/" + FILE_NAME;
+}
+
+function _open()
+{
+    if (_file || _failed) return _file;
+    const paths = [];
+    const primary = _logPath();
+    if (primary) paths.push(primary);
+    const fallback = "/tmp/" + FILE_NAME;
+    if (paths.indexOf(fallback) < 0) paths.push(fallback);
+    for (let i = 0; i < paths.length; i++)
+    {
+        try
+        {
+            _file = new File(paths[i], "a");
+            return _file;
+        }
+        catch (_)
+        {}
+    }
+    _failed = true;
+    return null;
+}
+
+function _stamp()
+{
+    const d = new Date();
+    const p = (n, w) => String(n).padStart(w || 2, "0");
+    return d.getFullYear() + "-" + p(d.getMonth() + 1) + "-" + p(d.getDate()) + " " +
+        p(d.getHours()) + ":" + p(d.getMinutes()) + ":" + p(d.getSeconds()) + "." + p(d.getMilliseconds(), 3);
+}
+
+function _emit(level, message, data)
+{
+    if (!_enabled) return;
+    const f = _open();
+    if (!f) return;
+    let line = _stamp() + " [" + level + "] " + String(message || "");
+    if (data !== void 0)
+    {
+        try
+        {
+            line += " " + JSON.stringify(data);
+        }
+        catch (_)
+        {}
+    }
+    try
+    {
+        f.write(line + "\n");
+        f.flush();
+    }
+    catch (_)
+    {}
+}
+
+function setLoggingEnabled(value)
+{
+    const next = !!value;
+    if (next === _enabled) return;
+    _enabled = next;
+    if (_enabled) _emit(LEVEL_DEBUG, "logging enabled");
+}
+
+function logWarn(message, data)
+{
+    _emit(LEVEL_WARN, message, data);
+}
+return { setLoggingEnabled, logWarn };
 })();
 __mods["helpers/dodge_kinds.js"] = (function(){
 const FITS = [
