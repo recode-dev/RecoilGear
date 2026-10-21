@@ -36,8 +36,7 @@ import
     K_FADE,
     K_LOCKPATH,
     fitOf,
-    kindOf,
-    projRadius
+    kindOf
 }
 from "../helpers/dodge_kinds.js";
 import
@@ -196,10 +195,7 @@ function _projectileVel(p)
 
 function _ballRadius(p)
 {
-    if (p.radius > 0) return p.radius;
-    const r = projRadius(p);
-    if (r > 0) return r;
-    return PROJ_RADIUS_DEFAULT;
+    return p.radius > 0 ? p.radius : PROJ_RADIUS_DEFAULT;
 }
 
 function _traveled(p)

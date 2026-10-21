@@ -18,21 +18,17 @@ export const offsets = Object.freeze({
     LogicGameObjectClient_ownerIndex: 0x3c,
 
     LogicCharacterClient_body: 0xa0,
-    LogicCharacterClient_hyperActive: 0xa8,
     CharData_brawlerId: 0x35c,
     HeroData_namePtr: 0x18,
-    LogicSkillData_kind: 0x8,
 
     LogicProjectileClient_ownerTeam: 0x40,
     LogicProjectileClient_dataName: 0x18,
-    LogicProjectileClient_data: 0x10,
     Projectile_isIndirect: 0x118,
     ProjectileData_speed: 0x124,
     ProjectileData_radius: 0x74,
 
     ClientInput_x: 0xc,
     ClientInput_y: 0x10,
-    ClientInput_skillData: 0x40,
     ClientInput_typeConstantTable: 0xe1bd30,
     ClientInput_typeFallback: 0xe1bc28,
     ClientInput_hashInnerMask: 0xe1bbd0,
@@ -53,9 +49,7 @@ export const offsets = Object.freeze({
     BattleMode_getInstance: 0x8c5130,
     LogicBattleModeClient_getOwnCharacter: 0xac3934,
     LogicBattleModeClient_getOwnPlayerTeam: 0xa7f47c,
-    LogicBattleModeClient_getOwnPlayerIndex: 0x9cda04,
     LogicBattleModeClient__getOwnPlayerIndex: 0x9cda04,
-    LogicBattleModeClient_getTileMap: 0x991440,
     LogicBattleModeClient__getTileMap: 0x991440,
     LogicBattleModeClient_setClientPredictionMoveTo: 0xac3a58,
 
@@ -70,30 +64,20 @@ export const offsets = Object.freeze({
 
     LogicCharacterData_getSpeed: 0x9911ec,
     LogicCharacterData_getCollisionRadius: 0x9913e8,
-    LogicCharacterClient_getWeaponSkill: 0x9fc440,
     LogicCharacterClient__getWeaponSkill: 0x9fc440,
-    LogicCharacterClient_getSkillAt: 0xa007fc,
     LogicCharacterClient__getSkillAt: 0xa007fc,
-    LogicCharacterClient_getLinkedCarryable: 0x9fc704,
-    LogicCharacterClient__getLinkedCarryable: 0x9fc704,
 
-    LogicSkillClient_getData: 0x1e5650,
     LogicSkillClient__getData: 0x1e5650,
-    LogicSkillData_getCastingRange: 0x9de9cc,
     LogicSkillData__getCastingRange: 0x9de9cc,
-    LogicSkillData_getProjectileData: 0x9e84a8,
     LogicSkillData__getProjectileData: 0x9e84a8,
 
     LogicProjectileClient_getData: 0x117050,
     LogicProjectileData_getSpeed: 0x8cee94,
     LogicProjectileData_getRadius: 0x860d88,
     LogicProjectileData_getRendering: 0x97d5c0,
-    LogicProjectileData_getSpawnAreaEffect: 0x9cda1c,
     LogicProjectileData__getSpawnAreaEffect: 0x9cda1c,
 
-    AreaEffectData_getRadius: 0x8cee8c,
     AreaEffectData__getRadius: 0x8cee8c,
-    AreaEffectData_getActiveTimeMs: 0x9bf8f4,
     AreaEffectData__getActiveTimeMs: 0x9bf8f4,
 
     LogicData_getName: 0x9a4f1c,

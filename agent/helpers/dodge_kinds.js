@@ -786,9 +786,3 @@ export function fitOf(name)
     if (kind && kind.fit >= 0 && kind.fit < FITS.length) return FITS[kind.fit];
     return FITS[FIT_FALLBACK];
 }
-
-export function projRadius(projectile)
-{
-    if (!projectile) return 0;
-    return projectile.radius > 0 ? projectile.radius : 0;
-}

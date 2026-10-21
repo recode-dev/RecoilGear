@@ -174,21 +174,6 @@ function _ownerNameByIndex(ownerIndex)
     return null;
 }
 
-function _readAngle(projectile, rendering)
-{
-    if (rendering !== 3) return null;
-    if (!offsets.Projectile_angle) return null;
-    try
-    {
-        const raw = projectile.add(offsets.Projectile_angle).readU32();
-        return raw <= 360 ? raw : raw % 360;
-    }
-    catch (_)
-    {
-        return null;
-    }
-}
-
 function _noteCastRange(name, units)
 {
     if (!name || !(units > 0) || units >= 70000) return;
@@ -333,7 +318,6 @@ function _captureProjectile(projectile, data, ownerTeamOverride)
             ? data.add(offsets.ProjectileData_radius).readU32() | 0
             : (fns.LogicProjectileData_getRadius ? fns.LogicProjectileData_getRadius(data) | 0 : 0));
         const rendering = fns.LogicProjectileData_getRendering ? fns.LogicProjectileData_getRendering(data) | 0 : 0;
-        const angle = _readAngle(projectile, rendering);
         const isThrower = projectile.add(offsets.Projectile_isIndirect).readU32() | 0;
         const isBeam = false;
         let ownerTeam = ownerTeamOverride === void 0 ? 0 : ownerTeamOverride | 0;
@@ -387,7 +371,7 @@ function _captureProjectile(projectile, data, ownerTeamOverride)
             speed,
             radius,
             rendering,
-            angle,
+            angle: null,
             isThrower,
             isBeam,
             spawnAreaRadius,
@@ -405,8 +389,8 @@ function _captureProjectile(projectile, data, ownerTeamOverride)
             lastTs: Date.now(),
             lastSeenAt: Date.now(),
             hasVelocitySample: false,
-            vx: angle === null ? 0 : Math.cos(angle * Math.PI / 180) * speed,
-            vy: angle === null ? 0 : Math.sin(angle * Math.PI / 180) * speed
+            vx: 0,
+            vy: 0
         });
     }
     catch (_)
@@ -618,9 +602,7 @@ export function updateScanner(bm, now)
             scanData.myRadius = functions.LogicCharacterData_getCollisionRadius(ownData) || 60;
             try
             {
-                const baseSpeed = functions.LogicCharacterData_getSpeed ? functions.LogicCharacterData_getSpeed(ownData) | 0 : 0;
-                const buff = offsets.LogicCharacterClientOwn_speedBuff ? own.add(offsets.LogicCharacterClientOwn_speedBuff).readS32() | 0 : 0;
-                const speed = baseSpeed + buff;
+                const speed = functions.LogicCharacterData_getSpeed ? functions.LogicCharacterData_getSpeed(ownData) | 0 : 0;
                 if (speed >= 300 && speed <= 3000) scanData.mySpeed = speed;
             }
             catch (_)
