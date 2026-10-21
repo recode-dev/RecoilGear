@@ -32,6 +32,9 @@ const RANGE_UNIT = 300;
 const SPEED_CAP_MUL = 1.35;
 const VEL_SMOOTH = 0.6;
 const LEAD_CLAMP = 0.35;
+const SPEED_DEFAULT_CAP = 1200;
+const SPEED_SPIKE_MUL = 1.6;
+const STICKY_MARGIN = 1.12;
 
 var _target = null;
 var _aimX = 0;
@@ -56,6 +59,7 @@ function _sample(gid, x, y, moveSpeed, now)
     const prev = _track.get(gid);
     let vx = 0;
     let vy = 0;
+    const cap = moveSpeed > 0 ? moveSpeed * SPEED_CAP_MUL : SPEED_DEFAULT_CAP;
     if (prev)
     {
         const dt = (now - prev.t) / 1000;
@@ -63,13 +67,21 @@ function _sample(gid, x, y, moveSpeed, now)
         {
             const ivx = (x - prev.x) / dt;
             const ivy = (y - prev.y) / dt;
-            vx = ivx * VEL_SMOOTH + prev.vx * (1 - VEL_SMOOTH);
-            vy = ivy * VEL_SMOOTH + prev.vy * (1 - VEL_SMOOTH);
+            const im = Math.sqrt(ivx * ivx + ivy * ivy);
+            if (im > cap * SPEED_SPIKE_MUL)
+            {
+                vx = prev.vx;
+                vy = prev.vy;
+            }
+            else
+            {
+                vx = ivx * VEL_SMOOTH + prev.vx * (1 - VEL_SMOOTH);
+                vy = ivy * VEL_SMOOTH + prev.vy * (1 - VEL_SMOOTH);
+            }
         }
     }
-    const cap = moveSpeed > 0 ? moveSpeed * SPEED_CAP_MUL : 0;
     const mag = Math.sqrt(vx * vx + vy * vy);
-    if (cap > 0 && mag > cap)
+    if (mag > cap)
     {
         vx = vx / mag * cap;
         vy = vy / mag * cap;
@@ -193,7 +205,9 @@ function _pickTarget(now)
     const speed = _ownProjectileSpeed();
     const range = _ownRange(speed);
     let best = null;
-    let bestT = Infinity;
+    let bestD = Infinity;
+    let cur = null;
+    let curD = Infinity;
 
     for (let i = 0; i < list.length; i++)
     {
@@ -202,20 +216,33 @@ function _pickTarget(now)
         if (e.kind !== "player") continue;
         if (_isSkipped(e.brawlerName)) continue;
         if ((e.teamId | 0) === myTeam) continue;
-        const pred = _sample(e.gid, e.x, e.y, e.moveSpeed, now);
-        const aim = _solve(mx, my, pred, speed, range);
-        if (!aim) continue;
-        if (aim.t < bestT)
+        const dx = e.x - mx;
+        const dy = e.y - my;
+        const d = Math.sqrt(dx * dx + dy * dy);
+        if (range > 0 && d > range) continue;
+        if (d < bestD)
         {
-            bestT = aim.t;
-            best = { enemy: e, aim };
+            bestD = d;
+            best = e;
+        }
+        if (_target && e.gid === _target.gid)
+        {
+            cur = e;
+            curD = d;
         }
     }
-    if (!best) return null;
 
-    _aimX = best.aim.x;
-    _aimY = best.aim.y;
-    return best.enemy;
+    let pick;
+    if (cur && best && curD <= bestD * STICKY_MARGIN) pick = cur;
+    else pick = best;
+    if (!pick) return null;
+
+    const pred = _sample(pick.gid, pick.x, pick.y, pick.moveSpeed, now);
+    const aim = _solve(mx, my, pred, speed, range);
+    if (!aim) return null;
+    _aimX = aim.x;
+    _aimY = aim.y;
+    return pick;
 }
 
 export function setupAimbot()
