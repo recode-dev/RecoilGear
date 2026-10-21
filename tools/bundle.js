@@ -50,7 +50,7 @@ function nextVersion()
 function build()
 {
     const version = nextVersion();
-    const parts = ["// RecoilGear v" + version + " — single-file build", "var __mods = {};"];
+    const parts = ["var __mods = {};"];
     for (const rel of order(ENTRY))
     {
         let source = readModule(rel).replace(/\r\n/g, "\n");

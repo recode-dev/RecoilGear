@@ -20,10 +20,16 @@ import
 }
 from "../utils/flags.js";
 
-const RANGE = 20000;
 const SPEED_FALLBACK = 3000;
 const SPEED_REFRESH_MS = 500;
 const SKIP_NAME_PARTS = ["BALL"];
+
+const LATENCY_S = 0.06;
+const LEAD_ITERATIONS = 3;
+const RANGE_FLIGHT_S = 1.1;
+const RANGE_MARGIN = 0.88;
+const RANGE_UNIT = 300;
+const SPEED_CAP_MUL = 1.35;
 
 var _target = null;
 var _aimX = 0;
@@ -33,16 +39,57 @@ var _projectileSpeed = SPEED_FALLBACK;
 var _speedAt = 0;
 var _hooks = false;
 
-function _velOf(enemy, now)
+function _isSkipped(name)
 {
-    const prev = _track.get(enemy.gid);
-    _track.set(enemy.gid, { x: enemy.x, y: enemy.y, t: now });
-    if (!prev) return { vx: 0, vy: 0 };
-    const dt = now - prev.t;
-    if (dt < 8 || dt > 400) return { vx: 0, vy: 0 };
+    if (!name) return true;
+    for (let i = 0; i < SKIP_NAME_PARTS.length; i++)
+    {
+        if (name.indexOf(SKIP_NAME_PARTS[i]) >= 0) return true;
+    }
+    return false;
+}
+
+function _sample(gid, x, y, moveSpeed, now)
+{
+    const prev = _track.get(gid);
+    let vx = 0;
+    let vy = 0;
+    if (prev)
+    {
+        const dt = (now - prev.t) / 1000;
+        if (dt >= 0.008 && dt <= 0.4)
+        {
+            vx = (x - prev.x) / dt;
+            vy = (y - prev.y) / dt;
+        }
+    }
+    const cap = moveSpeed > 0 ? moveSpeed * SPEED_CAP_MUL : 0;
+    const mag = Math.sqrt(vx * vx + vy * vy);
+    if (cap > 0 && mag > cap)
+    {
+        vx = vx / mag * cap;
+        vy = vy / mag * cap;
+    }
+    _track.set(gid, { x, y, t: now, vx, vy });
+    return { x, y, vx, vy };
+}
+
+function _solve(mx, my, pred, speed, range)
+{
+    let t = LATENCY_S;
+    for (let i = 0; i < LEAD_ITERATIONS; i++)
+    {
+        const px = pred.x + pred.vx * t - mx;
+        const py = pred.y + pred.vy * t - my;
+        t = LATENCY_S + Math.sqrt(px * px + py * py) / speed;
+    }
+    const ax = pred.x + pred.vx * t - mx;
+    const ay = pred.y + pred.vy * t - my;
+    if (range > 0 && Math.sqrt(ax * ax + ay * ay) > range) return null;
     return {
-        vx: (enemy.x - prev.x) * 1000 / dt,
-        vy: (enemy.y - prev.y) * 1000 / dt
+        x: Math.round(pred.x + pred.vx * t),
+        y: Math.round(pred.y + pred.vy * t),
+        t
     };
 }
 
@@ -69,14 +116,54 @@ function _ownProjectileSpeed()
     return _projectileSpeed;
 }
 
-function _isSkipped(name)
+function _ownRange(speed)
 {
-    if (!name) return true;
-    for (let i = 0; i < SKIP_NAME_PARTS.length; i++)
+    let tiles = 0;
+    try
     {
-        if (name.indexOf(SKIP_NAME_PARTS[i]) >= 0) return true;
+        const fns = getFunctions();
+        const own = scanData.ownCharacter;
+        if (own && !own.isNull() && fns.LogicCharacterClient_getWeaponSkill && fns.LogicSkillData_getCastingRange)
+        {
+            const skill = fns.LogicCharacterClient_getWeaponSkill(own);
+            if (skill && !skill.isNull()) tiles = fns.LogicSkillData_getCastingRange(skill) | 0;
+        }
     }
-    return false;
+    catch (_)
+    {}
+    if (tiles > 0 && tiles <= 40) return tiles * RANGE_UNIT * RANGE_MARGIN;
+    return speed * RANGE_FLIGHT_S * RANGE_MARGIN;
+}
+
+function _aimAt(enemy, now)
+{
+    if (!enemy || !enemy.ptr || enemy.ptr.isNull()) return null;
+    const fns = getFunctions();
+    let ex = enemy.x;
+    let ey = enemy.y;
+    let mx = scanData.myX;
+    let my = scanData.myY;
+    try
+    {
+        ex = fns.LogicGameObjectClient_getX(enemy.ptr) | 0;
+        ey = fns.LogicGameObjectClient_getY(enemy.ptr) | 0;
+    }
+    catch (_)
+    {}
+    try
+    {
+        const own = scanData.ownCharacter;
+        if (own && !own.isNull())
+        {
+            mx = fns.LogicGameObjectClient_getX(own) | 0;
+            my = fns.LogicGameObjectClient_getY(own) | 0;
+        }
+    }
+    catch (_)
+    {}
+    const speed = _ownProjectileSpeed();
+    const pred = _sample(enemy.gid, ex, ey, enemy.moveSpeed, now);
+    return _solve(mx, my, pred, speed, _ownRange(speed));
 }
 
 function _pickTarget(now)
@@ -85,6 +172,8 @@ function _pickTarget(now)
     const myTeam = scanData.myTeamId | 0;
     const mx = scanData.myX;
     const my = scanData.myY;
+    const speed = _ownProjectileSpeed();
+    const range = _ownRange(speed);
     let best = null;
     let bestT = Infinity;
 
@@ -95,23 +184,19 @@ function _pickTarget(now)
         if (e.kind !== "player") continue;
         if (_isSkipped(e.brawlerName)) continue;
         if ((e.teamId | 0) === myTeam) continue;
-        const dx = e.x - mx;
-        const dy = e.y - my;
-        const dist = Math.sqrt(dx * dx + dy * dy);
-        if (dist > RANGE) continue;
-        const t = dist / (_projectileSpeed > 0 ? _projectileSpeed : SPEED_FALLBACK);
-        if (t < bestT)
+        const pred = _sample(e.gid, e.x, e.y, e.moveSpeed, now);
+        const aim = _solve(mx, my, pred, speed, range);
+        if (!aim) continue;
+        if (aim.t < bestT)
         {
-            bestT = t;
-            best = { enemy: e, dist, dx, dy };
+            bestT = aim.t;
+            best = { enemy: e, aim };
         }
     }
     if (!best) return null;
 
-    const vel = _velOf(best.enemy, now);
-    const lead = bestT;
-    _aimX = Math.round(best.enemy.x + vel.vx * lead);
-    _aimY = Math.round(best.enemy.y + vel.vy * lead);
+    _aimX = best.aim.x;
+    _aimY = best.aim.y;
     return best.enemy;
 }
 
@@ -147,10 +232,12 @@ export function setupAimbot()
             {
                 if (!state.aimbot) return;
                 if (!_target || !_target.ptr || _target.ptr.isNull()) return;
+                const aim = _aimAt(_target, Date.now());
+                if (!aim) return;
                 try
                 {
-                    this.context.x1 = _aimX | 0;
-                    this.context.x2 = _aimY | 0;
+                    this.context.x1 = aim.x | 0;
+                    this.context.x2 = aim.y | 0;
                     this.context.x6 = Number(_target.gid) >>> 0;
                 }
                 catch (_)
@@ -174,7 +261,6 @@ export function updateAimbot()
         _target = null;
         return;
     }
-    _ownProjectileSpeed();
     _target = _pickTarget(Date.now());
 }
 
