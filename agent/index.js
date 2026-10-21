@@ -34,6 +34,14 @@ import
 }
 from "./features/autododge.js";
 
+import
+{
+    resetAimbot,
+    setupAimbot,
+    updateAimbot
+}
+from "./features/aimbot.js";
+
 let _base = null;
 let _lastBattle = null;
 let _installed = false;
@@ -64,6 +72,7 @@ export function install()
     initScanner(_base);
     watchTileChanges(_base);
     setupAutododge();
+    setupAimbot();
 
     Interceptor.attach(_base.add(offsets.LogicBattleModeClient_update),
     {
@@ -77,6 +86,7 @@ export function install()
                 _lastBattle = bm;
                 resetScannerCache();
                 resetAutododge();
+                resetAimbot();
                 notifyBattleModeChanged(bm);
             }
 
@@ -84,6 +94,7 @@ export function install()
             try
             {
                 updateScanner(bm, now);
+                updateAimbot();
             }
             catch (e)
             {

@@ -84,3 +84,4 @@ export function setupSafe(label, fn)
 }
 
 setState("autododge", true);
+setState("aimbot", true);
