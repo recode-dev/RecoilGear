@@ -94,8 +94,38 @@ function _sample(gid, x, y, moveSpeed, now)
         vx = vx / mag * cap;
         vy = vy / mag * cap;
     }
-    _track.set(gid, { x, y, t: now, vx, vy });
-    return { x, y, vx, vy };
+    const hist = prev && prev.hist ? prev.hist : [];
+    hist.push({ x, y, t: now });
+    while (hist.length > 8) hist.shift();
+    let juke = false;
+    if (hist.length >= 4)
+    {
+        const first = hist[0];
+        const span = (now - first.t) / 1000;
+        if (span > 0.03)
+        {
+            const mvx = (x - first.x) / span;
+            const mvy = (y - first.y) / span;
+            const meanMag = Math.sqrt(mvx * mvx + mvy * mvy);
+            juke = mag > 1.5 * (meanMag + 40);
+        }
+    }
+    if (juke)
+    {
+        let bx = 0;
+        let by = 0;
+        for (let i = 0; i < hist.length; i++)
+        {
+            bx += hist[i].x;
+            by += hist[i].y;
+        }
+        bx /= hist.length;
+        by /= hist.length;
+        _track.set(gid, { x, y, t: now, vx, vy, hist });
+        return { x: bx, y: by, vx: 0, vy: 0, juke: true };
+    }
+    _track.set(gid, { x, y, t: now, vx, vy, hist });
+    return { x, y, vx, vy, juke: false };
 }
 
 function _solve(mx, my, pred, speed, range)
