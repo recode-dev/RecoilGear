@@ -20,7 +20,7 @@ import
 }
 from "../utils/flags.js";
 
-const RANGE = 3600;
+const RANGE = 20000;
 const SPEED_FALLBACK = 3000;
 const SPEED_REFRESH_MS = 500;
 
@@ -136,6 +136,14 @@ export function setupAimbot()
             {
                 if (!state.aimbot) return;
                 if (!_target || !_target.ptr || _target.ptr.isNull()) return;
+                try
+                {
+                    this.context.x1 = _aimX | 0;
+                    this.context.x2 = _aimY | 0;
+                    this.context.x6 = Number(_target.gid) >>> 0;
+                }
+                catch (_)
+                {}
                 try
                 {
                     const screen = args[0];
