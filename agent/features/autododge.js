@@ -332,11 +332,16 @@ function _collect(mx, my, myRadius, nowMs)
 {
     const zoneSq = AD_AWARE * AD_AWARE;
     const bodyR = myRadius + AD_SKIN;
-    const list = scanData.projectiles || [];
+    const list = (scanData.projectiles || []).slice().sort((a, b) =>
+    {
+        const da = (a.x - mx) * (a.x - mx) + (a.y - my) * (a.y - my);
+        const db = (b.x - mx) * (b.x - mx) + (b.y - my) * (b.y - my);
+        return da - db;
+    });
 
     _hazardN = 0;
 
-    for (let i = 0; i < list.length && i < 16; i++)
+    for (let i = 0; i < list.length; i++)
     {
         const p = list[i];
         if (!p) continue;
