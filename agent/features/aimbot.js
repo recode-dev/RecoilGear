@@ -38,6 +38,7 @@ const RANGE_UNIT = 300;
 const SPEED_CAP_MUL = 1.35;
 const VEL_SMOOTH = 0.6;
 const LEAD_CLAMP = 0.35;
+const LEAD_RAMP_DIST = 1200;
 const SPEED_DEFAULT_CAP = 1200;
 const SPEED_SPIKE_MUL = 1.6;
 const STICKY_MARGIN = 1.12;
@@ -133,7 +134,8 @@ function _solve(mx, my, pred, speed, range)
     const cdx = pred.x - mx;
     const cdy = pred.y - my;
     const curDist = Math.sqrt(cdx * cdx + cdy * cdy);
-    const maxLead = curDist * LEAD_CLAMP;
+    const leadClamp = LEAD_CLAMP * Math.min(1, curDist / LEAD_RAMP_DIST);
+    const maxLead = curDist * leadClamp;
     let t = LATENCY_S + curDist / speed;
     let lx = 0;
     let ly = 0;
@@ -243,6 +245,7 @@ function _pickTarget(now)
     const range = _ownRange(speed);
     let best = null;
     let bestD = Infinity;
+    let bestPred = null;
     let cur = null;
     let curD = Infinity;
 
@@ -254,6 +257,7 @@ function _pickTarget(now)
         if (_isSkipped(e.brawlerName)) continue;
         if ((e.teamId | 0) === myTeam) continue;
         if (losCheck(mx, my, e.x, e.y, BLOCKS_PROJECTILES) === false) continue;
+        const pred = _sample(e.gid, e.x, e.y, e.moveSpeed, now);
         const dx = e.x - mx;
         const dy = e.y - my;
         const d = Math.sqrt(dx * dx + dy * dy);
@@ -262,6 +266,7 @@ function _pickTarget(now)
         {
             bestD = d;
             best = e;
+            bestPred = pred;
         }
         if (_target && e.gid === _target.gid)
         {
@@ -271,11 +276,19 @@ function _pickTarget(now)
     }
 
     let pick;
-    if (cur && best && curD <= bestD * STICKY_MARGIN) pick = cur;
-    else pick = best;
-    if (!pick) return null;
+    let pred;
+    if (cur && best && curD <= bestD * STICKY_MARGIN)
+    {
+        pick = cur;
+        pred = cur.gid === best.gid ? bestPred : _sample(cur.gid, cur.x, cur.y, cur.moveSpeed, now);
+    }
+    else
+    {
+        pick = best;
+        pred = bestPred;
+    }
+    if (!pick || !pred) return null;
 
-    const pred = _sample(pick.gid, pick.x, pick.y, pick.moveSpeed, now);
     const aim = _solve(mx, my, pred, speed, range);
     if (!aim) return null;
     _aimX = aim.x;
@@ -321,7 +334,6 @@ export function setupAimbot()
                 {
                     this.context.x1 = aim.x | 0;
                     this.context.x2 = aim.y | 0;
-                    this.context.x6 = Number(_target.gid) >>> 0;
                 }
                 catch (_)
                 {}
