@@ -50,6 +50,7 @@ var _aimY = 0;
 var _track = new Map();
 var _projectileSpeed = SPEED_FALLBACK;
 var _speedAt = 0;
+var _ownBeam = false;
 var _rangeCache = 0;
 var _rangeAt = 0;
 var _hooks = false;
@@ -135,6 +136,11 @@ function _solve(mx, my, pred, speed, range)
     const cdx = pred.x - mx;
     const cdy = pred.y - my;
     const curDist = Math.sqrt(cdx * cdx + cdy * cdy);
+    if (_ownBeam)
+    {
+        if (range > 0 && curDist > range) return null;
+        return { x: Math.round(pred.x), y: Math.round(pred.y), t: LATENCY_S };
+    }
     const leadClamp = LEAD_CLAMP * Math.min(1, curDist / LEAD_RAMP_DIST);
     const maxLead = curDist * leadClamp;
     let t = LATENCY_S + curDist / speed;
@@ -181,6 +187,7 @@ function _ownProjectileSpeed()
         if (!data || data.isNull()) return _projectileSpeed;
         const raw = data.add(offsets.ProjectileData_speed).readU32() | 0;
         if (raw >= 300 && raw <= 8500) _projectileSpeed = raw;
+        _ownBeam = !!(fns.LogicProjectileData_isBeam && fns.LogicProjectileData_isBeam(data));
     }
     catch (_)
     {}
