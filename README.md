@@ -12,11 +12,6 @@ through `setClientPredictionMoveTo` plus a signed `ClientInput`.
 
 `autododge` is enabled on start. Other flags stay off.
 
-## Build
-
-`node tools/bundle.js` inlines every module into a single file and writes the next
-`recoilgear_<n>.js` (version bumps automatically on each build).
-
 ## Logging
 
 Off by default. When enabled, lines go to `Documents/recoilgear.log` inside the app container,

@@ -303,6 +303,9 @@ function _pickTarget(now)
     let best = null;
     let bestD = Infinity;
     let bestPred = null;
+    let calm = null;
+    let calmD = Infinity;
+    let calmPred = null;
     let cur = null;
     let curD = Infinity;
 
@@ -319,6 +322,12 @@ function _pickTarget(now)
         const dy = e.y - my;
         const d = Math.sqrt(dx * dx + dy * dy);
         if (range > 0 && d > range) continue;
+        if (!pred.juke && d < calmD)
+        {
+            calmD = d;
+            calm = e;
+            calmPred = pred;
+        }
         if (d < bestD)
         {
             bestD = d;
@@ -330,6 +339,13 @@ function _pickTarget(now)
             cur = e;
             curD = d;
         }
+    }
+
+    if (calm && calmD <= bestD * 1.4)
+    {
+        best = calm;
+        bestD = calmD;
+        bestPred = calmPred;
     }
 
     let pick;
