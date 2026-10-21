@@ -42,6 +42,7 @@ const LEAD_RAMP_DIST = 1200;
 const SPEED_DEFAULT_CAP = 1200;
 const SPEED_SPIKE_MUL = 1.6;
 const STICKY_MARGIN = 1.12;
+const AIM_JITTER = 40;
 
 var _target = null;
 var _aimX = 0;
@@ -227,7 +228,11 @@ function _aimAt(enemy, now)
     const my = scanData.myY;
     const speed = _ownProjectileSpeed();
     const pred = _sample(enemy.gid, ex, ey, enemy.moveSpeed, now);
-    return _solve(mx, my, pred, speed, _ownRange(speed));
+    const aim = _solve(mx, my, pred, speed, _ownRange(speed));
+    if (!aim) return null;
+    aim.x += Math.round((Math.random() * 2 - 1) * AIM_JITTER);
+    aim.y += Math.round((Math.random() * 2 - 1) * AIM_JITTER);
+    return aim;
 }
 
 function _validEnemyPtr(p)
