@@ -618,7 +618,11 @@ function _escapeSum(mx, my)
 function _bdcPick(mx, my, myR, ix, iy, speed, wallMul, momX, momY, momOn)
 {
     _bdcSelN = 0;
-    for (let i = 0; i < _threatN; i++) if (_bdcAimedOne(_threats[i], mx, my, myR)) _bdcSel[_bdcSelN++] = i;
+    for (let i = 0; i < _threatN; i++)
+    {
+        const p = _threats[i], dx0 = p.x - mx, dy0 = p.y - my;
+        if (dx0 * dx0 + dy0 * dy0 <= 4840000) _bdcSel[_bdcSelN++] = i;
+    }
     if (_bdcSelN === 0) return _bdcHaveLast ? { x: _bdcLastX, y: _bdcLastY } : { x: 0, y: 0 };
 
     let prim = _bdcSel[0], ptd = BDC_FAR;
@@ -647,24 +651,28 @@ function _bdcPick(mx, my, myR, ix, iy, speed, wallMul, momX, momY, momOn)
     const clearOf = (dx, dy) =>
     {
         let best = BDC_FAR;
-        const px0 = mx + dx * 60, py0 = my + dy * 60;
-        for (let s = 1; s <= 8; s++)
+        for (let i = 0; i < _bdcSelN; i++)
         {
-            const t = s * 0.15, px = mx + dx * speed * t, py = my + dy * speed * t;
-            for (let i = 0; i < _bdcSelN; i++)
-            {
-                const p = _threats[_bdcSel[i]];
-                const tx = p.cone ? p.ax : p.x + p.vx * t;
-                const ty = p.cone ? p.ay : p.y + p.vy * t;
-                const dd = _hyp(tx - px, ty - py) - myR - p.rad - _margin(_hyp(p.vx, p.vy));
-                if (dd < best) best = dd;
-            }
+            const p = _threats[_bdcSel[i]];
+            const rx = p.x - mx, ry = p.y - my;
+            const wvx = p.vx - dx * speed, wvy = p.vy - dy * speed;
+            const w2 = wvx * wvx + wvy * wvy;
+            let t = w2 > 1e-6 ? -(rx * wvx + ry * wvy) / w2 : 0;
+            if (t < 0) t = 0; else if (t > 1.2) t = 1.2;
+            const d = _hyp(rx + wvx * t, ry + wvy * t) - myR - p.rad - _margin(_hyp(p.vx, p.vy));
+            if (d < best) best = d;
         }
         const ens = scanData.enemies || [];
-        for (let q = 0; q < ens.length && q < 8; q++) { const en = ens[q]; if (!en) continue; const ex = en.x, ey = en.y; if (!Number.isFinite(ex) || !Number.isFinite(ey)) continue; const dd = _hyp(ex - px0, ey - py0) - myR - 120; if (dd < best) best = dd; }
-        for (let s = 1; s <= 2; s++)
+        for (let q = 0; q < ens.length && q < 8; q++)
         {
-            const d = 130 * s;
+            const en = ens[q]; if (!en) continue;
+            const ex = en.x, ey = en.y; if (!Number.isFinite(ex) || !Number.isFinite(ey)) continue;
+            const d = _hyp(ex - mx, ey - my) - myR - 120;
+            if (d < best) best = d;
+        }
+        for (let s2 = 1; s2 <= 2; s2++)
+        {
+            const d = 130 * s2;
             if (isBlockedWide(mx + dx * d, my + dy * d, AD_WALL_BODY, BLOCKS_MOVEMENT)) best -= 700;
         }
         return best;
