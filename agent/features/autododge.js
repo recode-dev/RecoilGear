@@ -69,39 +69,38 @@ const AD_AWARE = 3200;
 const AD_FALLBACK_RANGE = 2800;
 const AD_SKIN = 50;
 const AD_SPAWN_MARGIN = 60;
-const AD_REACH = 380;
 const AD_TICK_MS = 16;
 const AD_TICK_MAX_MS = 250;
 const AD_WALL_BODY = 240;
 const AD_HAZARD_MAX = 96;
 const AD_CAP_MAX = 16;
 const BD_SAFETY_MARGIN = 28;
-const BD_THREAT_MAX = 160;
-const WARN_MUL = 4;
-const WARN_T = -1;
+const BD_THREAT_MAX = 200;
 const DYN_SPEED = 5000;
 const FAR_BIG = 1.0e18;
 const PROJ_RADIUS_DEFAULT = 150;
 const OWN_RADIUS_MIN = 40;
 const OWN_RADIUS_MAX = 200;
 
-const HOLD_MIN_MS = 80;
-const HOLD_MAX_MS = 200;
-const HOLD_DOT = 0.9;
-const HOLD_BIAS = 100;
-const HOLD_RETURN_MARGIN = 50;
-const PRIM_HYST = 0.8;
-const PRIM_TOL = 250;
+const CAND_ANGLES = 24;
+const CAND_RADII = [150, 250, 350, 450];
+const TIME_GRID = [0, 0.05, 0.1, 0.15, 0.25, 0.35, 0.5, 0.65, 0.85, 1.1];
+const TGRID_N = TIME_GRID.length;
+const SWITCH_MARGIN_EARLY = 180;
+const SWITCH_MARGIN_LATE = 60;
+const SWITCH_EARLY_MS = 180;
+const UNSAFE_THRESHOLD = -80;
+const SAFE_IDLE_THRESHOLD = 100;
+const ARRIVED_DIST = 30;
 const SEND_DEADZONE = 32;
 
 var _initDone = false;
 var _hazards = [], _hazardN = 0;
 var _threats = [], _threatN = 0;
-var _sel = [], _selN = 0;
-var _holdX = 0, _holdY = 0, _holdSince = 0, _haveHold = false;
-var _primX = 0, _primY = 0, _havePrim = false;
+var _threatT = [];
 var _lastTick = 0;
-var _lastTX = 1e9, _lastTY = 1e9, _lastSendT = 0, _calmSince = 0, _calmSent = false;
+var _tx = 0, _ty = 0, _tSince = 0, _haveTarget = false, _idle = true;
+var _lastTX = 1e9, _lastTY = 1e9, _lastSendT = 0;
 
 function _ok(v, lo, hi) { return v >= lo && v <= hi; }
 function _nowMs() { return Date.now(); }
@@ -110,8 +109,9 @@ function _hyp(a, b) { return Math.sqrt(a * a + b * b); }
 function _initPools()
 {
     if (_initDone) return;
-    for (let i = 0; i < BD_THREAT_MAX; i++) { _sel.push(0); _threats.push({ x: 0, y: 0, vx: 0, vy: 0, rad: 0 }); }
-    for (let i = 0; i < AD_HAZARD_MAX; i++) _hazards.push({ x: 0, y: 0, vx: 0, vy: 0, rad: 0, age: 0, fadeBase: 0, fadeK: 0, ax: 0, ay: 0, bx: 0, by: 0, hasSegment: false });
+    for (let i = 0; i < BD_THREAT_MAX; i++) _threats.push({ x: 0, y: 0, vx: 0, vy: 0, rad: 0, totalRad: 0, life: 0 });
+    for (let i = 0; i < BD_THREAT_MAX * TGRID_N; i++) _threatT.push({ x: 0, y: 0 });
+    for (let i = 0; i < AD_HAZARD_MAX; i++) _hazards.push({ x: 0, y: 0, vx: 0, vy: 0, rad: 0, life: 0, ax: 0, ay: 0, bx: 0, by: 0, hasSegment: false });
     _initDone = true;
 }
 
@@ -168,19 +168,6 @@ function _segDist(px, py, ax, ay, bx, by)
     return _hyp(px - (ax + dx * t), py - (ay + dy * t));
 }
 
-function _fadeVel(h, dt, out)
-{
-    let vx = h.vx, vy = h.vy;
-    if (h.fadeBase && h.fadeK)
-    {
-        const cur = h.fadeBase * Math.exp(h.fadeK * (h.age > 0 ? h.age : 0));
-        const nxt = h.fadeBase * Math.exp(h.fadeK * ((h.age > 0 ? h.age : 0) + dt * 1000));
-        if (cur > 1e-6) { const r = nxt / cur; vx *= r; vy *= r; }
-    }
-    out.vx = vx; out.vy = vy;
-    return out;
-}
-
 function _inAware(h, mx, my, zoneSq)
 {
     if (h.hasSegment) { const d = _segDist(mx, my, h.ax, h.ay, h.bx, h.by); return d * d <= zoneSq; }
@@ -216,9 +203,8 @@ function _lifeLeft(p, spec, spd, nowMs)
 function _pushHazard()
 {
     const h = _hazards[_hazardN];
-    h.x = 0; h.y = 0; h.vx = 0; h.vy = 0; h.rad = 0; h.age = 0;
-    h.fadeBase = 0; h.fadeK = 0; h.ax = 0; h.ay = 0; h.bx = 0; h.by = 0;
-    h.hasSegment = false;
+    h.x = 0; h.y = 0; h.vx = 0; h.vy = 0; h.rad = 0; h.life = 0;
+    h.ax = 0; h.ay = 0; h.bx = 0; h.by = 0; h.hasSegment = false;
     _hazardN++;
     return h;
 }
@@ -241,16 +227,16 @@ function _collect(mx, my, myRadius, nowMs)
         if (_isMine(p)) continue;
         if (_myShot(p, mx, my, bodyR)) continue;
         if (_shielded(p, mx, my)) continue;
-        const ageMs = nowMs - (p.spawnedAt || nowMs);
 
         const caps = shapeHazards(p, nowMs);
         for (let c = 0; c < caps.length && c < AD_CAP_MAX; c++)
         {
             const cap = caps[c];
-            if ((cap.t1 - nowMs) / 1000 <= 0) continue;
+            const lifeSec = (cap.t1 - nowMs) / 1000;
+            if (lifeSec <= 0) continue;
             if (_hazardN >= AD_HAZARD_MAX) break;
             const h = _pushHazard();
-            h.rad = cap.radius; h.hasSegment = !!cap.hasSegment;
+            h.rad = cap.radius; h.hasSegment = !!cap.hasSegment; h.life = lifeSec;
             if (cap.hasSegment) { h.ax = cap.ax; h.ay = cap.ay; h.bx = cap.bx; h.by = cap.by; }
             else { h.x = cap.x; h.y = cap.y; }
             if (!_inAware(h, mx, my, zoneSq)) _hazardN--;
@@ -297,64 +283,101 @@ function _collect(mx, my, myRadius, nowMs)
                 if (!losCheck(p.x, p.y, p.x + ux * tHit, p.y + uy * tHit, BLOCKS_PROJECTILES)) continue;
             }
         }
-        const left = _lifeLeft(p, spec, spd, nowMs);
-        if (left <= 10) continue;
+        const leftRaw = _lifeLeft(p, spec, spd, nowMs);
+        if (leftRaw <= 10) continue;
         const gap = _hyp(dx, dy) - bodyR - shotR;
-        if (left < 0.85 * (gap > 0 ? gap : 0)) continue;
-        if (!blob && playerAlong > left + shotR) continue;
+        if (leftRaw < 0.85 * (gap > 0 ? gap : 0)) continue;
+        if (!blob && playerAlong > leftRaw + shotR) continue;
         if (_hazardN >= AD_HAZARD_MAX) break;
+        const lifeSec = leftRaw / spd;
+        if (lifeSec <= 0) continue;
         const h = _pushHazard();
-        h.x = p.x; h.y = p.y; h.vx = vx; h.vy = vy; h.rad = rad;
-        h.age = (spec && (spec.flags & K_FADE)) ? ageMs : 0;
-        if (h.age < 0) h.age = 0;
-        h.fadeBase = spec ? spec.fadeBase : 0;
-        h.fadeK = spec ? spec.fadeK : 0;
+        h.x = p.x; h.y = p.y; h.vx = vx; h.vy = vy; h.rad = rad; h.life = lifeSec;
     }
 }
 
-function _bdPush(x, y, vx, vy, rad)
+function _bdPush(x, y, vx, vy, rad, life)
 {
     if (_threatN >= BD_THREAT_MAX) return;
     const t = _threats[_threatN];
     t.x = x; t.y = y; t.vx = vx; t.vy = vy; t.rad = rad;
+    t.life = life;
+    t.totalRad = rad + _margin(_hyp(vx, vy));
     _threatN++;
 }
 
 function _bdBuildThreats()
 {
-    const vel = { vx: 0, vy: 0 };
     _threatN = 0;
     for (let i = 0; i < _hazardN; i++)
     {
         const h = _hazards[i];
-        if (h.hasSegment) { _bdPush(h.ax, h.ay, 0, 0, h.rad); _bdPush(h.bx, h.by, 0, 0, h.rad); continue; }
-        _fadeVel(h, 0, vel);
-        _bdPush(h.x, h.y, vel.vx, vel.vy, h.rad);
+        if (h.hasSegment)
+        {
+            _bdPush(h.ax, h.ay, 0, 0, h.rad, h.life);
+            _bdPush(h.bx, h.by, 0, 0, h.rad, h.life);
+            continue;
+        }
+        _bdPush(h.x, h.y, h.vx, h.vy, h.rad, h.life);
     }
 }
 
-function _pointDanger(p, mx, my, r, tmax)
-{
-    const dx = mx - p.x, dy = my - p.y;
-    if (dx * dx + dy * dy <= r * r) return true;
-    const c1 = dx * p.vx + dy * p.vy;
-    if (c1 <= 0) return false;
-    const c2 = p.vx * p.vx + p.vy * p.vy;
-    if (c2 <= 0) return false;
-    const t = c1 / c2;
-    if (t > tmax) return false;
-    const cx = p.x + p.vx * t, cy = p.y + p.vy * t;
-    return (mx - cx) * (mx - cx) + (my - cy) * (my - cy) <= r * r;
-}
-
-function _bdDanger(mx, my, myR, mul, tmax)
+function _precomputeThreats()
 {
     for (let i = 0; i < _threatN; i++)
     {
         const p = _threats[i];
-        if (_pointDanger(p, mx, my, myR + p.rad + _margin(_hyp(p.vx, p.vy)) * mul, tmax)) return true;
+        const base = i * TGRID_N;
+        const life = p.life;
+        for (let t = 0; t < TGRID_N; t++)
+        {
+            const tm = TIME_GRID[t];
+            const slot = _threatT[base + t];
+            if (tm > life) { slot.x = FAR_BIG; slot.y = FAR_BIG; }
+            else { slot.x = p.x + p.vx * tm; slot.y = p.y + p.vy * tm; }
+        }
     }
-    return false;
+}
+
+function _scoreCandidate(cx, cy, mx, my, speed, myR)
+{
+    const dx = cx - mx, dy = cy - my;
+    const dist = _hyp(dx, dy);
+    const invT = dist > 0 ? speed / dist : 0;
+    let minClear = FAR_BIG;
+
+    for (let t = 0; t < TGRID_N; t++)
+    {
+        const tm = TIME_GRID[t];
+        let px, py;
+        if (dist < 1) { px = mx; py = my; }
+        else if (tm * invT >= 1) { px = cx; py = cy; }
+        else { const f = tm * invT; px = mx + dx * f; py = my + dy * f; }
+
+        for (let i = 0; i < _threatN; i++)
+        {
+            const slot = _threatT[i * TGRID_N + t];
+            const ex = px - slot.x, ey = py - slot.y;
+            const d2 = ex * ex + ey * ey;
+            const tr = myR + _threats[i].totalRad;
+            const d = Math.sqrt(d2) - tr;
+            if (d < minClear) minClear = d;
+            if (minClear < -600) return minClear;
+        }
+    }
+
+    const ens = scanData.enemies || [];
+    for (let q = 0; q < ens.length && q < 8; q++)
+    {
+        const en = ens[q];
+        if (!en) continue;
+        const ex = en.x, ey = en.y;
+        if (!Number.isFinite(ex) || !Number.isFinite(ey)) continue;
+        const d = _hyp(ex - cx, ey - cy) - myR - 120;
+        if (d < minClear) minClear = d;
+    }
+
+    return minClear;
 }
 
 function _clampToMap(v, maxTiles)
@@ -384,116 +407,7 @@ function _sendMove(tx, ty)
     catch (e) { logWarn("autododge send failed", { err: String(e && e.message || e) }); return false; }
 }
 
-function _forgetHold()
-{
-    _haveHold = false; _holdX = 0; _holdY = 0; _holdSince = 0;
-    _havePrim = false; _primX = 0; _primY = 0;
-}
-
-function _applyHold(dir, now)
-{
-    if (!_haveHold)
-    {
-        _holdX = dir.x; _holdY = dir.y; _holdSince = now; _haveHold = true;
-        return { x: dir.x, y: dir.y };
-    }
-    const dt = now - _holdSince;
-    if (dt < HOLD_MIN_MS) return { x: _holdX, y: _holdY };
-    const dot = dir.x * _holdX + dir.y * _holdY;
-    if (dt < HOLD_MAX_MS && dot >= HOLD_DOT) return { x: _holdX, y: _holdY };
-    _holdX = dir.x; _holdY = dir.y; _holdSince = now;
-    return { x: dir.x, y: dir.y };
-}
-
-function _pickDir(mx, my, myR, speed)
-{
-    _selN = 0;
-    for (let i = 0; i < _threatN; i++)
-    {
-        const p = _threats[i], dx0 = p.x - mx, dy0 = p.y - my;
-        if (dx0 * dx0 + dy0 * dy0 <= 4840000) _sel[_selN++] = i;
-    }
-    if (_selN === 0) return _haveHold ? { x: _holdX, y: _holdY } : { x: 0, y: 0 };
-
-    let prim = _sel[0], ptd = FAR_BIG;
-    for (let i = 0; i < _selN; i++)
-    {
-        const p = _threats[_sel[i]];
-        let d = _hyp(p.x - mx, p.y - my) - p.rad;
-        if (_havePrim)
-        {
-            const dp = _hyp(p.x - _primX, p.y - _primY);
-            if (dp < PRIM_TOL) d *= PRIM_HYST;
-        }
-        if (d < ptd) { ptd = d; prim = _sel[i]; }
-    }
-    const pp = _threats[prim];
-    _primX = pp.x; _primY = pp.y; _havePrim = true;
-
-    let ux = pp.vx, uy = pp.vy, ul = _hyp(ux, uy);
-    if (ul < 1) { ux = mx - pp.x; uy = my - pp.y; ul = _hyp(ux, uy); }
-    if (ul < 1) { ux = 1; uy = 0; ul = 1; }
-    ux /= ul; uy /= ul;
-    const pspd = _hyp(pp.vx, pp.vy);
-    const nx = -uy, ny = ux;
-
-    const dirs = [];
-    const add = (x, y, tag) => { const l = _hyp(x, y); if (l > 1e-6) dirs.push({ x: x / l, y: y / l, tag }); };
-    add(nx, ny, 1); add(-nx, -ny, 1);
-    add(nx + ux * 0.7, ny + uy * 0.7, 1); add(-nx + ux * 0.7, -ny + uy * 0.7, 1);
-    add(nx - ux * 0.7, ny - uy * 0.7, 1); add(-nx - ux * 0.7, -ny - uy * 0.7, 1);
-    if (pspd < 150) { add(ux, uy, 2); add(-ux, -uy, 3); } else add(-ux, -uy, 2);
-    for (let i = 0; i < 16; i++) { const a2 = Math.PI * 2 * i / 16; add(Math.cos(a2), Math.sin(a2), 0); }
-
-    const clearOf = (dx, dy) =>
-    {
-        let best = FAR_BIG;
-        for (let i = 0; i < _selN; i++)
-        {
-            const p = _threats[_sel[i]];
-            const rx = p.x - mx, ry = p.y - my;
-            const wvx = p.vx - dx * speed, wvy = p.vy - dy * speed;
-            const w2 = wvx * wvx + wvy * wvy;
-            let t = w2 > 1e-6 ? -(rx * wvx + ry * wvy) / w2 : 0;
-            if (t < 0) t = 0; else if (t > 1.2) t = 1.2;
-            const d = _hyp(rx + wvx * t, ry + wvy * t) - myR - p.rad - _margin(_hyp(p.vx, p.vy));
-            if (d < best) best = d;
-        }
-        const ens = scanData.enemies || [];
-        for (let q = 0; q < ens.length && q < 8; q++)
-        {
-            const en = ens[q];
-            if (!en) continue;
-            const ex = en.x, ey = en.y;
-            if (!Number.isFinite(ex) || !Number.isFinite(ey)) continue;
-            const d = _hyp(ex - mx, ey - my) - myR - 120;
-            if (d < best) best = d;
-        }
-        for (let s2 = 1; s2 <= 2; s2++)
-        {
-            const d = 130 * s2;
-            if (isBlockedWide(mx + dx * d, my + dy * d, AD_WALL_BODY, BLOCKS_MOVEMENT)) best -= 700;
-        }
-        return best;
-    };
-
-    let bi = 0, bs = -FAR_BIG;
-    for (let i = 0; i < dirs.length; i++)
-    {
-        const d = dirs[i];
-        let c = clearOf(d.x, d.y) + (d.tag === 1 ? 45 : 0) - (d.tag === 2 ? 70 : 0) - (d.tag === 3 ? 160 : 0);
-        if (_haveHold) c += (d.x * _holdX + d.y * _holdY) * HOLD_BIAS;
-        if (c > bs) { bs = c; bi = i; }
-    }
-
-    if (_haveHold)
-    {
-        const cH = clearOf(_holdX, _holdY);
-        if (cH >= bs - HOLD_RETURN_MARGIN) return { x: _holdX, y: _holdY };
-    }
-
-    return dirs[bi];
-}
+function _resetTarget() { _haveTarget = false; _tx = 0; _ty = 0; _tSince = 0; }
 
 function _adUpdate(mx, my)
 {
@@ -503,29 +417,70 @@ function _adUpdate(mx, my)
     const speed = _speed(), myR = _ownRadius();
     _collect(mx, my, myR, now);
     _bdBuildThreats();
-    if (_threatN === 0) { _forgetHold(); return false; }
 
-    if (_bdDanger(mx, my, myR, WARN_MUL, WARN_T) || _bdDanger(mx, my, myR, 2.0, 1.2))
+    if (_threatN === 0)
     {
-        _calmSince = now; _calmSent = false;
-        let dir = _pickDir(mx, my, myR, speed);
-        dir = _applyHold(dir, now);
-        _sendMove(Math.round(mx + dir.x * AD_REACH), Math.round(my + dir.y * AD_REACH));
-        return true;
+        if (!_idle) { _sendMove(Math.round(mx), Math.round(my)); _idle = true; }
+        _resetTarget();
+        return false;
     }
 
-    if (!_calmSent && now - _calmSince > 350)
+    _precomputeThreats();
+
+    if (_haveTarget && _hyp(mx - _tx, my - _ty) < ARRIVED_DIST) _resetTarget();
+
+    let bestX = mx, bestY = my;
+    let bestScore = _scoreCandidate(mx, my, mx, my, speed, myR);
+
+    for (let a = 0; a < CAND_ANGLES; a++)
     {
-        _sendMove(Math.round(mx), Math.round(my));
-        _calmSent = true;
-        _forgetHold();
+        const ang = Math.PI * 2 * a / CAND_ANGLES;
+        const ux = Math.cos(ang), uy = Math.sin(ang);
+        for (let r = 0; r < CAND_RADII.length; r++)
+        {
+            const cx = mx + ux * CAND_RADII[r];
+            const cy = my + uy * CAND_RADII[r];
+            if (isBlockedWide(cx, cy, AD_WALL_BODY, BLOCKS_MOVEMENT)) continue;
+            const sc = _scoreCandidate(cx, cy, mx, my, speed, myR);
+            if (sc > bestScore) { bestScore = sc; bestX = cx; bestY = cy; }
+        }
     }
-    return false;
+
+    let chosenX = bestX, chosenY = bestY, chosenScore = bestScore;
+
+    if (_haveTarget)
+    {
+        const curScore = _scoreCandidate(_tx, _ty, mx, my, speed, myR);
+        const age = now - _tSince;
+        const margin = age < SWITCH_EARLY_MS ? SWITCH_MARGIN_EARLY : SWITCH_MARGIN_LATE;
+        if (curScore > UNSAFE_THRESHOLD && curScore >= bestScore - margin)
+        {
+            chosenX = _tx; chosenY = _ty; chosenScore = curScore;
+        }
+    }
+
+    if (!_haveTarget || chosenX !== _tx || chosenY !== _ty)
+    {
+        _tx = chosenX; _ty = chosenY; _tSince = now; _haveTarget = true;
+    }
+
+    const idleNow = chosenScore > SAFE_IDLE_THRESHOLD && _hyp(chosenX - mx, chosenY - my) < ARRIVED_DIST;
+    if (idleNow)
+    {
+        if (!_idle) { _sendMove(Math.round(mx), Math.round(my)); _idle = true; }
+        _resetTarget();
+    }
+    else
+    {
+        _sendMove(Math.round(chosenX), Math.round(chosenY));
+        _idle = false;
+    }
+    return !idleNow;
 }
 
 export function setupAutododge() { enableProjectileTracking(); }
 
-export function resetAutododge() { _forgetHold(); resetProfiles(); }
+export function resetAutododge() { _resetTarget(); _idle = true; resetProfiles(); }
 
 export function updateAutododge()
 {
