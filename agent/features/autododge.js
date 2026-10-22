@@ -1,65 +1,12 @@
-import
-{
-    sendCommand
-}
-from "../core/commands.js";
-import
-{
-    getFunctions
-}
-from "../core/functions.js";
-import
-{
-    offsets
-}
-from "../core/offsets.js";
-import
-{
-    enableProjectileTracking,
-    scanData
-}
-from "../core/scanner.js";
-import
-{
-    state
-}
-from "../utils/flags.js";
-import
-{
-    logWarn
-}
-from "../utils/logger.js";
-import
-{
-    K_BLOB,
-    K_DROP,
-    K_FADE,
-    K_LOCKPATH,
-    fitOf,
-    kindOf
-}
-from "../helpers/dodge_kinds.js";
-import
-{
-    blocksLinear,
-    noteBurstDeath,
-    resetProfiles,
-    shapeHazards
-}
-from "../helpers/dodge_profiles.js";
-import
-{
-    BLOCKS_MOVEMENT,
-    BLOCKS_PROJECTILES,
-    TILE_SIZE,
-    getWallCacheH,
-    getWallCacheW,
-    isBlockedAt,
-    isBlockedWide,
-    losCheck,
-    traceWallHit
-}
-from "../utils/wallCache.js";
+import { sendCommand } from "../core/commands.js";
+import { getFunctions } from "../core/functions.js";
+import { offsets } from "../core/offsets.js";
+import { enableProjectileTracking, scanData } from "../core/scanner.js";
+import { state } from "../utils/flags.js";
+import { logWarn } from "../utils/logger.js";
+import { K_BLOB, K_DROP, K_FADE, K_LOCKPATH, fitOf, kindOf } from "../helpers/dodge_kinds.js";
+import { blocksLinear, noteBurstDeath, resetProfiles, shapeHazards } from "../helpers/dodge_profiles.js";
+import { BLOCKS_MOVEMENT, BLOCKS_PROJECTILES, TILE_SIZE, getWallCacheH, getWallCacheW, isBlockedAt, isBlockedWide, losCheck, traceWallHit } from "../utils/wallCache.js";
 
 const MOVE_INPUT_TYPE = 2;
 const DODGE_CHAR_SPEED = 720;
@@ -99,7 +46,7 @@ var _threats = [], _threatN = 0;
 var _threatT = [];
 var _lastTick = 0;
 var _tx = 0, _ty = 0, _idle = true;
-var _lastTX = 1e9, _lastTY = 1e9, _lastSendT = 0;
+var _lastTX = 1e9, _lastTY = 1e9;
 
 function _ok(v, lo, hi) { return v >= lo && v <= hi; }
 function _nowMs() { return Date.now(); }
@@ -108,9 +55,18 @@ function _hyp(a, b) { return Math.sqrt(a * a + b * b); }
 function _initPools()
 {
     if (_initDone) return;
-    for (let i = 0; i < BD_THREAT_MAX; i++) _threats.push({ x: 0, y: 0, vx: 0, vy: 0, rad: 0, totalRad: 0, life: 0 });
-    for (let i = 0; i < BD_THREAT_MAX * TGRID_N; i++) _threatT.push({ x: 0, y: 0 });
-    for (let i = 0; i < AD_HAZARD_MAX; i++) _hazards.push({ x: 0, y: 0, vx: 0, vy: 0, rad: 0, life: 0, ax: 0, ay: 0, bx: 0, by: 0, hasSegment: false });
+    for (let i = 0; i < BD_THREAT_MAX; i++)
+    {
+        _threats.push({ x: 0, y: 0, vx: 0, vy: 0, rad: 0, totalRad: 0, life: 0 });
+    }
+    for (let i = 0; i < BD_THREAT_MAX * TGRID_N; i++)
+    {
+        _threatT.push({ x: 0, y: 0 });
+    }
+    for (let i = 0; i < AD_HAZARD_MAX; i++)
+    {
+        _hazards.push({ x: 0, y: 0, vx: 0, vy: 0, rad: 0, life: 0, ax: 0, ay: 0, bx: 0, by: 0, hasSegment: false });
+    }
     _initDone = true;
 }
 
@@ -124,7 +80,12 @@ function _speed()
 function _ownRadius()
 {
     const r = scanData.myRadius;
-    if (r > 1) { if (r > OWN_RADIUS_MAX) return OWN_RADIUS_MAX; if (r < OWN_RADIUS_MIN) return OWN_RADIUS_MIN; return r; }
+    if (r > 1)
+    {
+        if (r > OWN_RADIUS_MAX) return OWN_RADIUS_MAX;
+        if (r < OWN_RADIUS_MIN) return OWN_RADIUS_MIN;
+        return r;
+    }
     return 120;
 }
 
@@ -138,22 +99,43 @@ function _projectileVel(p)
     return { vx: (p.x - p.lastX) * 1000 / dt, vy: (p.y - p.lastY) * 1000 / dt };
 }
 
-function _ballRadius(p) { if (p.isBeam) return PROJ_RADIUS_DEFAULT * 0.6; return p.radius > 0 ? p.radius : PROJ_RADIUS_DEFAULT; }
-function _traveled(p) { if (!p.spawnX && !p.spawnY) return 0; return _hyp(p.x - p.spawnX, p.y - p.spawnY); }
-function _isMine(p) { const t = p.ownerTeam | 0; return t >= 0 && t === (scanData.myTeamId | 0); }
+function _ballRadius(p)
+{
+    if (p.isBeam) return PROJ_RADIUS_DEFAULT * 0.6;
+    return p.radius > 0 ? p.radius : PROJ_RADIUS_DEFAULT;
+}
+
+function _traveled(p)
+{
+    if (!p.spawnX && !p.spawnY) return 0;
+    return _hyp(p.x - p.spawnX, p.y - p.spawnY);
+}
+
+function _isMine(p)
+{
+    const t = p.ownerTeam | 0;
+    return t >= 0 && t === (scanData.myTeamId | 0);
+}
 
 function _myShot(p, mx, my, bodyR)
 {
     if (!p.spawnX && !p.spawnY) return false;
-    const sx = p.spawnX - mx, sy = p.spawnY - my, nx = p.x - mx, ny = p.y - my;
-    const dSpawn = sx * sx + sy * sy, dNow = nx * nx + ny * ny, r = bodyR + AD_SPAWN_MARGIN;
+    const sx = p.spawnX - mx;
+    const sy = p.spawnY - my;
+    const nx = p.x - mx;
+    const ny = p.y - my;
+    const dSpawn = sx * sx + sy * sy;
+    const dNow = nx * nx + ny * ny;
+    const r = bodyR + AD_SPAWN_MARGIN;
     if (dSpawn > r * r) return false;
     return dNow > dSpawn;
 }
 
 function _shielded(p, mx, my)
 {
-    const dx = p.x - mx, dy = p.y - my, d = _hyp(dx, dy);
+    const dx = p.x - mx;
+    const dy = p.y - my;
+    const d = _hyp(dx, dy);
     if (d <= 1) return false;
     if (isBlockedAt(mx, my, BLOCKS_PROJECTILES)) return false;
     return traceWallHit(mx, my, dx / d, dy / d, d, BLOCKS_PROJECTILES) < d;
@@ -161,16 +143,24 @@ function _shielded(p, mx, my)
 
 function _segDist(px, py, ax, ay, bx, by)
 {
-    const dx = bx - ax, dy = by - ay, lenSq = dx * dx + dy * dy;
+    const dx = bx - ax;
+    const dy = by - ay;
+    const lenSq = dx * dx + dy * dy;
     let t = lenSq < 1e-6 ? 0 : ((px - ax) * dx + (py - ay) * dy) / lenSq;
-    if (t < 0) t = 0; else if (t > 1) t = 1;
+    if (t < 0) t = 0;
+    else if (t > 1) t = 1;
     return _hyp(px - (ax + dx * t), py - (ay + dy * t));
 }
 
 function _inAware(h, mx, my, zoneSq)
 {
-    if (h.hasSegment) { const d = _segDist(mx, my, h.ax, h.ay, h.bx, h.by); return d * d <= zoneSq; }
-    const dx = h.x - mx, dy = h.y - my;
+    if (h.hasSegment)
+    {
+        const d = _segDist(mx, my, h.ax, h.ay, h.bx, h.by);
+        return d * d <= zoneSq;
+    }
+    const dx = h.x - mx;
+    const dy = h.y - my;
     return dx * dx + dy * dy <= zoneSq;
 }
 
@@ -179,7 +169,10 @@ function _kindReach(p, spec, spd)
     let r = spec && spec.maxRange > 0 ? spec.maxRange : 0;
     if (spec && spec.chargedRange > 0 && spd > 3500) r = spec.chargedRange;
     if (r <= 0 && p.castRange > 0) r = p.castRange;
-    if (r <= 0 && p.isThrower && (p.targetX || p.targetY) && p.spawnX && p.spawnY) r = _hyp(p.targetX - p.spawnX, p.targetY - p.spawnY);
+    if (r <= 0 && p.isThrower && (p.targetX || p.targetY) && p.spawnX && p.spawnY)
+    {
+        r = _hyp(p.targetX - p.spawnX, p.targetY - p.spawnY);
+    }
     if (r <= 0) r = AD_FALLBACK_RANGE;
     if (spec && spec.reachAdj) r += spec.reachAdj;
     return r > 0 && r < 70000 ? r : AD_FALLBACK_RANGE;
@@ -202,15 +195,25 @@ function _lifeLeft(p, spec, spd, nowMs)
 function _pushHazard()
 {
     const h = _hazards[_hazardN];
-    h.x = 0; h.y = 0; h.vx = 0; h.vy = 0; h.rad = 0; h.life = 0;
-    h.ax = 0; h.ay = 0; h.bx = 0; h.by = 0; h.hasSegment = false;
+    h.x = 0;
+    h.y = 0;
+    h.vx = 0;
+    h.vy = 0;
+    h.rad = 0;
+    h.life = 0;
+    h.ax = 0;
+    h.ay = 0;
+    h.bx = 0;
+    h.by = 0;
+    h.hasSegment = false;
     _hazardN++;
     return h;
 }
 
 function _collect(mx, my, myRadius, nowMs)
 {
-    const zoneSq = AD_AWARE * AD_AWARE, bodyR = myRadius + AD_SKIN;
+    const zoneSq = AD_AWARE * AD_AWARE;
+    const bodyR = myRadius + AD_SKIN;
     const list = (scanData.projectiles || []).slice().sort((a, b) =>
     {
         const da = (a.x - mx) * (a.x - mx) + (a.y - my) * (a.y - my);
@@ -235,9 +238,21 @@ function _collect(mx, my, myRadius, nowMs)
             if (lifeSec <= 0) continue;
             if (_hazardN >= AD_HAZARD_MAX) break;
             const h = _pushHazard();
-            h.rad = cap.radius; h.hasSegment = !!cap.hasSegment; h.life = lifeSec;
-            if (cap.hasSegment) { h.ax = cap.ax; h.ay = cap.ay; h.bx = cap.bx; h.by = cap.by; }
-            else { h.x = cap.x; h.y = cap.y; }
+            h.rad = cap.radius;
+            h.hasSegment = !!cap.hasSegment;
+            h.life = lifeSec;
+            if (cap.hasSegment)
+            {
+                h.ax = cap.ax;
+                h.ay = cap.ay;
+                h.bx = cap.bx;
+                h.by = cap.by;
+            }
+            else
+            {
+                h.x = cap.x;
+                h.y = cap.y;
+            }
             if (!_inAware(h, mx, my, zoneSq)) _hazardN--;
         }
         if (caps.length > 0 && blocksLinear(p.name)) continue;
@@ -245,31 +260,49 @@ function _collect(mx, my, myRadius, nowMs)
         const name = p.name || "";
         const spec = kindOf(name);
         if (spec && (spec.flags & K_DROP)) continue;
-        const dx = p.x - mx, dy = p.y - my;
+        const dx = p.x - mx;
+        const dy = p.y - my;
         if (dx * dx + dy * dy > zoneSq) continue;
 
-        let vx = p.vx || 0, vy = p.vy || 0;
+        let vx = p.vx || 0;
+        let vy = p.vy || 0;
         if (vx === 0 && vy === 0)
         {
             const est = _projectileVel(p);
-            if (est) { vx = est.vx; vy = est.vy; }
+            if (est)
+            {
+                vx = est.vx;
+                vy = est.vy;
+            }
         }
-        if (!_ok(vx, -1e8, 1e8) || !_ok(vy, -1e8, 1e8)) { vx = 0; vy = 0; }
+        if (!_ok(vx, -1e8, 1e8) || !_ok(vy, -1e8, 1e8))
+        {
+            vx = 0;
+            vy = 0;
+        }
         const flown = _traveled(p);
         if (spec && (spec.flags & K_LOCKPATH) && flown > 120 && p.spawnX && p.spawnY)
         {
-            let base = _hyp(vx, vy); if (base < 1) base = 1;
-            vx = (p.x - p.spawnX) / flown * base; vy = (p.y - p.spawnY) / flown * base;
+            let base = _hyp(vx, vy);
+            if (base < 1) base = 1;
+            vx = (p.x - p.spawnX) / flown * base;
+            vy = (p.y - p.spawnY) / flown * base;
         }
         let spd = _hyp(vx, vy);
-        if (spec && spec.speedMul > 0 && spd > 3500) { vx *= spec.speedMul; vy *= spec.speedMul; spd *= spec.speedMul; }
+        if (spec && spec.speedMul > 0 && spd > 3500)
+        {
+            vx *= spec.speedMul;
+            vy *= spec.speedMul;
+            spd *= spec.speedMul;
+        }
         if (spd < 1) spd = 1;
         const lockPath = !!(spec && (spec.flags & K_LOCKPATH)) || !!p.isBeam;
         const blob = !!(spec && (spec.flags & K_BLOB)) || (!lockPath && !!p.isThrower);
         const fit = fitOf(name);
         const shotR = _ballRadius(p) + (spec ? (spec.growR | 0) : 0);
         const rad = shotR + fit.pad + shotR * fit.grow;
-        const ux = vx / spd, uy = vy / spd;
+        const ux = vx / spd;
+        const uy = vy / spd;
 
         let playerAlong = 0;
         if (!blob)
@@ -291,15 +324,24 @@ function _collect(mx, my, myRadius, nowMs)
         const lifeSec = leftRaw / spd;
         if (lifeSec <= 0) continue;
         const h = _pushHazard();
-        h.x = p.x; h.y = p.y; h.vx = vx; h.vy = vy; h.rad = rad; h.life = lifeSec;
+        h.x = p.x;
+        h.y = p.y;
+        h.vx = vx;
+        h.vy = vy;
+        h.rad = rad;
+        h.life = lifeSec;
     }
 }
 
 function _bdPush(x, y, vx, vy, rad, life)
 {
     if (_threatN >= BD_THREAT_MAX) return;
-    const t = _ tmthreats[_threat *N];
-    t.x inv = x; t.y = yT; t.vx =; vx; t.vy px = vy; t.rad = rad;
+    const t = _threats[_threatN];
+    t.x = x;
+    t.y = y;
+    t.vx = vx;
+    t.vy = vy;
+    t.rad = rad;
     t.life = life;
     t.totalRad = rad + _margin(_hyp(vx, vy));
     _threatN++;
@@ -332,15 +374,24 @@ function _precomputeThreats()
         {
             const tm = TIME_GRID[t];
             const slot = _threatT[base + t];
-            if (tm > life) { slot.x = FAR_BIG; slot.y = FAR_BIG; }
-            else { slot.x = p.x + p.vx * tm; slot.y = p.y + p.vy * tm; }
+            if (tm > life)
+            {
+                slot.x = FAR_BIG;
+                slot.y = FAR_BIG;
+            }
+            else
+            {
+                slot.x = p.x + p.vx * tm;
+                slot.y = p.y + p.vy * tm;
+            }
         }
     }
 }
 
 function _scoreCandidate(cx, cy, mx, my, speed, myR)
 {
-    const dx = cx - mx, dy = cy - my;
+    const dx = cx - mx;
+    const dy = cy - my;
     const dist = _hyp(dx, dy);
     const invT = dist > 0 ? speed / dist : 0;
     let minClear = FAR_BIG;
@@ -348,15 +399,30 @@ function _scoreCandidate(cx, cy, mx, my, speed, myR)
     for (let t = 0; t < TGRID_N; t++)
     {
         const tm = TIME_GRID[t];
-        let px, py;
-        if (dist < 1) { px = mx; py = my; }
-        else if (tm * invT >= 1) { px = cx; py = cy; }
-        else { const f = = mx + dx * f; py = my + dy * f; }
+        let px;
+        let py;
+        if (dist < 1)
+        {
+            px = mx;
+            py = my;
+        }
+        else if (tm * invT >= 1)
+        {
+            px = cx;
+            py = cy;
+        }
+        else
+        {
+            const f = tm * invT;
+            px = mx + dx * f;
+            py = my + dy * f;
+        }
 
         for (let i = 0; i < _threatN; i++)
         {
             const slot = _threatT[i * TGRID_N + t];
-            const ex = px - slot.x, ey = py - slot.y;
+            const ex = px - slot.x;
+            const ey = py - slot.y;
             const d2 = ex * ex + ey * ey;
             const tr = myR + _threats[i].totalRad;
             const d = Math.sqrt(d2) - tr;
@@ -379,20 +445,35 @@ function _clampToMap(v, maxTiles)
 
 function _sendMove(tx, ty)
 {
-    const w = getWallCacheW(), h = getWallCacheH();
-    if (w > 0 && h > 0) { tx = _clampToMap(tx, w); ty = _clampToMap(ty, h); }
+    const w = getWallCacheW();
+    const h = getWallCacheH();
+    if (w > 0 && h > 0)
+    {
+        tx = _clampToMap(tx, w);
+        ty = _clampToMap(ty, h);
+    }
     const battle = scanData.battleModeClient;
     if (!battle || battle.isNull()) return false;
     try
     {
-        const fns = getFunctions(), ix = Math.round(tx), iy = Math.round(ty);
+        const fns = getFunctions();
+        const ix = Math.round(tx);
+        const iy = Math.round(ty);
         if (Math.abs(ix - _lastTX) < SEND_DEADZONE && Math.abs(iy - _lastTY) < SEND_DEADZONE) return true;
-        const nt = _nowMs();
-        _lastTX = ix; _lastTY = iy; _lastSendT = nt;
+        _lastTX = ix;
+        _lastTY = iy;
         fns.LogicBattleModeClient_setClientPredictionMoveTo(battle, ix, iy, 1);
-        return sendCommand(MOVE_INPUT_TYPE, (ci) => { ci.add(offsets.ClientInput_x).writeS32(ix); ci.add(offsets.ClientInput_y).writeS32(iy); });
+        return sendCommand(MOVE_INPUT_TYPE, (ci) =>
+        {
+            ci.add(offsets.ClientInput_x).writeS32(ix);
+            ci.add(offsets.ClientInput_y).writeS32(iy);
+        });
     }
-    catch (e) { logWarn("autododge send failed", { err: String(e && e.message || e) }); return false; }
+    catch (e)
+    {
+        logWarn("autododge send failed", { err: String(e && e.message || e) });
+        return false;
+    }
 }
 
 function _adUpdate(mx, my)
@@ -400,7 +481,8 @@ function _adUpdate(mx, my)
     const now = _nowMs();
     if (!_ok(mx, -1e8, 1e8) || !_ok(my, -1e8, 1e8)) return false;
     _initPools();
-    const speed = _speed(), myR = _ownRadius();
+    const speed = _speed();
+    const myR = _ownRadius();
     _collect(mx, my, myR, now);
     _bdBuildThreats();
 
@@ -444,18 +526,26 @@ function _adUpdate(mx, my)
         return false;
     }
 
-    let bestX = mx, bestY = my, bestScore = hereScore;
+    let bestX = mx;
+    let bestY = my;
+    let bestScore = hereScore;
     for (let a = 0; a < CAND_ANGLES; a++)
     {
         const ang = Math.PI * 2 * a / CAND_ANGLES;
-        const ux = Math.cos(ang), uy = Math.sin(ang);
+        const ux = Math.cos(ang);
+        const uy = Math.sin(ang);
         for (let r = 0; r < CAND_RADII.length; r++)
         {
             const cx = mx + ux * CAND_RADII[r];
             const cy = my + uy * CAND_RADII[r];
             if (isBlockedWide(cx, cy, myR + 40, BLOCKS_MOVEMENT)) continue;
             const sc = _scoreCandidate(cx, cy, mx, my, speed, myR);
-            if (sc > bestScore) { bestScore = sc; bestX = cx; bestY = cy; }
+            if (sc > bestScore)
+            {
+                bestScore = sc;
+                bestX = cx;
+                bestY = cy;
+            }
         }
     }
 
@@ -466,7 +556,8 @@ function _adUpdate(mx, my)
         return false;
     }
 
-    _tx = bestX; _ty = bestY;
+    _tx = bestX;
+    _ty = bestY;
     _idle = false;
     _sendMove(_tx, _ty);
     return true;
@@ -474,7 +565,11 @@ function _adUpdate(mx, my)
 
 export function setupAutododge() { enableProjectileTracking(); }
 
-export function resetAutododge() { _idle = true; resetProfiles(); }
+export function resetAutododge()
+{
+    _idle = true;
+    resetProfiles();
+}
 
 export function updateAutododge()
 {
@@ -484,6 +579,9 @@ export function updateAutododge()
     if (now - _lastTick < AD_TICK_MS) return;
     _lastTick = now;
     const destroyed = scanData.destroyed;
-    if (destroyed) for (let i = 0; i < destroyed.length && i < 16; i++) noteBurstDeath(destroyed[i]);
+    if (destroyed)
+    {
+        for (let i = 0; i < destroyed.length && i < 16; i++) noteBurstDeath(destroyed[i]);
+    }
     _adUpdate(scanData.myX, scanData.myY);
 }
