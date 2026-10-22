@@ -1,21 +1,72 @@
-import { sendCommand } from "../core/commands.js";
-import { getFunctions } from "../core/functions.js";
-import { offsets } from "../core/offsets.js";
-import { enableProjectileTracking, scanData } from "../core/scanner.js";
-import { state } from "../utils/flags.js";
-import { logWarn } from "../utils/logger.js";
-import { K_BLOB, K_DROP, K_FADE, K_LOCKPATH, fitOf, kindOf } from "../helpers/dodge_kinds.js";
-import { blocksLinear, noteBurstDeath, resetProfiles, shapeHazards } from "../helpers/dodge_profiles.js";
-import { BLOCKS_MOVEMENT, BLOCKS_PROJECTILES, TILE_SIZE, getWallCacheH, getWallCacheW, isBlockedAt, isBlockedWide, losCheck, traceWallHit } from "../utils/wallCache.js";
+import
+{
+    sendCommand
+}
+from "../core/commands.js";
+import
+{
+    getFunctions
+}
+from "../core/functions.js";
+import
+{
+    offsets
+}
+from "../core/offsets.js";
+import
+{
+    enableProjectileTracking,
+    scanData
+}
+from "../core/scanner.js";
+import
+{
+    state
+}
+from "../utils/flags.js";
+import
+{
+    logWarn
+}
+from "../utils/logger.js";
+import
+{
+    K_BLOB,
+    K_DROP,
+    K_FADE,
+    K_LOCKPATH,
+    fitOf,
+    kindOf
+}
+from "../helpers/dodge_kinds.js";
+import
+{
+    blocksLinear,
+    noteBurstDeath,
+    resetProfiles,
+    shapeHazards
+}
+from "../helpers/dodge_profiles.js";
+import
+{
+    BLOCKS_MOVEMENT,
+    BLOCKS_PROJECTILES,
+    TILE_SIZE,
+    getWallCacheH,
+    getWallCacheW,
+    isBlockedAt,
+    isBlockedWide,
+    losCheck,
+    traceWallHit
+}
+from "../utils/wallCache.js";
 
 const MOVE_INPUT_TYPE = 2;
 const DODGE_CHAR_SPEED = 720;
 const DODGE_SPEED_MIN = 300;
 const DODGE_SPEED_MAX = 8500;
-const AD_FAR_LOOKAHEAD = 1.6;
 const AD_AWARE = 3200;
 const AD_FALLBACK_RANGE = 2800;
-const AD_DIR_COUNT = 64;
 const AD_SKIN = 50;
 const AD_SPAWN_MARGIN = 60;
 const AD_REACH = 380;
@@ -25,66 +76,37 @@ const AD_WALL_BODY = 240;
 const AD_HAZARD_MAX = 96;
 const AD_CAP_MAX = 16;
 const BD_SAFETY_MARGIN = 28;
-const BD_T_FIELD = 1.8;
 const BD_THREAT_MAX = 160;
-const BDC_EXTRA = 12;
-const BDC_DANGER = 1000000;
-const BDC_T_FIELD = 2.4;
-const BDC_T_URGENT = 0.9;
-const BDC_KEEP = 0.15;
-const BDC_KEEP_IMPACT = 0.9;
-const BDC_TIE = 1.05;
-const BDC_WALL_HIT = 200000;
-const BDC_WALL_BAND = 170;
-const BDC_WALL_PROBE = 3;
-const BDC_EXTRA_BLEND = 120;
-const BDC_HIT_GATE = 1.15;
-const BDC_FAR = 1.0e18;
-const BDC_EPS = 1;
-const BDC_DIR_MAX = AD_DIR_COUNT + BDC_EXTRA;
-const BDC_WARN_MUL = 4;
-const BDC_WARN_T = -1;
-const BDC_MOMENTUM = 0.3;
-const BDC_DYN_SPEED = 5000;
-const BDC_AGE_MS = 48;
-const BDC_CONE_MIN = 999;
-const BDC_CONE_SPREAD = 0.8;
-const BDC_CONE_PAD = 0.05;
-const BDC_STALL_MAX = 8;
+const WARN_MUL = 4;
+const WARN_T = -1;
+const DYN_SPEED = 5000;
+const CONE_MIN = 999;
+const CONE_SPREAD = 0.8;
+const CONE_PAD = 0.05;
+const FAR_BIG = 1.0e18;
+const EPS = 1;
 const PROJ_RADIUS_DEFAULT = 150;
 const OWN_RADIUS_MIN = 40;
 const OWN_RADIUS_MAX = 200;
-const SEV = { beam: 1.5, slow: 0.7, fade: 0.5, grab: 2.0, cone: 1.25, area: 0.8 };
 
-var _ring = [], _dirBuilt = false;
+var _initDone = false;
 var _hazards = [], _hazardN = 0;
 var _threats = [], _threatN = 0;
-var _bdcDirs = [], _bdcScores = [], _bdcImpacts = [], _bdcSel = [], _bdcSelN = 0;
-var _bdcLastX = 0, _bdcLastY = 0, _bdcHaveLast = false;
+var _sel = [], _selN = 0;
+var _lastDirX = 0, _lastDirY = 0, _haveLastDir = false;
 var _lastTick = 0;
-var _myPX = 0, _myPY = 0, _myVX = 0, _myVY = 0, _myInit = false, _myTs = 0;
-var _lastReason = "none";
-var _hits = [], _hitN = 0, _hitSeen = 0;
-var _stall = 0, _stallHold = 0;
 var _holdX = 0, _holdY = 0, _holdUntil = 0, _lastTX = 1e9, _lastTY = 1e9, _lastSendT = 0, _calmSince = 0, _calmSent = false;
 
 function _ok(v, lo, hi) { return v >= lo && v <= hi; }
 function _nowMs() { return Date.now(); }
 function _hyp(a, b) { return Math.sqrt(a * a + b * b); }
-function _sevOf(p) { if (p.isBeam) return SEV.beam; if (p.isSlow) return SEV.slow; return 1; }
 
-function _buildRing()
+function _initPools()
 {
-    if (_dirBuilt) return;
-    for (let i = 0; i < AD_DIR_COUNT; i++)
-    {
-        const a = Math.PI * 2 * i / AD_DIR_COUNT;
-        _ring.push({ x: Math.cos(a), y: Math.sin(a) });
-    }
-    for (let i = 0; i < BDC_DIR_MAX; i++) { _bdcDirs.push({ x: 0, y: 0 }); _bdcScores.push(0); _bdcImpacts.push(0); }
-    for (let i = 0; i < BD_THREAT_MAX; i++) { _bdcSel.push(0); _threats.push({ x: 0, y: 0, vx: 0, vy: 0, rad: 0, sev: 1, cone: false, ax: 0, ay: 0, adx: 1, ady: 0, ang: 0, rng: 0, spd: 0, ageMs: 0 }); }
-    for (let i = 0; i < AD_HAZARD_MAX; i++) _hazards.push({ x: 0, y: 0, vx: 0, vy: 0, rad: 0, age: 0, fadeBase: 0, fadeK: 0, ax: 0, ay: 0, bx: 0, by: 0, hasSegment: false, name: null, sev: 1, ageMs: 0, unstable: false });
-    _dirBuilt = true;
+    if (_initDone) return;
+    for (let i = 0; i < BD_THREAT_MAX; i++) { _sel.push(0); _threats.push({ x: 0, y: 0, vx: 0, vy: 0, rad: 0, cone: false, ax: 0, ay: 0, adx: 1, ady: 0, ang: 0, rng: 0, spd: 0 }); }
+    for (let i = 0; i < AD_HAZARD_MAX; i++) _hazards.push({ x: 0, y: 0, vx: 0, vy: 0, rad: 0, age: 0, fadeBase: 0, fadeK: 0, ax: 0, ay: 0, bx: 0, by: 0, hasSegment: false, name: null });
+    _initDone = true;
 }
 
 function _speed()
@@ -101,37 +123,14 @@ function _ownRadius()
     return 120;
 }
 
-function _margin(spd) { return BD_SAFETY_MARGIN * (1 + spd / BDC_DYN_SPEED); }
-
-function _trackSelf(mx, my)
-{
-    const now = _nowMs();
-    if (_myInit)
-    {
-        const dt = (now - _myTs) / 1000;
-        if (dt > 0.005 && dt < 0.4)
-        {
-            const vx = (mx - _myPX) / dt, vy = (my - _myPY) / dt;
-            if (_hyp(vx, vy) < 6000) { _myVX = _myVX * 0.5 + vx * 0.5; _myVY = _myVY * 0.5 + vy * 0.5; }
-        }
-    }
-    _myPX = mx; _myPY = my; _myTs = now; _myInit = true;
-}
+function _margin(spd) { return BD_SAFETY_MARGIN * (1 + spd / DYN_SPEED); }
 
 function _projectileVel(p)
 {
     if (!p || !p.hasVelocitySample) return null;
     let dt = p.lastTs && p.spawnedAt ? _nowMs() - p.lastTs : 0;
     if (!(dt >= AD_TICK_MS && dt <= AD_TICK_MAX_MS)) dt = AD_TICK_MS;
-    const vx = (p.x - p.lastX) * 1000 / dt, vy = (p.y - p.lastY) * 1000 / dt;
-    const ex = vx - (p.svx || 0), ey = vy - (p.svy || 0);
-    if (p.svx !== undefined)
-    {
-        const a = _hyp(vx, vy), b = _hyp(p.svx, p.svy);
-        if (a > 1 && b > 1) { const c = (vx * p.svx + vy * p.svy) / (a * b); if (c < 0.7071) p.unstable = true; }
-    }
-    p.svx = vx; p.svy = vy;
-    return { vx, vy };
+    return { vx: (p.x - p.lastX) * 1000 / dt, vy: (p.y - p.lastY) * 1000 / dt };
 }
 
 function _ballRadius(p) { if (p.isBeam) return PROJ_RADIUS_DEFAULT * 0.6; return p.radius > 0 ? p.radius : PROJ_RADIUS_DEFAULT; }
@@ -213,7 +212,7 @@ function _pushHazard()
     const h = _hazards[_hazardN];
     h.x = 0; h.y = 0; h.vx = 0; h.vy = 0; h.rad = 0; h.age = 0;
     h.fadeBase = 0; h.fadeK = 0; h.ax = 0; h.ay = 0; h.bx = 0; h.by = 0;
-    h.hasSegment = false; h.name = null; h.sev = 1; h.ageMs = 0; h.unstable = false;
+    h.hasSegment = false; h.name = null;
     _hazardN++;
     return h;
 }
@@ -252,7 +251,7 @@ function _collect(mx, my, myRadius, nowMs)
     for (const key in groups)
     {
         const g = groups[key];
-        if (g.n < BDC_CONE_MIN) continue;
+        if (g.n < CONE_MIN) continue;
         let ax = g.dx, ay = g.dy;
         const l = _hyp(ax, ay);
         if (l < 1e-6) continue;
@@ -267,7 +266,7 @@ function _collect(mx, my, myRadius, nowMs)
             const a = Math.acos(c < -1 ? -1 : c > 1 ? 1 : c);
             if (a > dev) dev = a;
         }
-        if (dev > BDC_CONE_SPREAD) continue;
+        if (dev > CONE_SPREAD) continue;
         const apexX = g.sx / g.n, apexY = g.sy / g.n;
         let rng = 0;
         for (let k = 0; k < g.idx.length; k++)
@@ -280,9 +279,8 @@ function _collect(mx, my, myRadius, nowMs)
         {
             const h = _pushHazard();
             h.cone = true; h.ax = apexX; h.ay = apexY; h.adx = ax; h.ady = ay;
-            h.ang = Math.min(1.2, dev + BDC_CONE_PAD); h.rng = rng; h.spd = g.sp / g.n;
-            h.rad = (g.rad || PROJ_RADIUS_DEFAULT) + 10; h.name = g.first.name; h.sev = SEV.cone;
-            h.ageMs = nowMs - (g.first.spawnedAt || nowMs);
+            h.ang = Math.min(1.2, dev + CONE_PAD); h.rng = rng; h.spd = g.sp / g.n;
+            h.rad = (g.rad || PROJ_RADIUS_DEFAULT) + 10; h.name = g.first.name;
             for (let k = 0; k < g.idx.length; k++) used[g.idx[k]] = 1;
         }
     }
@@ -296,7 +294,6 @@ function _collect(mx, my, myRadius, nowMs)
         if (_myShot(p, mx, my, bodyR)) continue;
         if (_shielded(p, mx, my)) continue;
         const ageMs = nowMs - (p.spawnedAt || nowMs);
-        const sev = _sevOf(p);
 
         const caps = shapeHazards(p, nowMs);
         for (let c = 0; c < caps.length && c < AD_CAP_MAX; c++)
@@ -305,7 +302,7 @@ function _collect(mx, my, myRadius, nowMs)
             if ((cap.t1 - nowMs) / 1000 <= 0) continue;
             if (_hazardN >= AD_HAZARD_MAX) break;
             const h = _pushHazard();
-            h.rad = cap.radius; h.hasSegment = !!cap.hasSegment; h.name = p.name || cap.name; h.sev = SEV.area; h.ageMs = ageMs;
+            h.rad = cap.radius; h.hasSegment = !!cap.hasSegment; h.name = p.name || cap.name;
             if (cap.hasSegment) { h.ax = cap.ax; h.ay = cap.ay; h.bx = cap.bx; h.by = cap.by; }
             else { h.x = cap.x; h.y = cap.y; }
             if (!_inAware(h, mx, my, zoneSq)) _hazardN--;
@@ -364,11 +361,10 @@ function _collect(mx, my, myRadius, nowMs)
         if (h.age < 0) h.age = 0;
         h.fadeBase = spec ? spec.fadeBase : 0;
         h.fadeK = spec ? spec.fadeK : 0;
-        h.sev = sev; h.ageMs = ageMs; h.unstable = !!p.unstable;
     }
 }
 
-function _bdPush(x, y, vx, vy, rad) { if (_threatN >= BD_THREAT_MAX) return; const t = _threats[_threatN]; t.x = x; t.y = y; t.vx = vx; t.vy = vy; t.rad = rad; t.sev = 1; t.cone = false; t.ageMs = 0; _threatN++; }
+function _bdPush(x, y, vx, vy, rad) { if (_threatN >= BD_THREAT_MAX) return; const t = _threats[_threatN]; t.x = x; t.y = y; t.vx = vx; t.vy = vy; t.rad = rad; t.cone = false; _threatN++; }
 
 function _bdBuildThreats()
 {
@@ -383,15 +379,15 @@ function _bdBuildThreats()
             if (_threatN >= BD_THREAT_MAX) continue;
             const t = _threats[_threatN++];
             t.x = h.ax; t.y = h.ay; t.vx = h.adx * h.spd; t.vy = h.ady * h.spd; t.rad = h.rad;
-            t.sev = h.sev; t.cone = true; t.ax = h.ax; t.ay = h.ay; t.adx = h.adx; t.ady = h.ady;
-            t.ang = h.ang; t.rng = h.rng; t.spd = h.spd; t.ageMs = h.ageMs;
+            t.cone = true; t.ax = h.ax; t.ay = h.ay; t.adx = h.adx; t.ady = h.ady;
+            t.ang = h.ang; t.rng = h.rng; t.spd = h.spd;
             continue;
         }
         _fadeVel(h, 0, vel);
         if (_threatN >= BD_THREAT_MAX) continue;
         const t = _threats[_threatN++];
         t.x = h.x; t.y = h.y; t.vx = vel.vx; t.vy = vel.vy; t.rad = h.rad;
-        t.sev = h.sev || 1; t.cone = false; t.ageMs = h.ageMs || 0;
+        t.cone = false;
     }
 }
 
@@ -454,183 +450,30 @@ function _sendMove(tx, ty)
         const nt = _nowMs();
         if (Math.abs(tx - _lastTX) < 24 && Math.abs(ty - _lastTY) < 24 && nt - _lastSendT < 160) return true;
         _lastTX = tx; _lastTY = ty; _lastSendT = nt;
-        if (_stallHold > 0) { _stallHold--; return false; }
         fns.LogicBattleModeClient_setClientPredictionMoveTo(battle, ix, iy, 1);
         return sendCommand(MOVE_INPUT_TYPE, (ci) => { ci.add(offsets.ClientInput_x).writeS32(ix); ci.add(offsets.ClientInput_y).writeS32(iy); });
     }
     catch (e) { logWarn("autododge send failed", { err: String(e && e.message || e) }); return false; }
 }
 
-function _bdcForget() { _bdcHaveLast = false; _bdcLastX = 0; _bdcLastY = 0; }
+function _forgetLastDir() { _haveLastDir = false; _lastDirX = 0; _lastDirY = 0; }
 
-function _bdcAimedOne(p, mx, my, myR)
+function _pickDir(mx, my, myR, speed)
 {
-    if (p.cone) return _coneTTI(p, mx, my) <= BDC_T_FIELD;
-    const r = myR + p.rad + _margin(_hyp(p.vx, p.vy));
-    const vx = p.vx, vy = p.vy, px = p.x - mx, py = p.y - my;
-    const a = vx * vx + vy * vy, b = 2 * (px * vx + py * vy), c = px * px + py * py;
-    let minD2 = c;
-    if (a > 1e-6)
-    {
-        let tm = -b / (2 * a);
-        if (tm < 0) tm = 0; if (tm > BDC_T_FIELD) tm = BDC_T_FIELD;
-        minD2 = c + b * tm + a * tm * tm;
-    }
-    const gate = r * BDC_HIT_GATE;
-    return minD2 <= gate * gate;
-}
-
-function _wallsNear(mx, my)
-{
-    let n = 0;
-    const d = [1, 0, -1, 0, 0, 1, 0, -1];
-    for (let k = 0; k < 4; k++)
-    {
-        if (isBlockedWide(mx + d[k * 2] * 120, my + d[k * 2 + 1] * 120, AD_WALL_BODY, BLOCKS_MOVEMENT)) n++;
-    }
-    return n;
-}
-
-function _bdcWallCost(mx, my, dx, dy, mul)
-{
-    let raw = 0;
-    for (let s = 1; s <= BDC_WALL_PROBE; s++)
-    {
-        const d = BDC_WALL_BAND * s / BDC_WALL_PROBE;
-        if (isBlockedWide(mx + dx * d, my + dy * d, AD_WALL_BODY, BLOCKS_MOVEMENT)) raw += BDC_WALL_HIT * (BDC_WALL_PROBE - s + 1);
-    }
-    return raw * mul;
-}
-
-function _pointMinD2(p, dx, dy, mx, my, speed)
-{
-    const vx = p.vx - dx * speed, vy = p.vy - dy * speed;
-    const px = p.x - mx, py = p.y - my;
-    const a = vx * vx + vy * vy, b = 2 * (px * vx + py * vy), c = px * px + py * py;
-    let minD2 = c;
-    if (a > 1e-6)
-    {
-        let tm = -b / (2 * a);
-        if (tm < 0) tm = 0; if (tm > BDC_T_FIELD) tm = BDC_T_FIELD;
-        minD2 = c + b * tm + a * tm * tm;
-    }
-    return minD2 < BDC_EPS ? BDC_EPS : minD2;
-}
-
-function _bdcScoreDir(dx, dy, mx, my, myR, speed, wallMul, momX, momY, momOn)
-{
-    let score = 0;
-    for (let i = 0; i < _bdcSelN; i++)
-    {
-        const p = _threats[_bdcSel[i]];
-        const r = myR + p.rad + _margin(_hyp(p.vx, p.vy));
-        let minD2, tti;
-        if (p.cone) { tti = _coneTTI(p, mx, my); minD2 = Math.max(BDC_EPS, r * r + tti * tti * 1000); }
-        else
-        {
-            minD2 = _pointMinD2(p, dx, dy, mx, my, speed);
-            const sp = Math.max(1, _hyp(p.vx, p.vy));
-            tti = Math.sqrt(minD2) / sp;
-        }
-        const urgency = 1 / (tti + 0.1);
-        const spd = _hyp(p.vx, p.vy);
-        const trust = p.ageMs < BDC_AGE_MS ? 0.5 : 1;
-        score += BDC_DANGER * (r * r) / minD2 * urgency * (1 + spd / 3000) * (p.sev || 1) * trust;
-    }
-    score += _bdcWallCost(mx, my, dx, dy, wallMul);
-    if (momOn)
-    {
-        const dot = dx * momX + dy * momY;
-        if (dot > 0) score *= 1 - BDC_MOMENTUM * dot;
-    }
-    return score;
-}
-
-function _bdcImpactDir(dx, dy, mx, my, myR, speed)
-{
-    let best = BDC_FAR;
-    for (let i = 0; i < _bdcSelN; i++)
-    {
-        const p = _threats[_bdcSel[i]];
-        if (p.cone) { const t = _coneTTI(p, mx, my); if (t < best) best = t; continue; }
-        const r = myR + p.rad + _margin(_hyp(p.vx, p.vy));
-        const vx = p.vx - dx * speed, vy = p.vy - dy * speed;
-        const px = p.x - mx, py = p.y - my;
-        const a = vx * vx + vy * vy, b = 2 * (px * vx + py * vy), c = px * px + py * py - r * r;
-        if (c < 0) return 0;
-        if (a > 1e-6)
-        {
-            const disc = b * b - 4 * a * c;
-            if (disc >= 0) { const t1 = (-b - Math.sqrt(disc)) / (2 * a); if (t1 > 0 && t1 < best) best = t1; }
-        }
-    }
-    return best;
-}
-
-function _bdcThreatD2(k, mx, my) { const p = _threats[_bdcSel[k]]; return (p.x - mx) * (p.x - mx) + (p.y - my) * (p.y - my); }
-
-function _bdcExtraDirs(mx, my)
-{
-    let first = -1, second = -1, at = AD_DIR_COUNT;
-    for (let i = 0; i < _bdcSelN; i++)
-    {
-        const p = _threats[_bdcSel[i]], dx = p.x - mx, dy = p.y - my, d2 = dx * dx + dy * dy;
-        if (first < 0) { first = i; continue; }
-        const f2 = _bdcThreatD2(first, mx, my);
-        if (d2 < f2) { second = first; first = i; continue; }
-        if (second < 0) { second = i; continue; }
-        if (d2 < _bdcThreatD2(second, mx, my)) second = i;
-    }
-    for (let j = 0; j < 2; j++)
-    {
-        const k = j === 0 ? first : second;
-        if (k < 0 || at + 3 > BDC_DIR_MAX) continue;
-        const p = _threats[_bdcSel[k]];
-        let pxv = -p.vy, pyv = p.vx;
-        let len = _hyp(pxv, pyv);
-        if (len < 1e-6) continue;
-        const px = pxv / len, py = pyv / len;
-        _bdcDirs[at].x = px; _bdcDirs[at].y = py;
-        _bdcDirs[at + 1].x = -px; _bdcDirs[at + 1].y = -py;
-        pxv = (mx - p.x) + px * BDC_EXTRA_BLEND; pyv = (my - p.y) + py * BDC_EXTRA_BLEND;
-        len = _hyp(pxv, pyv);
-        if (len < 1e-6) { pxv = -px; pyv = -py; len = 1; }
-        _bdcDirs[at + 2].x = pxv / len; _bdcDirs[at + 2].y = pyv / len;
-        at += 3;
-    }
-    return at - AD_DIR_COUNT;
-}
-
-function _escapeSum(mx, my)
-{
-    let ex = 0, ey = 0;
-    for (let i = 0; i < _bdcSelN; i++)
-    {
-        const p = _threats[_bdcSel[i]];
-        const dx = mx - p.x, dy = my - p.y, d = _hyp(dx, dy);
-        if (d < 1) continue;
-        ex += dx / d; ey += dy / d;
-    }
-    const len = _hyp(ex, ey);
-    return len > 0.01 ? { x: ex / len, y: ey / len } : null;
-}
-
-function _bdcPick(mx, my, myR, ix, iy, speed, wallMul, momX, momY, momOn)
-{
-    _bdcSelN = 0;
+    _selN = 0;
     for (let i = 0; i < _threatN; i++)
     {
         const p = _threats[i], dx0 = p.x - mx, dy0 = p.y - my;
-        if (dx0 * dx0 + dy0 * dy0 <= 4840000) _bdcSel[_bdcSelN++] = i;
+        if (dx0 * dx0 + dy0 * dy0 <= 4840000) _sel[_selN++] = i;
     }
-    if (_bdcSelN === 0) return _bdcHaveLast ? { x: _bdcLastX, y: _bdcLastY } : { x: 0, y: 0 };
+    if (_selN === 0) return _haveLastDir ? { x: _lastDirX, y: _lastDirY } : { x: 0, y: 0 };
 
-    let prim = _bdcSel[0], ptd = BDC_FAR;
-    for (let i = 0; i < _bdcSelN; i++)
+    let prim = _sel[0], ptd = FAR_BIG;
+    for (let i = 0; i < _selN; i++)
     {
-        const p = _threats[_bdcSel[i]];
+        const p = _threats[_sel[i]];
         const d = _hyp(p.x - mx, p.y - my) - p.rad;
-        if (d < ptd) { ptd = d; prim = _bdcSel[i]; }
+        if (d < ptd) { ptd = d; prim = _sel[i]; }
     }
     const pp = _threats[prim];
     let ux = pp.vx, uy = pp.vy, ul = _hyp(ux, uy);
@@ -650,10 +493,10 @@ function _bdcPick(mx, my, myR, ix, iy, speed, wallMul, momX, momY, momOn)
 
     const clearOf = (dx, dy) =>
     {
-        let best = BDC_FAR;
-        for (let i = 0; i < _bdcSelN; i++)
+        let best = FAR_BIG;
+        for (let i = 0; i < _selN; i++)
         {
-            const p = _threats[_bdcSel[i]];
+            const p = _threats[_sel[i]];
             const rx = p.x - mx, ry = p.y - my;
             const wvx = p.vx - dx * speed, wvy = p.vy - dy * speed;
             const w2 = wvx * wvx + wvy * wvy;
@@ -678,83 +521,57 @@ function _bdcPick(mx, my, myR, ix, iy, speed, wallMul, momX, momY, momOn)
         return best;
     };
 
-    let bi = 0, bs = -BDC_FAR;
+    let bi = 0, bs = -FAR_BIG;
     for (let i = 0; i < dirs.length; i++)
     {
         const d = dirs[i], c = clearOf(d.x, d.y) + (d.tag === 1 ? 45 : 0) - (d.tag === 2 ? 70 : 0) - (d.tag === 3 ? 160 : 0);
         if (c > bs) { bs = c; bi = i; }
     }
-    if (_bdcHaveLast)
+    if (_haveLastDir)
     {
-        const c = clearOf(_bdcLastX, _bdcLastY) + 20;
-        if (c >= bs - 25 && _bdcLastX * dirs[bi].x + _bdcLastY * dirs[bi].y > 0.7) return { x: _bdcLastX, y: _bdcLastY };
+        const c = clearOf(_lastDirX, _lastDirY) + 20;
+        if (c >= bs - 25 && _lastDirX * dirs[bi].x + _lastDirY * dirs[bi].y > 0.7) return { x: _lastDirX, y: _lastDirY };
     }
     const out = dirs[bi];
-    _bdcLastX = out.x; _bdcLastY = out.y; _bdcHaveLast = true;
+    _lastDirX = out.x; _lastDirY = out.y; _haveLastDir = true;
     return { x: out.x, y: out.y };
-}
-
-function _recordHits(mx, my, myR)
-{
-    for (let i = 0; i < _threatN; i++)
-    {
-        const p = _threats[i];
-        let d;
-        if (p.cone) d = _coneTTI(p, mx, my) * Math.max(p.spd || 1, 1);
-        else d = _hyp(p.x - mx, p.y - my) - myR - p.rad;
-        if (d > 0) continue;
-        if (_hitN >= 64) { for (let k = 1; k < 64; k++) _hits[k - 1] = _hits[k]; _hitN = 63; }
-        _hits[_hitN++] = { spd: Math.round(_hyp(p.vx, p.vy)), rad: Math.round(p.rad), tti: 0, dir: _bdcLastX.toFixed(2) + "," + _bdcLastY.toFixed(2), at: _nowMs() };
-        _hitSeen++;
-    }
 }
 
 function _adUpdate(mx, my)
 {
     const now = _nowMs();
     if (!_ok(mx, -1e8, 1e8) || !_ok(my, -1e8, 1e8)) return false;
-    _buildRing();
-    _trackSelf(mx, my);
+    _initPools();
     const speed = _speed(), myR = _ownRadius();
     _collect(mx, my, myR, now);
     _bdBuildThreats();
-    if (_threatN === 0) { _bdcForget(); _lastReason = "none"; return false; }
-
-    const walls = _wallsNear(mx, my);
-    const wallMul = walls >= 3 ? 0.35 : 1;
-    const spdNow = _hyp(_myVX, _myVY), momOn = spdNow > 100;
-    const momX = momOn ? _myVX / spdNow : 0, momY = momOn ? _myVY / spdNow : 0;
-
-    if (walls >= 3) _recordHits(mx, my, myR);
+    if (_threatN === 0) { _forgetLastDir(); return false; }
 
     if (_bdDanger(mx, my, myR, 2.0, 1.2))
     {
         _calmSince = _nowMs(); _calmSent = false;
-        let dir = _bdcPick(mx, my, myR, 0, 0, speed, wallMul, momX, momY, momOn);
+        let dir = _pickDir(mx, my, myR, speed);
         const nn = _nowMs();
         if (nn < _holdUntil) dir = { x: _holdX, y: _holdY };
         else if (dir.x * _holdX + dir.y * _holdY > 0.82) { _holdUntil = nn + 300; dir = { x: _holdX, y: _holdY }; }
         else { _holdX = dir.x; _holdY = dir.y; _holdUntil = nn + 460; }
-        _bdcLastX = dir.x; _bdcLastY = dir.y; _bdcHaveLast = true;
+        _lastDirX = dir.x; _lastDirY = dir.y; _haveLastDir = true;
         _sendMove(Math.round(mx + dir.x * AD_REACH), Math.round(my + dir.y * AD_REACH));
-        _lastReason = "reactive";
         return true;
     }
-    if (_bdDanger(mx, my, myR, BDC_WARN_MUL, BDC_WARN_T))
+    if (_bdDanger(mx, my, myR, WARN_MUL, WARN_T))
     {
-        const dir = _bdcPick(mx, my, myR, 0, 0, speed, wallMul, momX, momY, momOn);
+        const dir = _pickDir(mx, my, myR, speed);
         _sendMove(Math.round(mx + dir.x * AD_REACH * 0.45), Math.round(my + dir.y * AD_REACH * 0.45));
-        _lastReason = "warning";
         return true;
     }
-    _lastReason = "none";
     if (!_calmSent && _nowMs() - _calmSince > 350) { _sendMove(Math.round(mx), Math.round(my)); _calmSent = true; }
     return false;
 }
 
 export function setupAutododge() { enableProjectileTracking(); }
 
-export function resetAutododge() { _bdcForget(); resetProfiles(); _myInit = false; _hitN = 0; _hitSeen = 0; _stall = 0; _stallHold = 0; }
+export function resetAutododge() { _forgetLastDir(); resetProfiles(); }
 
 export function updateAutododge()
 {
@@ -767,12 +584,3 @@ export function updateAutododge()
     if (destroyed) for (let i = 0; i < destroyed.length && i < 16; i++) noteBurstDeath(destroyed[i]);
     _adUpdate(scanData.myX, scanData.myY);
 }
-
-export function debugDodgeSnapshot()
-{
-    const top = [];
-    for (let i = 0; i < Math.min(12, _bdcScores.length); i++) top.push(Math.round(_bdcScores[i]));
-    return { threats: _threatN, aimed: _bdcSelN, scored: top, picked: _bdcLastX.toFixed(2) + "," + _bdcLastY.toFixed(2), reason: _lastReason, hits: _hitSeen, walls: _wallsNear(scanData.myX, scanData.myY) };
-}
-
-export function recentDodgeHits() { return _hits.slice(0, _hitN); }
