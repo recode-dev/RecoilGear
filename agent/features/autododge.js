@@ -18,7 +18,7 @@ const AD_FALLBACK_RANGE = 2800;
 const AD_DIR_COUNT = 64;
 const AD_SKIN = 50;
 const AD_SPAWN_MARGIN = 60;
-const AD_REACH = 600;
+const AD_REACH = 380;
 const AD_TICK_MS = 16;
 const AD_TICK_MAX_MS = 250;
 const AD_WALL_BODY = 240;
@@ -452,7 +452,7 @@ function _sendMove(tx, ty)
     {
         const fns = getFunctions(), ix = Math.round(tx), iy = Math.round(ty);
         const nt = _nowMs();
-        if (Math.abs(tx - _lastTX) < 16 && Math.abs(ty - _lastTY) < 16 && nt - _lastSendT < 120) return true;
+        if (Math.abs(tx - _lastTX) < 24 && Math.abs(ty - _lastTY) < 24 && nt - _lastSendT < 160) return true;
         _lastTX = tx; _lastTY = ty; _lastSendT = nt;
         if (_stallHold > 0) { _stallHold--; return false; }
         fns.LogicBattleModeClient_setClientPredictionMoveTo(battle, ix, iy, 1);
@@ -725,7 +725,8 @@ function _adUpdate(mx, my)
         let dir = _bdcPick(mx, my, myR, 0, 0, speed, wallMul, momX, momY, momOn);
         const nn = _nowMs();
         if (nn < _holdUntil) dir = { x: _holdX, y: _holdY };
-        else { _holdX = dir.x; _holdY = dir.y; _holdUntil = nn + 420; }
+        else if (dir.x * _holdX + dir.y * _holdY > 0.82) { _holdUntil = nn + 300; dir = { x: _holdX, y: _holdY }; }
+        else { _holdX = dir.x; _holdY = dir.y; _holdUntil = nn + 460; }
         _bdcLastX = dir.x; _bdcLastY = dir.y; _bdcHaveLast = true;
         _sendMove(Math.round(mx + dir.x * AD_REACH), Math.round(my + dir.y * AD_REACH));
         _lastReason = "reactive";
