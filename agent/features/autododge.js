@@ -26,12 +26,6 @@ import
 from "../utils/flags.js";
 import
 {
-    logInfo,
-    logWarn
-}
-from "../utils/logger.js";
-import
-{
     canonBrawlerName
 }
 from "../utils/brawlerName.js";
@@ -68,13 +62,13 @@ const TUNE = {
     TICK_MS: 16,
     DIR_COUNT: 48,
     SKIN: 50,
-    LOCK_MS: 130,
+    LOCK_MS: 150,
     REACH: 600,
-    HORIZON_S: 1,
-    KEEP_BAND: 120,
+    HORIZON_S: 1.2,
+    KEEP_BAND: 140,
     MOMENTUM: 100,
-    ENGAGE: 40,
-    RELEASE_GRACE_MS: 120,
+    ENGAGE: 65,
+    RELEASE_GRACE_MS: 140,
     WALL_HIT: 9000,
     PROBE_N: 3,
     PROBE_T: 0.35,
@@ -494,10 +488,6 @@ function _sendMove(logic, tx, ty)
     }
     catch (e)
     {
-        logWarn("autododge send failed",
-        {
-            err: String(e && e.message || e)
-        });
         return false;
     }
 }
@@ -583,40 +573,11 @@ export function updateAutododge()
         x: Math.round(myX + chosen.x * TUNE.REACH),
         y: Math.round(myY + chosen.y * TUNE.REACH)
     };
-    const ok = state.speedhack ? true : _sendMove(scanData.battleModeClient, target.x, target.y);
-    if (chosenIdx !== prevIdx)
-    {
-        const names = [];
-        for (let i = 0; i < hazards.length && names.length < 4; i++)
-        {
-            if (hazards[i].name) names.push(hazards[i].name);
-        }
-        logInfo("autododge dodge",
-        {
-            names,
-            id: names[0] || "",
-            x: target.x,
-            y: target.y,
-            myX: myX | 0,
-            myY: myY | 0,
-            dist: Math.hypot(target.x - myX, target.y - myY) | 0,
-            threats: hazards.length,
-            sent: ok
-        });
-    }
+    if (!state.speedhack) _sendMove(scanData.battleModeClient, target.x, target.y);
 }
 
 export function resetAutododge()
 {
-    if (_muted.size > 0 || _heading)
-    {
-        logInfo("autododge reset",
-        {
-            tracks: _muted.size,
-            heading: !!_heading,
-            headingIdx: _headingIdx
-        });
-    }
     _muted.clear();
     resetProfiles();
     _clearHeading();
