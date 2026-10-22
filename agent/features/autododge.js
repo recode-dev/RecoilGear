@@ -62,13 +62,13 @@ const TUNE = {
     TICK_MS: 16,
     DIR_COUNT: 48,
     SKIN: 50,
-    LOCK_MS: 150,
+    LOCK_MS: 105,
     REACH: 600,
-    HORIZON_S: 1.2,
-    KEEP_BAND: 140,
-    MOMENTUM: 100,
-    ENGAGE: 65,
-    RELEASE_GRACE_MS: 140,
+    HORIZON_S: 1.4,
+    KEEP_BAND: 100,
+    MOMENTUM: 55,
+    ENGAGE: 100,
+    RELEASE_GRACE_MS: 200,
     WALL_HIT: 9000,
     PROBE_N: 3,
     PROBE_T: 0.35,
@@ -110,7 +110,7 @@ function _syncTuning()
 {
     const t = Math.max(0, Math.min(100, _options.reactionSpeed)) / 100;
     TUNE.TICK_MS = Math.max(16, Math.round(32 - t * 16));
-    TUNE.LOCK_MS = Math.max(80, Math.round(260 - t * 180));
+    TUNE.LOCK_MS = Math.max(70, Math.round(240 - t * 180));
     const n = Math.max(8, Math.min(128, _options.directionPrecision | 0));
     if (n !== TUNE.DIR_COUNT)
     {
