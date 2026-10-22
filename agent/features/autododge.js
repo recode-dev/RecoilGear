@@ -60,9 +60,8 @@ const RANGE_FALLBACK = 2800;
 
 const TUNE = {
     AWARE: 3200,
-    TICK_MS: 16,
-    TICK_MS_HOT: 0,
-    TICK_MS_IDLE: 32,
+    TICK_MS: 4,
+    TICK_MS_IDLE: 48,
     DIR_COUNT: 48,
     SKIN: 50,
     LOCK_MS: 105,
@@ -75,7 +74,9 @@ const TUNE = {
     WALL_HIT: 9000,
     PROBE_N: 3,
     PROBE_T: 0.35,
-    WALL_BODY: 240
+    WALL_BODY: 240,
+    SEND_MIN_MS: 40,
+    SEND_MIN_DIST: 5
 };
 
 let _heading = null;
@@ -83,12 +84,14 @@ let _headingIdx = -1;
 let _holdUntil = 0;
 let _lastDangerTs = 0;
 let _lastTick = 0;
-let _lastSpawnSeen = 0;
+let _lastSentX = 1e9;
+let _lastSentY = 1e9;
+let _lastSentAt = 0;
 const _muted = new Set();
 const _ring = [];
 let _skip = new Set();
 const _options = {
-    reactionSpeed: 50,
+    reactionSpeed: 100,
     directionPrecision: 48,
     safetyMargin: 25
 };
@@ -113,9 +116,8 @@ _buildRing();
 function _syncTuning()
 {
     const t = Math.max(0, Math.min(100, _options.reactionSpeed)) / 100;
-    TUNE.TICK_MS = Math.max(0, Math.round(24 - t * 24));
-    TUNE.TICK_MS_HOT = Math.max(0, Math.round(16 - t * 16));
-    TUNE.TICK_MS_IDLE = Math.max(16, Math.round(64 - t * 32));
+    TUNE.TICK_MS = Math.max(4, Math.round(24 - t * 20));
+    TUNE.TICK_MS_IDLE = Math.max(16, Math.round(64 - t * 16));
     TUNE.LOCK_MS = Math.max(70, Math.round(240 - t * 180));
     const n = Math.max(8, Math.min(128, _options.directionPrecision | 0));
     if (n !== TUNE.DIR_COUNT)
@@ -228,19 +230,6 @@ function _inAware(myX, myY, hazard, zoneSq)
     return dx * dx + dy * dy <= zoneSq;
 }
 
-function _maxSpawnAt()
-{
-    const shots = scanData.projectiles;
-    if (!shots || shots.length === 0) return 0;
-    let m = 0;
-    for (let i = 0; i < shots.length; i++)
-    {
-        const sp = shots[i].spawnedAt || 0;
-        if (sp > m) m = sp;
-    }
-    return m;
-}
-
 function _collectLive(myX, myY, myRadius, nowMs)
 {
     const out = [];
@@ -261,6 +250,7 @@ function _collectLive(myX, myY, myRadius, nowMs)
     for (let i = 0; i < shots.length; i++)
     {
         const p = shots[i];
+        if (!p) continue;
         const gid = p.gid;
         if (!gid) continue;
         live.add(gid);
@@ -336,8 +326,8 @@ function _collectLive(myX, myY, myRadius, nowMs)
             ux = vx / spd;
             uy = vy / spd;
         }
-        let playerAlong = 0;
         const skipAlong = blob || indirect;
+        let playerAlong = 0;
         if (!skipAlong && spd >= 1)
         {
             playerAlong = (myX - p.x) * ux + (myY - p.y) * uy;
@@ -505,11 +495,7 @@ export function updateAutododge()
     if (!state.autododge) return;
     if (scanData.lastUpdate === 0) return;
     const now = Date.now();
-    const maxSpawn = _maxSpawnAt();
-    const isHot = maxSpawn > _lastSpawnSeen;
-    if (isHot) _lastSpawnSeen = maxSpawn;
-    const hasThreat = _heading !== null;
-    const tickMs = isHot ? TUNE.TICK_MS_HOT : (hasThreat ? TUNE.TICK_MS : TUNE.TICK_MS_IDLE);
+    const tickMs = _heading ? TUNE.TICK_MS : TUNE.TICK_MS_IDLE;
     if (now - _lastTick < tickMs) return;
     _lastTick = now;
     const myX = scanData.myX;
@@ -575,11 +561,18 @@ export function updateAutododge()
     const chosen = _ring[chosenIdx];
     _headingIdx = chosenIdx;
     _heading = chosen;
-    const target = {
-        x: Math.round(myX + chosen.x * TUNE.REACH),
-        y: Math.round(myY + chosen.y * TUNE.REACH)
-    };
-    if (!state.speedhack) _sendMove(scanData.battleModeClient, target.x, target.y);
+    if (state.speedhack) return;
+    const tx = Math.round(myX + chosen.x * TUNE.REACH);
+    const ty = Math.round(myY + chosen.y * TUNE.REACH);
+    const ddx = tx - _lastSentX;
+    const ddy = ty - _lastSentY;
+    const moved = ddx * ddx + ddy * ddy > TUNE.SEND_MIN_DIST * TUNE.SEND_MIN_DIST;
+    const stale = now - _lastSentAt > TUNE.SEND_MIN_MS;
+    if (!moved && !stale) return;
+    _lastSentX = tx;
+    _lastSentY = ty;
+    _lastSentAt = now;
+    _sendMove(scanData.battleModeClient, tx, ty);
 }
 
 export function resetAutododge()
@@ -589,10 +582,17 @@ export function resetAutododge()
     _clearHeading();
     _lastDangerTs = 0;
     _lastTick = 0;
-    _lastSpawnSeen = 0;
+    _lastSentX = 1e9;
+    _lastSentY = 1e9;
+    _lastSentAt = 0;
 }
 
 export function setupAutododge()
 {
-    enableProjectileTracking();
+    try
+    {
+        enableProjectileTracking();
+    }
+    catch (e)
+    {}
 }
