@@ -281,4 +281,268 @@ function _collect(mx, my, myRadius, nowMs) {
         const fit = fitOf(name);
         const shotR = _ballRadius(p) + (spec ? (spec.growR | 0) : 0);
         const rad = shotR + fit.pad + shotR * fit.grow;
-        const
+        const ux = vx / spd;
+        const uy = vy / spd;
+
+        let playerAlong = 0;
+        if (!blob) {
+            playerAlong = (mx - p.x) * ux + (my - p.y) * uy;
+            if (playerAlong < -50) continue;
+            if (!p.isThrower) {
+                const tHit = playerAlong > 0 ? playerAlong : 0;
+                if (!losCheck(p.x, p.y, p.x + ux * tHit, p.y + uy * tHit, BLOCKS_PROJECTILES)) continue;
+            }
+        }
+        const leftRaw = _lifeLeft(p, spec, spd, nowMs);
+        if (leftRaw <= 10) continue;
+        const gap = _hyp(dx, dy) - bodyR - shotR;
+        if (leftRaw < 0.85 * (gap > 0 ? gap : 0)) continue;
+        if (!blob && playerAlong > leftRaw + shotR) continue;
+        if (_hazardN >= HAZARD_MAX) break;
+        const lifeSec = leftRaw / spd;
+        if (lifeSec <= 0) continue;
+        const h = _pushHazard();
+        h.x = p.x;
+        h.y = p.y;
+        h.vx = vx;
+        h.vy = vy;
+        h.rad = rad;
+        h.life = lifeSec;
+    }
+}
+
+function _bdPush(x, y, vx, vy, rad, life) {
+    if (_threatN >= THREAT_MAX) return;
+    const t = _threats[_threatN];
+    t.x = x;
+    t.y = y;
+    t.vx = vx;
+    t.vy = vy;
+    t.rad = rad;
+    t.life = life;
+    t.totalRad = rad + _margin(_hyp(vx, vy));
+    _threatN++;
+}
+
+function _bdBuildThreats() {
+    _threatN = 0;
+    for (let i = 0; i < _hazardN; i++) {
+        const h = _hazards[i];
+        if (h.hasSegment) {
+            _bdPush(h.ax, h.ay, 0, 0, h.rad, h.life);
+            _bdPush(h.bx, h.by, 0, 0, h.rad, h.life);
+            continue;
+        }
+        _bdPush(h.x, h.y, h.vx, h.vy, h.rad, h.life);
+    }
+}
+
+function _precomputeThreats() {
+    for (let i = 0; i < _threatN; i++) {
+        const p = _threats[i];
+        const base = i * TGRID_N;
+        const life = p.life;
+        for (let t = 0; t < TGRID_N; t++) {
+            const tm = TIME_GRID[t];
+            const slot = _threatT[base + t];
+            if (tm > life) {
+                slot.x = FAR_BIG;
+                slot.y = FAR_BIG;
+            } else {
+                slot.x = p.x + p.vx * tm;
+                slot.y = p.y + p.vy * tm;
+            }
+        }
+    }
+}
+
+function _score(cx, cy, mx, my, speed, myR) {
+    const dx = cx - mx;
+    const dy = cy - my;
+    const dist = _hyp(dx, dy);
+    const invT = dist > 0 ? speed / dist : 0;
+    let minClear = FAR_BIG;
+
+    for (let t = 0; t < TGRID_N; t++) {
+        const tm = TIME_GRID[t];
+        let px;
+        let py;
+        if (dist < 1) {
+            px = mx;
+            py = my;
+        } else if (tm * invT >= 1) {
+            px = cx;
+            py = cy;
+        } else {
+            const f = tm * invT;
+            px = mx + dx * f;
+            py = my + dy * f;
+        }
+        for (let i = 0; i < _threatN; i++) {
+            const slot = _threatT[i * TGRID_N + t];
+            const ex = px - slot.x;
+            const ey = py - slot.y;
+            const tr = myR + _threats[i].totalRad;
+            const d = Math.sqrt(ex * ex + ey * ey) - tr;
+            if (d < minClear) minClear = d;
+            if (minClear < -600) return minClear;
+        }
+    }
+    return minClear;
+}
+
+function _pickBestDir(mx, my, speed, myR) {
+    let bestX = 0;
+    let bestY = 0;
+    let bestScore = -FAR_BIG;
+
+    for (let a = 0; a < CAND_ANGLES; a++) {
+        const ang = Math.PI * 2 * a / CAND_ANGLES;
+        const ux = Math.cos(ang);
+        const uy = Math.sin(ang);
+        const cx = mx + ux * CAND_DIST;
+        const cy = my + uy * CAND_DIST;
+        if (isBlockedWide(cx, cy, myR + 40, BLOCKS_MOVEMENT)) continue;
+        const sc = _score(cx, cy, mx, my, speed, myR);
+        if (sc > bestScore) {
+            bestScore = sc;
+            bestX = ux;
+            bestY = uy;
+        }
+    }
+    return { x: bestX, y: bestY, score: bestScore };
+}
+
+function _clampToMap(v, maxTiles) {
+    const maxV = maxTiles * TILE_SIZE - 1;
+    if (maxV <= 0) return v;
+    if (v < 0) return 0;
+    if (v > maxV) return maxV;
+    return v;
+}
+
+function _sendMove(tx, ty) {
+    const w = getWallCacheW();
+    const h = getWallCacheH();
+    if (w > 0 && h > 0) {
+        tx = _clampToMap(tx, w);
+        ty = _clampToMap(ty, h);
+    }
+    const battle = scanData.battleModeClient;
+    if (!battle || battle.isNull()) return false;
+    try {
+        const fns = getFunctions();
+        const ix = Math.round(tx);
+        const iy = Math.round(ty);
+        if (Math.abs(ix - _clientTx) < SEND_DEADZONE && Math.abs(iy - _clientTy) < SEND_DEADZONE) return true;
+        _clientTx = ix;
+        _clientTy = iy;
+        fns.LogicBattleModeClient_setClientPredictionMoveTo(battle, ix, iy, 1);
+        return sendCommand(MOVE_INPUT_TYPE, (ci) => {
+            ci.add(offsets.ClientInput_x).writeS32(ix);
+            ci.add(offsets.ClientInput_y).writeS32(iy);
+        });
+    } catch (e) {
+        logWarn("autododge send failed", { err: String(e && e.message || e) });
+        return false;
+    }
+}
+
+function _resetSendCache() {
+    _clientTx = 1e9;
+    _clientTy = 1e9;
+}
+
+function _adUpdate(mx, my) {
+    if (!(mx >= -1e8 && mx <= 1e8 && my >= -1e8 && my <= 1e8)) return false;
+    const now = _nowMs();
+    _initPools();
+    const speed = _speed();
+    const myR = _ownRadius();
+    _collect(mx, my, myR, now);
+    _bdBuildThreats();
+
+    if (_threatN === 0) {
+        _moving = false;
+        return false;
+    }
+
+    _precomputeThreats();
+
+    const hereScore = _score(mx, my, mx, my, speed, myR);
+
+    if (!_moving) {
+        if (hereScore >= IDLE_EXIT) {
+            if (_clientTx < 1e8) {
+                const destScore = _score(_clientTx, _clientTy, mx, my, speed, myR);
+                if (destScore >= IDLE_EXIT) return false;
+            } else {
+                return false;
+            }
+        }
+        const best = _pickBestDir(mx, my, speed, myR);
+        if (best.score - hereScore < MIN_START_IMPROVEMENT) return false;
+        _dirX = best.x;
+        _dirY = best.y;
+        _moving = true;
+        _commitUntil = now + COMMIT_MS;
+        _resetSendCache();
+        _sendMove(mx + _dirX * REACH, my + _dirY * REACH);
+        return true;
+    }
+
+    const destX = mx + _dirX * REACH;
+    const destY = my + _dirY * REACH;
+    const destScore = _score(destX, destY, mx, my, speed, myR);
+
+    if (hereScore >= IDLE_ENTER && destScore >= IDLE_ENTER) {
+        _moving = false;
+        _resetSendCache();
+        return false;
+    }
+
+    if (now < _commitUntil && destScore > CATASTROPHIC) {
+        _sendMove(destX, destY);
+        return true;
+    }
+
+    const best = _pickBestDir(mx, my, speed, myR);
+    if (best.score > destScore + MIN_SWITCH_IMPROVEMENT) {
+        _dirX = best.x;
+        _dirY = best.y;
+        _commitUntil = now + COMMIT_MS;
+        _resetSendCache();
+        _sendMove(mx + _dirX * REACH, my + _dirY * REACH);
+        return true;
+    }
+
+    _commitUntil = now + COMMIT_MS;
+    _sendMove(destX, destY);
+    return true;
+}
+
+export function setupAutododge() {
+    enableProjectileTracking();
+}
+
+export function resetAutododge() {
+    _moving = false;
+    _dirX = 0;
+    _dirY = 0;
+    _commitUntil = 0;
+    _resetSendCache();
+    resetProfiles();
+}
+
+export function updateAutododge() {
+    if (!state.autododge) return;
+    if (scanData.lastUpdate === 0) return;
+    const now = _nowMs();
+    if (now - _lastTick < TICK_MS) return;
+    _lastTick = now;
+    const destroyed = scanData.destroyed;
+    if (destroyed) {
+        for (let i = 0; i < destroyed.length && i < 16; i++) noteBurstDeath(destroyed[i]);
+    }
+    _adUpdate(scanData.myX, scanData.myY);
+}
