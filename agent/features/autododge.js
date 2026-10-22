@@ -1,13 +1,65 @@
-import { sendCommand } from "../core/commands.js";
-import { getFunctions } from "../core/functions.js";
-import { offsets } from "../core/offsets.js";
-import { enableProjectileTracking, scanData } from "../core/scanner.js";
-import { state } from "../utils/flags.js";
-import { logInfo, logWarn } from "../utils/logger.js";
-import { canonBrawlerName } from "../utils/brawlerName.js";
-import { fitOf, kindOf } from "../helpers/dodge_kinds.js";
-import { blocksLinear, noteBurstDeath, resetProfiles, shapeHazards } from "../helpers/dodge_profiles.js";
-import { BLOCKS_MOVEMENT, BLOCKS_PROJECTILES, getWallCacheH, getWallCacheW, isBlockedWide, losCheck, TILE_SIZE } from "../utils/wallCache.js";
+import
+{
+    sendCommand
+}
+from "../core/commands.js";
+import
+{
+    getFunctions
+}
+from "../core/functions.js";
+import
+{
+    offsets
+}
+from "../core/offsets.js";
+import
+{
+    enableProjectileTracking,
+    scanData
+}
+from "../core/scanner.js";
+import
+{
+    state
+}
+from "../utils/flags.js";
+import
+{
+    logInfo,
+    logWarn
+}
+from "../utils/logger.js";
+import
+{
+    canonBrawlerName
+}
+from "../utils/brawlerName.js";
+import
+{
+    fitOf,
+    kindOf
+}
+from "../helpers/dodge_kinds.js";
+import
+{
+    blocksLinear,
+    noteBurstDeath,
+    resetProfiles,
+    shapeHazards
+}
+from "../helpers/dodge_profiles.js";
+import
+{
+    BLOCKS_MOVEMENT,
+    BLOCKS_PROJECTILES,
+    getWallCacheH,
+    getWallCacheW,
+    isBlockedWide,
+    losCheck,
+    TILE_SIZE
+}
+from "../utils/wallCache.js";
 
 const MOVE_INPUT_TYPE = 2;
 const TUNE = {
@@ -36,7 +88,6 @@ let _lastDangerTs = 0;
 let _lastTick = 0;
 const _muted = new Set();
 const _ring = [];
-let _scoreBuf = [];
 let _skip = new Set();
 const _options = {
     reactionSpeed: 50,
@@ -44,24 +95,31 @@ const _options = {
     safetyMargin: 25
 };
 
-function _buildRing() {
+function _buildRing()
+{
     _ring.length = 0;
     const n = TUNE.DIR_COUNT;
-    for (let i = 0; i < n; i++) {
+    for (let i = 0; i < n; i++)
+    {
         const a = Math.PI * 2 * i / n;
-        _ring.push({ x: Math.cos(a), y: Math.sin(a) });
+        _ring.push(
+        {
+            x: Math.cos(a),
+            y: Math.sin(a)
+        });
     }
-    _scoreBuf = new Array(n).fill(0);
     _headingIdx = -1;
 }
 _buildRing();
 
-function _syncTuning() {
+function _syncTuning()
+{
     const t = Math.max(0, Math.min(100, _options.reactionSpeed)) / 100;
     TUNE.TICK_MS = Math.max(16, Math.round(32 - t * 16));
     TUNE.LOCK_MS = Math.max(80, Math.round(260 - t * 180));
     const n = Math.max(8, Math.min(128, _options.directionPrecision | 0));
-    if (n !== TUNE.DIR_COUNT) {
+    if (n !== TUNE.DIR_COUNT)
+    {
         TUNE.DIR_COUNT = n;
         _buildRing();
     }
@@ -69,24 +127,31 @@ function _syncTuning() {
 }
 _syncTuning();
 
-export function getDodgeDir() {
+export function getDodgeDir()
+{
     return _heading;
 }
 
-export function setAutododgeOptions(opts) {
+export function setAutododgeOptions(opts)
+{
     if (!opts || typeof opts !== "object") return;
-    if (typeof opts.reactionSpeed === "number" && isFinite(opts.reactionSpeed)) {
+    if (typeof opts.reactionSpeed === "number" && isFinite(opts.reactionSpeed))
+    {
         _options.reactionSpeed = Math.max(0, Math.min(100, opts.reactionSpeed));
     }
-    if (typeof opts.directionPrecision === "number" && isFinite(opts.directionPrecision)) {
+    if (typeof opts.directionPrecision === "number" && isFinite(opts.directionPrecision))
+    {
         _options.directionPrecision = Math.max(8, Math.min(128, opts.directionPrecision | 0));
     }
-    if (typeof opts.safetyMargin === "number" && isFinite(opts.safetyMargin)) {
+    if (typeof opts.safetyMargin === "number" && isFinite(opts.safetyMargin))
+    {
         _options.safetyMargin = Math.max(0, Math.min(120, opts.safetyMargin));
     }
-    if (Array.isArray(opts.ignoredBrawlers)) {
+    if (Array.isArray(opts.ignoredBrawlers))
+    {
         _skip = new Set();
-        for (const name of opts.ignoredBrawlers) {
+        for (const name of opts.ignoredBrawlers)
+        {
             const id = canonBrawlerName(name);
             if (id) _skip.add(id);
         }
@@ -95,22 +160,26 @@ export function setAutododgeOptions(opts) {
     _syncTuning();
 }
 
-function _ballR(p) {
+function _ballR(p)
+{
     return p.radius > 0 ? p.radius : 100;
 }
 
-function _traveled(p) {
+function _traveled(p)
+{
     const sx = p.spawnX;
     const sy = p.spawnY;
     if (!isFinite(sx) || !isFinite(sy)) return 0;
     return Math.hypot(p.x - sx, p.y - sy);
 }
 
-function _kindReach(p, spec, spd) {
+function _kindReach(p, spec, spd)
+{
     let r = spec && spec.maxRange > 0 ? spec.maxRange : 0;
     if (spec && spec.chargedRange > 0 && spd > 3500) r = spec.chargedRange;
     if (r <= 0 && p.castRange > 0) r = p.castRange;
-    if (r <= 0 && p.isThrower && (p.targetX || p.targetY) && isFinite(p.spawnX) && isFinite(p.spawnY)) {
+    if (r <= 0 && p.isThrower && (p.targetX || p.targetY) && isFinite(p.spawnX) && isFinite(p.spawnY))
+    {
         const td = Math.hypot(p.targetX - p.spawnX, p.targetY - p.spawnY);
         if (td > 0) r = td;
     }
@@ -120,23 +189,35 @@ function _kindReach(p, spec, spd) {
     return TUNE.RANGE_FALLBACK;
 }
 
-function _homePos(p) {
-    if (isFinite(p.ownerX) && isFinite(p.ownerY) && (p.ownerX || p.ownerY)) {
-        return { x: p.ownerX, y: p.ownerY };
+function _homePos(p)
+{
+    if (isFinite(p.ownerX) && isFinite(p.ownerY) && (p.ownerX || p.ownerY))
+    {
+        return {
+            x: p.ownerX,
+            y: p.ownerY
+        };
     }
-    if (p.targetX || p.targetY) {
-        return { x: p.targetX, y: p.targetY };
+    if (p.targetX || p.targetY)
+    {
+        return {
+            x: p.targetX,
+            y: p.targetY
+        };
     }
     return null;
 }
 
-function _lifeLeft(p, spec, spd, nowMs) {
+function _lifeLeft(p, spec, spd, nowMs)
+{
     const maxR = _kindReach(p, spec, spd);
-    if (spec && spec.fade) {
+    if (spec && spec.fade)
+    {
         const age = Math.max(0, nowMs - (p.spawnedAt || nowMs));
         return Math.max(0, maxR * (1 - age / 1000));
     }
-    if (spec && spec.home) {
+    if (spec && spec.home)
+    {
         const home = _homePos(p);
         if (home) return Math.hypot(home.x - p.x, home.y - p.y);
     }
@@ -144,8 +225,21 @@ function _lifeLeft(p, spec, spd, nowMs) {
     return Math.max(0, maxR - flown);
 }
 
-function _inAware(myX, myY, hazard, zoneSq) {
-    if (hazard.segment) {
+function _segDist(px, py, ax, ay, bx, by)
+{
+    const dx = bx - ax;
+    const dy = by - ay;
+    const lenSq = dx * dx + dy * dy;
+    let t = lenSq < 1e-6 ? 0 : ((px - ax) * dx + (py - ay) * dy) / lenSq;
+    if (t < 0) t = 0;
+    else if (t > 1) t = 1;
+    return Math.hypot(px - (ax + dx * t), py - (ay + dy * t));
+}
+
+function _inAware(myX, myY, hazard, zoneSq)
+{
+    if (hazard.segment)
+    {
         const d = _segDist(myX, myY, hazard.segment.ax, hazard.segment.ay, hazard.segment.bx, hazard.segment.by);
         return d * d <= zoneSq;
     }
@@ -154,21 +248,25 @@ function _inAware(myX, myY, hazard, zoneSq) {
     return dx * dx + dy * dy <= zoneSq;
 }
 
-function _collectLive(myX, myY, myRadius, nowMs) {
+function _collectLive(myX, myY, myRadius, nowMs)
+{
     const out = [];
     const live = new Set();
     const shots = scanData.projectiles;
-    if (!shots || shots.length === 0) {
+    if (!shots || shots.length === 0)
+    {
         if (_muted.size > 0) _muted.clear();
         return out;
     }
     const zoneSq = TUNE.AWARE * TUNE.AWARE;
-    const bodyPad = myRadius + TUNE.SKIN;
+    const bodyR = myRadius + TUNE.SKIN;
     const deaths = scanData.destroyed;
-    if (deaths && deaths.length) {
+    if (deaths && deaths.length)
+    {
         for (let d = 0; d < deaths.length; d++) noteBurstDeath(deaths[d]);
     }
-    for (let i = 0; i < shots.length; i++) {
+    for (let i = 0; i < shots.length; i++)
+    {
         const p = shots[i];
         const gid = p.gid;
         if (!gid) continue;
@@ -177,22 +275,27 @@ function _collectLive(myX, myY, myRadius, nowMs) {
         if (owner && _skip.has(canonBrawlerName(owner) || owner)) _muted.add(gid);
         if (_muted.has(gid)) continue;
         const shaped = shapeHazards(p, nowMs);
-        if (shaped) {
-            for (let c = 0; c < shaped.length; c++) {
+        if (shaped)
+        {
+            for (let c = 0; c < shaped.length; c++)
+            {
                 const cap = shaped[c];
                 const until = (cap.t1 - nowMs) / 1e3;
                 if (until <= 0) continue;
                 const hazard = {
-                    rad: cap.radius + bodyPad,
+                    rad: cap.radius + bodyR,
                     until,
                     name: p.name || cap.name || ""
                 };
-                if (cap.ax === void 0) {
+                if (cap.ax === void 0)
+                {
                     hazard.x = cap.x;
                     hazard.y = cap.y;
                     hazard.vx = 0;
                     hazard.vy = 0;
-                } else {
+                }
+                else
+                {
                     hazard.segment = cap;
                 }
                 if (_inAware(myX, myY, hazard, zoneSq)) out.push(hazard);
@@ -207,17 +310,20 @@ function _collectLive(myX, myY, myRadius, nowMs) {
         if (dx * dx + dy * dy > zoneSq) continue;
         let vx = p.vx;
         let vy = p.vy;
-        if (!isFinite(vx) || !isFinite(vy)) {
+        if (!isFinite(vx) || !isFinite(vy))
+        {
             vx = 0;
             vy = 0;
         }
         const flown = _traveled(p);
-        if (spec && spec.lockPath && flown > 120 && isFinite(p.spawnX) && isFinite(p.spawnY)) {
+        if (spec && spec.lockPath && flown > 120 && isFinite(p.spawnX) && isFinite(p.spawnY))
+        {
             vx = (p.x - p.spawnX) / flown * (p.speed || 1);
             vy = (p.y - p.spawnY) / flown * (p.speed || 1);
         }
         let spd = Math.hypot(vx, vy);
-        if (spec && spec.speedMul > 0 && spd > 3500) {
+        if (spec && spec.speedMul > 0 && spd > 3500)
+        {
             vx *= spec.speedMul;
             vy *= spec.speedMul;
             spd *= spec.speedMul;
@@ -225,7 +331,6 @@ function _collectLive(myX, myY, myRadius, nowMs) {
         const slow = (p.speed || 0) > 0 && p.speed < 1600;
         const lockPath = !!(spec && spec.lockPath) || !!p.isBeam;
         const blob = !!(spec && spec.blob) || (!lockPath && (p.isThrower || slow));
-        const bodyR = myRadius + TUNE.SKIN;
         const fit = fitOf(name);
         const growR = spec && spec.growR || 0;
         const shotR = _ballR(p) + growR;
@@ -233,14 +338,17 @@ function _collectLive(myX, myY, myRadius, nowMs) {
         let ux = 0;
         let uy = 0;
         let playerAlong = 0;
-        if (spd >= 1) {
+        if (spd >= 1)
+        {
             ux = vx / spd;
             uy = vy / spd;
         }
-        if (!blob && spd >= 1) {
+        if (!blob && spd >= 1)
+        {
             playerAlong = (myX - p.x) * ux + (myY - p.y) * uy;
             if (playerAlong < -50) continue;
-            if (!p.isThrower) {
+            if (!p.isThrower)
+            {
                 const hitX = p.x + ux * Math.max(playerAlong, 0);
                 const hitY = p.y + uy * Math.max(playerAlong, 0);
                 if (!losCheck(p.x, p.y, hitX, hitY, BLOCKS_PROJECTILES)) continue;
@@ -251,7 +359,8 @@ function _collectLive(myX, myY, myRadius, nowMs) {
         const gap = Math.hypot(p.x - myX, p.y - myY) - bodyR - shotR;
         if (left < 0.85 * Math.max(0, gap)) continue;
         if (!blob && spd >= 1 && playerAlong > left + shotR) continue;
-        out.push({
+        out.push(
+        {
             x: p.x,
             y: p.y,
             vx: blob ? 0 : vx,
@@ -262,30 +371,25 @@ function _collectLive(myX, myY, myRadius, nowMs) {
             name
         });
     }
-    for (const k of _muted) {
+    for (const k of _muted)
+    {
         if (!live.has(k)) _muted.delete(k);
     }
     return out;
 }
 
-function _segDist(px, py, ax, ay, bx, by) {
-    const dx = bx - ax;
-    const dy = by - ay;
-    const lenSq = dx * dx + dy * dy;
-    let t = lenSq < 1e-6 ? 0 : ((px - ax) * dx + (py - ay) * dy) / lenSq;
-    if (t < 0) t = 0;
-    else if (t > 1) t = 1;
-    return Math.hypot(px - (ax + dx * t), py - (ay + dy * t));
-}
-
-function _clearanceFor(threats, myX, myY, mvx, mvy) {
+function _clearanceFor(threats, myX, myY, mvx, mvy)
+{
     let minClear = Infinity;
     const horizon = TUNE.HORIZON_S;
-    for (let i = 0; i < threats.length; i++) {
+    for (let i = 0; i < threats.length; i++)
+    {
         const t = threats[i];
-        if (t.segment) {
+        if (t.segment)
+        {
             const maxT = t.until > 0 ? Math.min(horizon, t.until) : horizon;
-            for (let step = 0; step <= 4; step++) {
+            for (let step = 0; step <= 4; step++)
+            {
                 const ts = maxT * (step / 4);
                 const d = _segDist(myX + mvx * ts, myY + mvy * ts, t.segment.ax, t.segment.ay, t.segment.bx, t.segment.by) - t.rad;
                 if (d < minClear) minClear = d;
@@ -294,7 +398,8 @@ function _clearanceFor(threats, myX, myY, mvx, mvy) {
         }
         const spd = Math.hypot(t.vx, t.vy);
         let maxT = horizon;
-        if (spd > 1) {
+        if (spd > 1)
+        {
             if (t.left > 0) maxT = Math.min(maxT, t.left / spd);
             if (t.pathLen > 0) maxT = Math.min(maxT, t.pathLen / spd);
         }
@@ -306,10 +411,13 @@ function _clearanceFor(threats, myX, myY, mvx, mvy) {
         const vv = vrx * vrx + vry * vry;
         let cx;
         let cy;
-        if (vv < 1e-6) {
+        if (vv < 1e-6)
+        {
             cx = relx;
             cy = rely;
-        } else {
+        }
+        else
+        {
             let ts = -(relx * vrx + rely * vry) / vv;
             if (ts < 0) ts = 0;
             else if (ts > maxT) ts = maxT;
@@ -322,28 +430,34 @@ function _clearanceFor(threats, myX, myY, mvx, mvy) {
     return minClear;
 }
 
-function _wallAhead(myX, myY, dir, speed, bodyR) {
+function _wallAhead(myX, myY, dir, speed, bodyR)
+{
     const step = speed * TUNE.PROBE_T;
     let raw = 0;
-    for (let s = 1; s <= TUNE.PROBE_N; s++) {
+    for (let s = 1; s <= TUNE.PROBE_N; s++)
+    {
         const px = myX + dir.x * step * s;
         const py = myY + dir.y * step * s;
-        if (isBlockedWide(px, py, bodyR, BLOCKS_MOVEMENT)) {
+        if (isBlockedWide(px, py, bodyR, BLOCKS_MOVEMENT))
+        {
             raw += TUNE.WALL_HIT * (TUNE.PROBE_N - s + 1);
         }
     }
     return raw;
 }
 
-export function clampMoveTarget(tx, ty) {
+export function clampMoveTarget(tx, ty)
+{
     return _clampTarget(tx, ty);
 }
 
-export function sendBattleMove(logic, tx, ty) {
+export function sendBattleMove(logic, tx, ty)
+{
     return _sendMove(logic, tx, ty);
 }
 
-function _clampToMap(v, maxTiles) {
+function _clampToMap(v, maxTiles)
+{
     const max = maxTiles * TILE_SIZE - 1;
     if (max <= 0) return v;
     if (v < 0) return 0;
@@ -351,38 +465,52 @@ function _clampToMap(v, maxTiles) {
     return v;
 }
 
-function _clampTarget(tx, ty) {
+function _clampTarget(tx, ty)
+{
     const w = getWallCacheW();
     const h = getWallCacheH();
-    if (w <= 0 || h <= 0) return { x: tx, y: ty };
+    if (w <= 0 || h <= 0) return {
+        x: tx,
+        y: ty
+    };
     return {
         x: _clampToMap(tx, w),
         y: _clampToMap(ty, h)
     };
 }
 
-function _sendMove(logic, tx, ty) {
+function _sendMove(logic, tx, ty)
+{
     if (!logic || logic.isNull()) return false;
-    try {
+    try
+    {
         const fns = getFunctions();
         fns.LogicBattleModeClient_setClientPredictionMoveTo(logic, tx, ty, 1);
-        return sendCommand(MOVE_INPUT_TYPE, (ci) => {
+        return sendCommand(MOVE_INPUT_TYPE, (ci) =>
+        {
             ci.add(offsets.ClientInput_x).writeS32(tx);
             ci.add(offsets.ClientInput_y).writeS32(ty);
         });
-    } catch (e) {
-        logWarn("autododge send failed", { err: String(e && e.message || e) });
+    }
+    catch (e)
+    {
+        logWarn("autododge send failed",
+        {
+            err: String(e && e.message || e)
+        });
         return false;
     }
 }
 
-function _clearHeading() {
+function _clearHeading()
+{
     _heading = null;
     _headingIdx = -1;
     _holdUntil = 0;
 }
 
-export function updateAutododge() {
+export function updateAutododge()
+{
     if (!state.autododge) return;
     if (scanData.lastUpdate === 0) return;
     const now = Date.now();
@@ -393,14 +521,16 @@ export function updateAutododge() {
     const speed = scanData.mySpeed || 720;
     const myRadius = scanData.myRadius || 60;
     const hazards = _collectLive(myX, myY, myRadius, now);
-    if (hazards.length === 0) {
+    if (hazards.length === 0)
+    {
         if (_heading && now - _lastDangerTs > TUNE.RELEASE_GRACE_MS) _clearHeading();
         return;
     }
     const stayClear = _clearanceFor(hazards, myX, myY, 0, 0);
     const inDanger = stayClear < TUNE.ENGAGE;
     if (inDanger) _lastDangerTs = now;
-    if (!inDanger && (!_heading || now - _lastDangerTs > TUNE.RELEASE_GRACE_MS)) {
+    if (!inDanger && (!_heading || now - _lastDangerTs > TUNE.RELEASE_GRACE_MS))
+    {
         if (_heading) _clearHeading();
         return;
     }
@@ -409,28 +539,40 @@ export function updateAutododge() {
     const bodyR = TUNE.WALL_BODY;
     let bestIdx = 0;
     let bestScore = -Infinity;
-    for (let i = 0; i < _ring.length; i++) {
+    let prevScore = -Infinity;
+    for (let i = 0; i < _ring.length; i++)
+    {
         const d = _ring[i];
         let s = _clearanceFor(hazards, myX, myY, speed * d.x, speed * d.y);
         s -= _wallAhead(myX, myY, d, speed, bodyR);
         if (prevDir) s += TUNE.MOMENTUM * (d.x * prevDir.x + d.y * prevDir.y);
-        _scoreBuf[i] = s;
-        if (s > bestScore) {
+        if (i === prevIdx) prevScore = s;
+        if (s > bestScore)
+        {
             bestScore = s;
             bestIdx = i;
         }
     }
     let chosenIdx = bestIdx;
-    if (prevIdx >= 0 && now < _holdUntil && chosenIdx !== prevIdx) {
-        if (_scoreBuf[prevIdx] + TUNE.KEEP_BAND >= _scoreBuf[chosenIdx]) {
+    let chosenScore = bestScore;
+    if (prevIdx >= 0 && now < _holdUntil && chosenIdx !== prevIdx)
+    {
+        if (prevScore + TUNE.KEEP_BAND >= bestScore)
+        {
             chosenIdx = prevIdx;
-        } else {
+            chosenScore = prevScore;
+        }
+        else
+        {
             _holdUntil = now + TUNE.LOCK_MS;
         }
-    } else if (now >= _holdUntil) {
+    }
+    else if (now >= _holdUntil)
+    {
         _holdUntil = now + TUNE.LOCK_MS;
     }
-    if (_scoreBuf[chosenIdx] <= stayClear) {
+    if (chosenScore <= stayClear)
+    {
         if (_heading) _clearHeading();
         return;
     }
@@ -442,12 +584,15 @@ export function updateAutododge() {
         y: Math.round(myY + chosen.y * TUNE.REACH)
     };
     const ok = state.speedhack ? true : _sendMove(scanData.battleModeClient, target.x, target.y);
-    if (chosenIdx !== prevIdx) {
+    if (chosenIdx !== prevIdx)
+    {
         const names = [];
-        for (let i = 0; i < hazards.length && names.length < 4; i++) {
+        for (let i = 0; i < hazards.length && names.length < 4; i++)
+        {
             if (hazards[i].name) names.push(hazards[i].name);
         }
-        logInfo("autododge dodge", {
+        logInfo("autododge dodge",
+        {
             names,
             id: names[0] || "",
             x: target.x,
@@ -461,9 +606,12 @@ export function updateAutododge() {
     }
 }
 
-export function resetAutododge() {
-    if (_muted.size > 0 || _heading) {
-        logInfo("autododge reset", {
+export function resetAutododge()
+{
+    if (_muted.size > 0 || _heading)
+    {
+        logInfo("autododge reset",
+        {
             tracks: _muted.size,
             heading: !!_heading,
             headingIdx: _headingIdx
@@ -476,6 +624,7 @@ export function resetAutododge() {
     _lastTick = 0;
 }
 
-export function setupAutododge() {
+export function setupAutododge()
+{
     enableProjectileTracking();
 }
