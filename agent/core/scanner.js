@@ -32,7 +32,6 @@ var _liveProjectiles = new Map();
 var _destroyed = [];
 var _friendlyIdx = new Set();
 var _projectileHooksInstalled = false;
-var MASSIVE_RADIUS_THRESHOLD = 380;
 var CASTING_RANGE_SCALE = 100;
 var SKILL_SLOT_MAX = 8;
 var PROJ_INDEX_MAX = 4;
@@ -134,27 +133,6 @@ function _readProjectileName(data)
     {
         return null;
     }
-}
-
-function _classify(speed, radius)
-{
-    const isSlow = speed <= 800;
-    const isSpread = radius === 0 && speed >= 1400 && speed <= 1600;
-    const isSniper = speed > 3500;
-    let hitRadius;
-    if (radius > 0) hitRadius = radius * 1.05;
-    else if (isSlow) hitRadius = 520;
-    else if (isSpread) hitRadius = 320;
-    else if (isSniper) hitRadius = 350;
-    else hitRadius = 240;
-    return {
-        isSlow,
-        isSpread,
-        isSniper,
-        isMassive: hitRadius > MASSIVE_RADIUS_THRESHOLD || radius > MASSIVE_RADIUS_THRESHOLD,
-        hitRadius,
-        category: isSlow ? "slow" : isSpread ? "spread" : isSniper ? "sniper" : "normal"
-    };
 }
 
 function _readOwnerIndex(obj)
@@ -294,32 +272,6 @@ function _castRangeFor(name, ownerIndex)
     return 0;
 }
 
-function _ownerPos(ownerIndex)
-{
-    if (ownerIndex < 0) return null;
-    if (ownerIndex === scanData.myPlayerIndex)
-    {
-        return {
-            x: scanData.myX,
-            y: scanData.myY
-        };
-    }
-    const character = _charsByIndex.get(ownerIndex);
-    if (!_validPtr(character)) return null;
-    try
-    {
-        const fns = getFunctions();
-        return {
-            x: fns.LogicGameObjectClient_getX(character) | 0,
-            y: fns.LogicGameObjectClient_getY(character) | 0
-        };
-    }
-    catch (_)
-    {
-        return null;
-    }
-}
-
 function _captureProjectile(projectile, data, ownerTeamOverride)
 {
     if (!_validPtr(projectile)) return;
@@ -347,8 +299,16 @@ function _captureProjectile(projectile, data, ownerTeamOverride)
         const radius = Math.max(0, offsets.ProjectileData_radius
             ? data.add(offsets.ProjectileData_radius).readU32() | 0
             : (fns.LogicProjectileData_getRadius ? fns.LogicProjectileData_getRadius(data) | 0 : 0));
-        const rendering = fns.LogicProjectileData_getRendering ? fns.LogicProjectileData_getRendering(data) | 0 : 0;
-        const isThrower = projectile.add(offsets.Projectile_isIndirect).readU32() | 0;
+        let isIndirect = 0;
+        try
+        {
+            if (offsets.Projectile_isIndirect)
+            {
+                isIndirect = projectile.add(offsets.Projectile_isIndirect).readU32() | 0;
+            }
+        }
+        catch (_)
+        {}
         let isBeam = false;
         try
         {
@@ -367,28 +327,10 @@ function _captureProjectile(projectile, data, ownerTeamOverride)
             {}
         }
         const ownerIndex = _readOwnerIndex(projectile);
-        let spawnAreaRadius = 0;
-        let spawnAreaActiveTime = 0;
-        try
-        {
-            if (fns.LogicProjectileData_getSpawnAreaEffect)
-            {
-                const area = fns.LogicProjectileData_getSpawnAreaEffect(data);
-                if (_validPtr(area))
-                {
-                    spawnAreaRadius = fns.AreaEffectData_getRadius ? fns.AreaEffectData_getRadius(area) | 0 : 0;
-                    spawnAreaActiveTime = fns.AreaEffectData_getActiveTimeMs ? fns.AreaEffectData_getActiveTimeMs(area) | 0 : 0;
-                }
-            }
-        }
-        catch (_)
-        {
-            spawnAreaRadius = 0;
-            spawnAreaActiveTime = 0;
-        }
-        const classification = _classify(speed, radius);
         const name = _readProjectileName(data);
         const castRange = _castRangeFor(name, ownerIndex);
+        const earlyTicks = _earlyTicks(fns, data);
+        const now = Date.now();
         _liveProjectiles.set(gid,
         {
             gid,
@@ -402,29 +344,17 @@ function _captureProjectile(projectile, data, ownerTeamOverride)
             y,
             spawnX: x,
             spawnY: y,
-            targetX: 0,
-            targetY: 0,
             speed,
             radius,
-            rendering,
-            angle: null,
-            isThrower,
+            isIndirect: isIndirect,
             isBeam,
-            spawnAreaRadius,
-            spawnAreaActiveTime,
             castRange,
-            hitRadius: classification.hitRadius,
-            isSlow: classification.isSlow,
-            isSpread: classification.isSpread,
-            isSniper: classification.isSniper,
-            isMassive: classification.isMassive,
-            category: classification.category,
-            spawnedAt: Date.now() - _earlyTicks(fns, data) * 16,
-            earlyTicks: _earlyTicks(fns, data),
+            spawnedAt: now - earlyTicks * 16,
+            earlyTicks,
             lastX: x,
             lastY: y,
-            lastTs: Date.now(),
-            lastSeenAt: Date.now(),
+            lastTs: now,
+            lastSeenAt: now,
             hasVelocitySample: false,
             vx: 0,
             vy: 0
@@ -445,7 +375,6 @@ function _removeProjectile(projectile)
             _destroyed.push(
             {
                 name: record.name,
-                angle: record.angle,
                 spawnX: record.spawnX,
                 spawnY: record.spawnY,
                 x: record.lastX,
@@ -525,29 +454,12 @@ function _updateLiveProjectiles(now)
                 projectile.vy = projectile.vy * (1 - alpha) + observedVy * alpha;
                 projectile.hasVelocitySample = true;
             }
-            if (!projectile.hasVelocitySample && projectile.targetX !== 0 && projectile.targetY !== 0 && projectile.vx === 0 && projectile.vy === 0)
-            {
-                const tx = projectile.targetX - x;
-                const ty = projectile.targetY - y;
-                const length = Math.hypot(tx, ty);
-                if (length > 0)
-                {
-                    projectile.vx = tx / length * projectile.speed;
-                    projectile.vy = ty / length * projectile.speed;
-                }
-            }
             projectile.x = x;
             projectile.y = y;
             projectile.lastX = x;
             projectile.lastY = y;
             projectile.lastTs = now;
             projectile.ownerName = _ownerNameByIndex(projectile.ownerIndex);
-            const ownerPos = _ownerPos(projectile.ownerIndex);
-            if (ownerPos)
-            {
-                projectile.ownerX = ownerPos.x;
-                projectile.ownerY = ownerPos.y;
-            }
             if (!(projectile.castRange > 0))
             {
                 projectile.castRange = _castRangeFor(projectile.name, projectile.ownerIndex);
@@ -562,29 +474,15 @@ function _updateLiveProjectiles(now)
                 ownerTeam: projectile.ownerTeam,
                 ownerIndex: projectile.ownerIndex,
                 ownerName: projectile.ownerName,
-                ownerX: projectile.ownerX,
-                ownerY: projectile.ownerY,
                 x,
                 y,
                 spawnX: projectile.spawnX,
                 spawnY: projectile.spawnY,
-                targetX: projectile.targetX,
-                targetY: projectile.targetY,
                 speed: projectile.speed,
                 radius: projectile.radius,
-                hitRadius: projectile.hitRadius,
-                rendering: projectile.rendering,
-                angle: projectile.angle,
-                isThrower: projectile.isThrower,
+                isIndirect: !!projectile.isIndirect,
                 isBeam: !!projectile.isBeam,
-                spawnAreaRadius: projectile.spawnAreaRadius,
-                spawnAreaActiveTime: projectile.spawnAreaActiveTime,
                 castRange: projectile.castRange || 0,
-                isSlow: projectile.isSlow,
-                isSpread: projectile.isSpread,
-                isSniper: projectile.isSniper,
-                isMassive: projectile.isMassive,
-                category: projectile.category,
                 spawnedAt: projectile.spawnedAt,
                 vx: projectile.vx,
                 vy: projectile.vy
