@@ -56,10 +56,13 @@ import
 from "../utils/wallCache.js";
 
 const MOVE_INPUT_TYPE = 2;
+const RANGE_FALLBACK = 2800;
+
 const TUNE = {
     AWARE: 3200,
-    RANGE_FALLBACK: 2800,
     TICK_MS: 16,
+    TICK_MS_HOT: 0,
+    TICK_MS_IDLE: 32,
     DIR_COUNT: 48,
     SKIN: 50,
     LOCK_MS: 105,
@@ -80,6 +83,7 @@ let _headingIdx = -1;
 let _holdUntil = 0;
 let _lastDangerTs = 0;
 let _lastTick = 0;
+let _lastSpawnSeen = 0;
 const _muted = new Set();
 const _ring = [];
 let _skip = new Set();
@@ -109,7 +113,9 @@ _buildRing();
 function _syncTuning()
 {
     const t = Math.max(0, Math.min(100, _options.reactionSpeed)) / 100;
-    TUNE.TICK_MS = Math.max(16, Math.round(32 - t * 16));
+    TUNE.TICK_MS = Math.max(0, Math.round(24 - t * 24));
+    TUNE.TICK_MS_HOT = Math.max(0, Math.round(16 - t * 16));
+    TUNE.TICK_MS_IDLE = Math.max(16, Math.round(64 - t * 32));
     TUNE.LOCK_MS = Math.max(70, Math.round(240 - t * 180));
     const n = Math.max(8, Math.min(128, _options.directionPrecision | 0));
     if (n !== TUNE.DIR_COUNT)
@@ -172,34 +178,15 @@ function _kindReach(p, spec, spd)
     let r = spec && spec.maxRange > 0 ? spec.maxRange : 0;
     if (spec && spec.chargedRange > 0 && spd > 3500) r = spec.chargedRange;
     if (r <= 0 && p.castRange > 0) r = p.castRange;
-    if (r <= 0 && p.isThrower && (p.targetX || p.targetY) && isFinite(p.spawnX) && isFinite(p.spawnY))
+    if (r <= 0 && (p.isThrower || p.isIndirect) && (p.targetX || p.targetY) && isFinite(p.spawnX) && isFinite(p.spawnY))
     {
         const td = Math.hypot(p.targetX - p.spawnX, p.targetY - p.spawnY);
         if (td > 0) r = td;
     }
-    if (r <= 0) r = TUNE.RANGE_FALLBACK;
+    if (r <= 0) r = RANGE_FALLBACK;
     if (spec && spec.reachAdj) r += spec.reachAdj;
     if (r > 0 && r < 70000) return r;
-    return TUNE.RANGE_FALLBACK;
-}
-
-function _homePos(p)
-{
-    if (isFinite(p.ownerX) && isFinite(p.ownerY) && (p.ownerX || p.ownerY))
-    {
-        return {
-            x: p.ownerX,
-            y: p.ownerY
-        };
-    }
-    if (p.targetX || p.targetY)
-    {
-        return {
-            x: p.targetX,
-            y: p.targetY
-        };
-    }
-    return null;
+    return RANGE_FALLBACK;
 }
 
 function _lifeLeft(p, spec, spd, nowMs)
@@ -210,10 +197,9 @@ function _lifeLeft(p, spec, spd, nowMs)
         const age = Math.max(0, nowMs - (p.spawnedAt || nowMs));
         return Math.max(0, maxR * (1 - age / 1000));
     }
-    if (spec && spec.home)
+    if (p.isIndirect && isFinite(p.targetX) && isFinite(p.targetY))
     {
-        const home = _homePos(p);
-        if (home) return Math.hypot(home.x - p.x, home.y - p.y);
+        return Math.max(0, Math.hypot(p.targetX - p.x, p.targetY - p.y));
     }
     const flown = _traveled(p);
     return Math.max(0, maxR - flown);
@@ -240,6 +226,19 @@ function _inAware(myX, myY, hazard, zoneSq)
     const dx = hazard.x - myX;
     const dy = hazard.y - myY;
     return dx * dx + dy * dy <= zoneSq;
+}
+
+function _maxSpawnAt()
+{
+    const shots = scanData.projectiles;
+    if (!shots || shots.length === 0) return 0;
+    let m = 0;
+    for (let i = 0; i < shots.length; i++)
+    {
+        const sp = shots[i].spawnedAt || 0;
+        if (sp > m) m = sp;
+    }
+    return m;
 }
 
 function _collectLive(myX, myY, myRadius, nowMs)
@@ -302,6 +301,7 @@ function _collectLive(myX, myY, myRadius, nowMs)
         const dx = p.x - myX;
         const dy = p.y - myY;
         if (dx * dx + dy * dy > zoneSq) continue;
+        const indirect = !!p.isIndirect;
         let vx = p.vx;
         let vy = p.vy;
         if (!isFinite(vx) || !isFinite(vy))
@@ -324,20 +324,21 @@ function _collectLive(myX, myY, myRadius, nowMs)
         }
         const slow = (p.speed || 0) > 0 && p.speed < 1600;
         const lockPath = !!(spec && spec.lockPath) || !!p.isBeam;
-        const blob = !!(spec && spec.blob) || (!lockPath && (p.isThrower || slow));
+        const blob = !!(spec && spec.blob) || (!lockPath && !indirect && (p.isThrower || slow));
         const fit = fitOf(name);
         const growR = spec && spec.growR || 0;
         const shotR = _ballR(p) + growR;
         const rad = shotR + bodyR + fit.pad + shotR * fit.grow;
         let ux = 0;
         let uy = 0;
-        let playerAlong = 0;
         if (spd >= 1)
         {
             ux = vx / spd;
             uy = vy / spd;
         }
-        if (!blob && spd >= 1)
+        let playerAlong = 0;
+        const skipAlong = blob || indirect;
+        if (!skipAlong && spd >= 1)
         {
             playerAlong = (myX - p.x) * ux + (myY - p.y) * uy;
             if (playerAlong < -50) continue;
@@ -352,7 +353,7 @@ function _collectLive(myX, myY, myRadius, nowMs)
         if (left <= 10) continue;
         const gap = Math.hypot(p.x - myX, p.y - myY) - bodyR - shotR;
         if (left < 0.85 * Math.max(0, gap)) continue;
-        if (!blob && spd >= 1 && playerAlong > left + shotR) continue;
+        if (!skipAlong && spd >= 1 && playerAlong > left + shotR) continue;
         out.push(
         {
             x: p.x,
@@ -504,7 +505,12 @@ export function updateAutododge()
     if (!state.autododge) return;
     if (scanData.lastUpdate === 0) return;
     const now = Date.now();
-    if (now - _lastTick < TUNE.TICK_MS) return;
+    const maxSpawn = _maxSpawnAt();
+    const isHot = maxSpawn > _lastSpawnSeen;
+    if (isHot) _lastSpawnSeen = maxSpawn;
+    const hasThreat = _heading !== null;
+    const tickMs = isHot ? TUNE.TICK_MS_HOT : (hasThreat ? TUNE.TICK_MS : TUNE.TICK_MS_IDLE);
+    if (now - _lastTick < tickMs) return;
     _lastTick = now;
     const myX = scanData.myX;
     const myY = scanData.myY;
@@ -583,6 +589,7 @@ export function resetAutododge()
     _clearHeading();
     _lastDangerTs = 0;
     _lastTick = 0;
+    _lastSpawnSeen = 0;
 }
 
 export function setupAutododge()
