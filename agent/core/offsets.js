@@ -44,7 +44,7 @@ export const offsets = Object.freeze({
     BattleScreen_activateSkill: 0x7a0084,
     BattleScreen_getClosestTargetForAutoshoot: 0x7b67ec,
     LogicTile__setData: 0x9401fc,
-    LogicProjectileClient_ctor: 0xa3146c,
+    LogicProjectileClient_ctor: 0xa313f8,
     LogicProjectileClient_destruct: 0xa31a00,
 
     BattleMode_getInstance: 0x8c5130,
@@ -72,7 +72,6 @@ export const offsets = Object.freeze({
     LogicSkillData__getCastingRange: 0x9de9cc,
     LogicSkillData__getProjectileData: 0x9e84a8,
 
-    LogicProjectileClient_getData: 0x117050,
     LogicProjectileData_getSpeed: 0x8cee94,
     LogicProjectileData_getRadius: 0x860d88,
     LogicProjectileData_getRendering: 0x97d5c0,
