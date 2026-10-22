@@ -630,6 +630,7 @@ function _bdcPick(mx, my, myR, ix, iy, speed, wallMul, momX, momY, momOn)
     if (ul < 1) { ux = mx - pp.x; uy = my - pp.y; ul = _hyp(ux, uy); }
     if (ul < 1) { ux = 1; uy = 0; ul = 1; }
     ux /= ul; uy /= ul;
+    const pspd = _hyp(pp.vx, pp.vy);
     const nx = -uy, ny = ux;
 
     const dirs = [];
@@ -637,12 +638,13 @@ function _bdcPick(mx, my, myR, ix, iy, speed, wallMul, momX, momY, momOn)
     add(nx, ny, 1); add(-nx, -ny, 1);
     add(nx + ux * 0.7, ny + uy * 0.7, 1); add(-nx + ux * 0.7, -ny + uy * 0.7, 1);
     add(nx - ux * 0.7, ny - uy * 0.7, 1); add(-nx - ux * 0.7, -ny - uy * 0.7, 1);
-    add(-ux, -uy, 2);
+    if (pspd < 150) { add(ux, uy, 2); add(-ux, -uy, 3); } else add(-ux, -uy, 2);
     for (let i = 0; i < 16; i++) { const a2 = Math.PI * 2 * i / 16; add(Math.cos(a2), Math.sin(a2), 0); }
 
     const clearOf = (dx, dy) =>
     {
         let best = BDC_FAR;
+        const px0 = mx + dx * 60, py0 = my + dy * 60;
         for (let s = 1; s <= 8; s++)
         {
             const t = s * 0.15, px = mx + dx * speed * t, py = my + dy * speed * t;
@@ -655,6 +657,8 @@ function _bdcPick(mx, my, myR, ix, iy, speed, wallMul, momX, momY, momOn)
                 if (dd < best) best = dd;
             }
         }
+        const ens = scanData.enemies || [];
+        for (let q = 0; q < ens.length && q < 8; q++) { const en = ens[q]; if (!en) continue; const ex = en.x, ey = en.y; if (!Number.isFinite(ex) || !Number.isFinite(ey)) continue; const dd = _hyp(ex - px0, ey - py0) - myR - 120; if (dd < best) best = dd; }
         for (let s = 1; s <= 2; s++)
         {
             const d = 130 * s;
@@ -666,7 +670,7 @@ function _bdcPick(mx, my, myR, ix, iy, speed, wallMul, momX, momY, momOn)
     let bi = 0, bs = -BDC_FAR;
     for (let i = 0; i < dirs.length; i++)
     {
-        const d = dirs[i], c = clearOf(d.x, d.y) + (d.tag === 1 ? 45 : 0) - (d.tag === 2 ? 70 : 0);
+        const d = dirs[i], c = clearOf(d.x, d.y) + (d.tag === 1 ? 45 : 0) - (d.tag === 2 ? 70 : 0) - (d.tag === 3 ? 160 : 0);
         if (c > bs) { bs = c; bi = i; }
     }
     if (_bdcHaveLast)
@@ -717,7 +721,7 @@ function _adUpdate(mx, my)
         let dir = _bdcPick(mx, my, myR, 0, 0, speed, wallMul, momX, momY, momOn);
         const nn = _nowMs();
         if (nn < _holdUntil && dir.x * _holdX + dir.y * _holdY > 0.9) dir = { x: _holdX, y: _holdY };
-        else { _holdX = dir.x; _holdY = dir.y; _holdUntil = nn + 240; }
+        else { _holdX = dir.x; _holdY = dir.y; _holdUntil = nn + 320; }
         _sendMove(Math.round(mx + dir.x * AD_REACH), Math.round(my + dir.y * AD_REACH));
         _lastReason = "reactive";
         return true;
