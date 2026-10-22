@@ -614,89 +614,69 @@ function _escapeSum(mx, my)
 
 function _bdcPick(mx, my, myR, ix, iy, speed, wallMul, momX, momY, momOn)
 {
-    let rx = ix, ry = iy, hasRef = ix !== 0 || iy !== 0;
-    let best = 0, bestScore = BDC_FAR, impactBest, fence, tBest, cand;
-    let leastBad = false;
-    for (let i = 0; i < AD_DIR_COUNT; i++) { _bdcDirs[i].x = _ring[i].x; _bdcDirs[i].y = _ring[i].y; }
-
     _bdcSelN = 0;
-    for (let i = 0; i < _threatN; i++) if (_bdcAimedOne(_threats[i], mx, my, myR)) { _bdcSel[_bdcSelN++] = i; }
+    for (let i = 0; i < _threatN; i++) if (_bdcAimedOne(_threats[i], mx, my, myR)) _bdcSel[_bdcSelN++] = i;
+    if (_bdcSelN === 0) return _bdcHaveLast ? { x: _bdcLastX, y: _bdcLastY } : { x: 0, y: 0 };
 
-    if (_bdcSelN === 0)
+    let prim = _bdcSel[0], ptd = BDC_FAR;
+    for (let i = 0; i < _bdcSelN; i++)
     {
-        let ox, oy;
-        if (!hasRef && _threatN > 0)
+        const p = _threats[_bdcSel[i]];
+        const d = _hyp(p.x - mx, p.y - my) - p.rad;
+        if (d < ptd) { ptd = d; prim = _bdcSel[i]; }
+    }
+    const pp = _threats[prim];
+    let ux = pp.vx, uy = pp.vy, ul = _hyp(ux, uy);
+    if (ul < 1) { ux = mx - pp.x; uy = my - pp.y; ul = _hyp(ux, uy); }
+    if (ul < 1) { ux = 1; uy = 0; ul = 1; }
+    ux /= ul; uy /= ul;
+    const nx = -uy, ny = ux;
+
+    const dirs = [];
+    const add = (x, y, tag) => { const l = _hyp(x, y); if (l > 1e-6) dirs.push({ x: x / l, y: y / l, tag }); };
+    add(nx, ny, 1); add(-nx, -ny, 1);
+    add(nx + ux * 0.7, ny + uy * 0.7, 1); add(-nx + ux * 0.7, -ny + uy * 0.7, 1);
+    add(nx - ux * 0.7, ny - uy * 0.7, 1); add(-nx - ux * 0.7, -ny - uy * 0.7, 1);
+    add(-ux, -uy, 2);
+    for (let i = 0; i < 16; i++) { const a2 = Math.PI * 2 * i / 16; add(Math.cos(a2), Math.sin(a2), 0); }
+
+    const clearOf = (dx, dy) =>
+    {
+        let best = BDC_FAR;
+        for (let s = 1; s <= 8; s++)
         {
-            let nearest = 0, nd = BDC_FAR;
-            for (let i = 0; i < _threatN; i++) { const dx = _threats[i].x - mx, dy = _threats[i].y - my, d2 = dx * dx + dy * dy; if (d2 < nd) { nd = d2; nearest = i; } }
-            rx = mx - _threats[nearest].x; ry = my - _threats[nearest].y; hasRef = true;
-        }
-        if (hasRef && (rx !== 0 || ry !== 0)) { const len = _hyp(rx, ry); ox = rx / len; oy = ry / len; }
-        else if (_bdcHaveLast) { ox = _bdcLastX; oy = _bdcLastY; }
-        else { ox = 0; oy = 0; }
-        _bdcLastX = ox; _bdcLastY = oy; _bdcHaveLast = true;
-        return { x: ox, y: oy };
-    }
-
-    if (momOn && _hyp(momX, momY) > 0.5) {}
-    const count = AD_DIR_COUNT + _bdcExtraDirs(mx, my);
-    for (let i = 0; i < count; i++)
-    {
-        const d = _bdcDirs[i];
-        _bdcScores[i] = _bdcScoreDir(d.x, d.y, mx, my, myR, speed, wallMul, momX, momY, momOn);
-        _bdcImpacts[i] = _bdcImpactDir(d.x, d.y, mx, my, myR, speed);
-        if (_bdcScores[i] < bestScore) { bestScore = _bdcScores[i]; best = i; }
-    }
-    cand = best; impactBest = _bdcImpacts[best];
-
-    if (_bdcHaveLast && best < AD_DIR_COUNT)
-    {
-        let pi = 0, a = Math.atan2(_bdcLastY, _bdcLastX);
-        if (_hyp(_bdcLastX, _bdcLastY) > 1e-6) { if (a < 0) a += Math.PI * 2; pi = Math.round(a / (Math.PI * 2) * AD_DIR_COUNT); if (pi >= AD_DIR_COUNT) pi = 0; }
-        if (_bdcScores[pi] <= bestScore * (1 + BDC_KEEP) && _bdcImpacts[pi] >= impactBest * BDC_KEEP_IMPACT) cand = pi;
-    }
-
-    if (_bdcImpacts[cand] <= BDC_T_URGENT)
-    {
-        let s = -1, sScore = BDC_FAR;
-        for (let i = 0; i < count; i++) if (_bdcImpacts[i] > BDC_T_URGENT && _bdcScores[i] < sScore) { sScore = _bdcScores[i]; s = i; }
-        if (s >= 0) cand = s;
-        else
-        {
-            let tMax = _bdcImpacts[cand], lb = cand;
-            leastBad = true;
-            fence = _bdcScores[cand] * BDC_TIE + BDC_EPS;
-            for (let i = 0; i < count; i++) if (_bdcScores[i] <= fence && _bdcImpacts[i] > tMax * 1.1) { tMax = _bdcImpacts[i]; lb = i; }
-            cand = lb;
-            const esc = _escapeSum(mx, my);
-            if (esc)
+            const t = s * 0.15, px = mx + dx * speed * t, py = my + dy * speed * t;
+            for (let i = 0; i < _bdcSelN; i++)
             {
-                let bi = -1, bd = -2;
-                for (let i = 0; i < count; i++)
-                {
-                    const d = _bdcDirs[i], dot = d.x * esc.x + d.y * esc.y;
-                    if (dot > bd && _bdcScores[i] <= _bdcScores[cand] * 2.5) { bd = dot; bi = i; }
-                }
-                if (bi >= 0) cand = bi;
+                const p = _threats[_bdcSel[i]];
+                const tx = p.cone ? p.ax : p.x + p.vx * t;
+                const ty = p.cone ? p.ay : p.y + p.vy * t;
+                const dd = _hyp(tx - px, ty - py) - myR - p.rad - _margin(_hyp(p.vx, p.vy));
+                if (dd < best) best = dd;
             }
         }
-    }
-
-    if (!leastBad)
-    {
-        fence = _bdcScores[cand] * BDC_TIE + BDC_EPS;
-        tBest = _bdcImpacts[cand];
-        for (let i = 0; i < count; i++)
+        for (let s = 1; s <= 2; s++)
         {
-            const sameClass = (_bdcImpacts[i] > BDC_T_URGENT) === (_bdcImpacts[cand] > BDC_T_URGENT);
-            if (!sameClass || _bdcScores[i] > fence) continue;
-            if (_bdcImpacts[i] > tBest * 1.1) { tBest = _bdcImpacts[i]; cand = i; }
+            const d = 130 * s;
+            if (isBlockedWide(mx + dx * d, my + dy * d, AD_WALL_BODY, BLOCKS_MOVEMENT)) best -= 700;
         }
-    }
+        return best;
+    };
 
-    const out = { x: _bdcDirs[cand].x, y: _bdcDirs[cand].y };
+    let bi = 0, bs = -BDC_FAR;
+    for (let i = 0; i < dirs.length; i++)
+    {
+        const d = dirs[i], c = clearOf(d.x, d.y) + (d.tag === 1 ? 45 : 0) - (d.tag === 2 ? 70 : 0);
+        if (c > bs) { bs = c; bi = i; }
+    }
+    if (_bdcHaveLast)
+    {
+        const c = clearOf(_bdcLastX, _bdcLastY) + 20;
+        if (c >= bs - 25 && _bdcLastX * dirs[bi].x + _bdcLastY * dirs[bi].y > 0.7) return { x: _bdcLastX, y: _bdcLastY };
+    }
+    const out = dirs[bi];
     _bdcLastX = out.x; _bdcLastY = out.y; _bdcHaveLast = true;
-    return out;
+    return { x: out.x, y: out.y };
 }
 
 function _recordHits(mx, my, myR)
