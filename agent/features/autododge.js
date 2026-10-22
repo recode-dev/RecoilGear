@@ -66,7 +66,7 @@ var _myPX = 0, _myPY = 0, _myVX = 0, _myVY = 0, _myInit = false, _myTs = 0;
 var _lastReason = "none";
 var _hits = [], _hitN = 0, _hitSeen = 0;
 var _stall = 0, _stallHold = 0;
-var _holdX = 0, _holdY = 0, _holdUntil = 0;
+var _holdX = 0, _holdY = 0, _holdUntil = 0, _lastTX = 1e9, _lastTY = 1e9, _lastSendT = 0, _calmSince = 0, _calmSent = false;
 
 function _ok(v, lo, hi) { return v >= lo && v <= hi; }
 function _nowMs() { return Date.now(); }
@@ -451,6 +451,9 @@ function _sendMove(tx, ty)
     try
     {
         const fns = getFunctions(), ix = Math.round(tx), iy = Math.round(ty);
+        const nt = _nowMs();
+        if (Math.abs(tx - _lastTX) < 16 && Math.abs(ty - _lastTY) < 16 && nt - _lastSendT < 120) return true;
+        _lastTX = tx; _lastTY = ty; _lastSendT = nt;
         if (_stallHold > 0) { _stallHold--; return false; }
         fns.LogicBattleModeClient_setClientPredictionMoveTo(battle, ix, iy, 1);
         return sendCommand(MOVE_INPUT_TYPE, (ci) => { ci.add(offsets.ClientInput_x).writeS32(ix); ci.add(offsets.ClientInput_y).writeS32(iy); });
@@ -718,10 +721,12 @@ function _adUpdate(mx, my)
 
     if (_bdDanger(mx, my, myR, 2.0, 1.2))
     {
+        _calmSince = _nowMs(); _calmSent = false;
         let dir = _bdcPick(mx, my, myR, 0, 0, speed, wallMul, momX, momY, momOn);
         const nn = _nowMs();
-        if (nn < _holdUntil && dir.x * _holdX + dir.y * _holdY > 0.9) dir = { x: _holdX, y: _holdY };
-        else { _holdX = dir.x; _holdY = dir.y; _holdUntil = nn + 320; }
+        if (nn < _holdUntil) dir = { x: _holdX, y: _holdY };
+        else { _holdX = dir.x; _holdY = dir.y; _holdUntil = nn + 420; }
+        _bdcLastX = dir.x; _bdcLastY = dir.y; _bdcHaveLast = true;
         _sendMove(Math.round(mx + dir.x * AD_REACH), Math.round(my + dir.y * AD_REACH));
         _lastReason = "reactive";
         return true;
@@ -734,6 +739,7 @@ function _adUpdate(mx, my)
         return true;
     }
     _lastReason = "none";
+    if (!_calmSent && _nowMs() - _calmSince > 350) { _sendMove(Math.round(mx), Math.round(my)); _calmSent = true; }
     return false;
 }
 
