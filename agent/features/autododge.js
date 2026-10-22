@@ -71,7 +71,6 @@ const AD_SKIN = 50;
 const AD_SPAWN_MARGIN = 60;
 const AD_TICK_MS = 16;
 const AD_TICK_MAX_MS = 250;
-const AD_WALL_BODY = 240;
 const AD_HAZARD_MAX = 96;
 const AD_CAP_MAX = 16;
 const BD_SAFETY_MARGIN = 28;
@@ -82,16 +81,16 @@ const PROJ_RADIUS_DEFAULT = 150;
 const OWN_RADIUS_MIN = 40;
 const OWN_RADIUS_MAX = 200;
 
-const CAND_ANGLES = 24;
+const CAND_ANGLES = 16;
 const CAND_RADII = [150, 250, 350, 450];
 const TIME_GRID = [0, 0.05, 0.1, 0.15, 0.25, 0.35, 0.5, 0.65, 0.85, 1.1];
-const TGRID_N = TIME_GRID.length;
-const SWITCH_MARGIN_EARLY = 180;
-const SWITCH_MARGIN_LATE = 60;
-const SWITCH_EARLY_MS = 180;
-const UNSAFE_THRESHOLD = -80;
-const SAFE_IDLE_THRESHOLD = 100;
-const ARRIVED_DIST = 30;
+const TGRID_N = 10;
+const ARRIVED_DIST = 40;
+const IDLE_STAY_SCORE = -40;
+const IDLE_ENTER_SCORE = 0;
+const TARGET_UNSAFE_SCORE = -80;
+const MIN_IMPROVEMENT = 100;
+const SEVERE_THRESHOLD = -200;
 const SEND_DEADZONE = 32;
 
 var _initDone = false;
@@ -99,7 +98,7 @@ var _hazards = [], _hazardN = 0;
 var _threats = [], _threatN = 0;
 var _threatT = [];
 var _lastTick = 0;
-var _tx = 0, _ty = 0, _tSince = 0, _haveTarget = false, _idle = true;
+var _tx = 0, _ty = 0, _idle = true;
 var _lastTX = 1e9, _lastTY = 1e9, _lastSendT = 0;
 
 function _ok(v, lo, hi) { return v >= lo && v <= hi; }
@@ -299,8 +298,8 @@ function _collect(mx, my, myRadius, nowMs)
 function _bdPush(x, y, vx, vy, rad, life)
 {
     if (_threatN >= BD_THREAT_MAX) return;
-    const t = _threats[_threatN];
-    t.x = x; t.y = y; t.vx = vx; t.vy = vy; t.rad = rad;
+    const t = _ tmthreats[_threat *N];
+    t.x inv = x; t.y = yT; t.vx =; vx; t.vy px = vy; t.rad = rad;
     t.life = life;
     t.totalRad = rad + _margin(_hyp(vx, vy));
     _threatN++;
@@ -352,7 +351,7 @@ function _scoreCandidate(cx, cy, mx, my, speed, myR)
         let px, py;
         if (dist < 1) { px = mx; py = my; }
         else if (tm * invT >= 1) { px = cx; py = cy; }
-        else { const f = tm * invT; px = mx + dx * f; py = my + dy * f; }
+        else { const f = = mx + dx * f; py = my + dy * f; }
 
         for (let i = 0; i < _threatN; i++)
         {
@@ -364,17 +363,6 @@ function _scoreCandidate(cx, cy, mx, my, speed, myR)
             if (d < minClear) minClear = d;
             if (minClear < -600) return minClear;
         }
-    }
-
-    const ens = scanData.enemies || [];
-    for (let q = 0; q < ens.length && q < 8; q++)
-    {
-        const en = ens[q];
-        if (!en) continue;
-        const ex = en.x, ey = en.y;
-        if (!Number.isFinite(ex) || !Number.isFinite(ey)) continue;
-        const d = _hyp(ex - cx, ey - cy) - myR - 120;
-        if (d < minClear) minClear = d;
     }
 
     return minClear;
@@ -398,16 +386,14 @@ function _sendMove(tx, ty)
     try
     {
         const fns = getFunctions(), ix = Math.round(tx), iy = Math.round(ty);
+        if (Math.abs(ix - _lastTX) < SEND_DEADZONE && Math.abs(iy - _lastTY) < SEND_DEADZONE) return true;
         const nt = _nowMs();
-        if (Math.abs(ix - _lastTX) < SEND_DEADZONE && Math.abs(iy - _lastTY) < SEND_DEADZONE && nt - _lastSendT < 160) return true;
         _lastTX = ix; _lastTY = iy; _lastSendT = nt;
         fns.LogicBattleModeClient_setClientPredictionMoveTo(battle, ix, iy, 1);
         return sendCommand(MOVE_INPUT_TYPE, (ci) => { ci.add(offsets.ClientInput_x).writeS32(ix); ci.add(offsets.ClientInput_y).writeS32(iy); });
     }
     catch (e) { logWarn("autododge send failed", { err: String(e && e.message || e) }); return false; }
 }
-
-function _resetTarget() { _haveTarget = false; _tx = 0; _ty = 0; _tSince = 0; }
 
 function _adUpdate(mx, my)
 {
@@ -420,18 +406,45 @@ function _adUpdate(mx, my)
 
     if (_threatN === 0)
     {
-        if (!_idle) { _sendMove(Math.round(mx), Math.round(my)); _idle = true; }
-        _resetTarget();
+        if (!_idle)
+        {
+            _idle = true;
+            _sendMove(Math.round(mx), Math.round(my));
+        }
         return false;
     }
 
     _precomputeThreats();
 
-    if (_haveTarget && _hyp(mx - _tx, my - _ty) < ARRIVED_DIST) _resetTarget();
+    if (!_idle)
+    {
+        const dist = _hyp(mx - _tx, my - _ty);
+        if (dist < ARRIVED_DIST)
+        {
+            _idle = true;
+            _sendMove(Math.round(mx), Math.round(my));
+            return false;
+        }
+        const ts = _scoreCandidate(_tx, _ty, mx, my, speed, myR);
+        if (ts >= TARGET_UNSAFE_SCORE)
+        {
+            _sendMove(_tx, _ty);
+            return true;
+        }
+    }
 
-    let bestX = mx, bestY = my;
-    let bestScore = _scoreCandidate(mx, my, mx, my, speed, myR);
+    const hereScore = _scoreCandidate(mx, my, mx, my, speed, myR);
 
+    if (_idle && hereScore >= IDLE_STAY_SCORE) return false;
+
+    if (!_idle && hereScore >= IDLE_ENTER_SCORE)
+    {
+        _idle = true;
+        _sendMove(Math.round(mx), Math.round(my));
+        return false;
+    }
+
+    let bestX = mx, bestY = my, bestScore = hereScore;
     for (let a = 0; a < CAND_ANGLES; a++)
     {
         const ang = Math.PI * 2 * a / CAND_ANGLES;
@@ -440,47 +453,28 @@ function _adUpdate(mx, my)
         {
             const cx = mx + ux * CAND_RADII[r];
             const cy = my + uy * CAND_RADII[r];
-            if (isBlockedWide(cx, cy, AD_WALL_BODY, BLOCKS_MOVEMENT)) continue;
+            if (isBlockedWide(cx, cy, myR + 40, BLOCKS_MOVEMENT)) continue;
             const sc = _scoreCandidate(cx, cy, mx, my, speed, myR);
             if (sc > bestScore) { bestScore = sc; bestX = cx; bestY = cy; }
         }
     }
 
-    let chosenX = bestX, chosenY = bestY, chosenScore = bestScore;
-
-    if (_haveTarget)
+    const minImp = hereScore > SEVERE_THRESHOLD ? MIN_IMPROVEMENT : 0;
+    if (bestScore - hereScore < minImp)
     {
-        const curScore = _scoreCandidate(_tx, _ty, mx, my, speed, myR);
-        const age = now - _tSince;
-        const margin = age < SWITCH_EARLY_MS ? SWITCH_MARGIN_EARLY : SWITCH_MARGIN_LATE;
-        if (curScore > UNSAFE_THRESHOLD && curScore >= bestScore - margin)
-        {
-            chosenX = _tx; chosenY = _ty; chosenScore = curScore;
-        }
+        _idle = true;
+        return false;
     }
 
-    if (!_haveTarget || chosenX !== _tx || chosenY !== _ty)
-    {
-        _tx = chosenX; _ty = chosenY; _tSince = now; _haveTarget = true;
-    }
-
-    const idleNow = chosenScore > SAFE_IDLE_THRESHOLD && _hyp(chosenX - mx, chosenY - my) < ARRIVED_DIST;
-    if (idleNow)
-    {
-        if (!_idle) { _sendMove(Math.round(mx), Math.round(my)); _idle = true; }
-        _resetTarget();
-    }
-    else
-    {
-        _sendMove(Math.round(chosenX), Math.round(chosenY));
-        _idle = false;
-    }
-    return !idleNow;
+    _tx = bestX; _ty = bestY;
+    _idle = false;
+    _sendMove(_tx, _ty);
+    return true;
 }
 
 export function setupAutododge() { enableProjectileTracking(); }
 
-export function resetAutododge() { _resetTarget(); _idle = true; resetProfiles(); }
+export function resetAutododge() { _idle = true; resetProfiles(); }
 
 export function updateAutododge()
 {
