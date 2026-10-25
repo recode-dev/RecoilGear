@@ -364,7 +364,7 @@ function _pickTarget(now)
     return pick;
 }
 
-export function setupAimbot()
+export function setupAutoaim()
 {
     if (_hooks) return;
     _hooks = true;
@@ -410,7 +410,7 @@ export function setupAimbot()
     {}
 }
 
-export function updateAimbot()
+export function updateAutoaim()
 {
     if (scanData.lastUpdate === 0)
     {
@@ -420,7 +420,7 @@ export function updateAimbot()
     _target = _pickTarget(Date.now());
 }
 
-export function resetAimbot()
+export function resetAutoaim()
 {
     _target = null;
     _track.clear();
