@@ -19,7 +19,6 @@ var _brawlerNameCache = new Map();
 var _scanCount = 0;
 var _activeGidSet = new Set();
 var _liveProjectiles = new Map();
-var _destroyed = [];
 var _friendlyIdx = new Set();
 var _projectileHooksInstalled = false;
 var CASTING_RANGE_SCALE = 100;
@@ -41,7 +40,6 @@ export var scanData = {
     myBrawlerName: null,
     enemies: [],
     projectiles: [],
-    destroyed: [],
     lastUpdate: 0
 };
 
@@ -359,18 +357,6 @@ function _removeProjectile(projectile)
     try
     {
         const gid = String(getFunctions().LogicGameObjectClient_getGlobalID(projectile));
-        const record = _liveProjectiles.get(gid);
-        if (record && _destroyed.length < 16)
-        {
-            _destroyed.push(
-            {
-                name: record.name,
-                spawnX: record.spawnX,
-                spawnY: record.spawnY,
-                x: record.lastX,
-                y: record.lastY
-            });
-        }
         _liveProjectiles.delete(gid);
     }
     catch (_)
@@ -655,16 +641,7 @@ export function updateScanner(bm, now)
             }
         }
         scanData.enemies = enemies;
-        scanData.destroyed = _destroyed.splice(0);
-        if (true)
-        {
-            scanData.projectiles = _updateLiveProjectiles(now);
-        }
-        else
-        {
-            if (_liveProjectiles.size) _liveProjectiles.clear();
-            scanData.projectiles = [];
-        }
+        scanData.projectiles = _updateLiveProjectiles(now);
         scanData.lastUpdate = now;
     }
     catch (_)
@@ -678,9 +655,7 @@ export function resetScannerCache()
     _friendlyIdx.clear();
     _charsByIndex.clear();
     _harvestedChars.clear();
-    _destroyed.length = 0;
     scanData.projectiles = [];
-    scanData.destroyed = [];
 }
 
 export function initScanner(base)

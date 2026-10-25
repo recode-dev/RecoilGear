@@ -375,7 +375,6 @@ export function setupAimbot()
         {
             onLeave(retval)
             {
-                if (!true) return;
                 if (!_target || !_target.ptr || _target.ptr.isNull()) return;
                 try
                 {
@@ -394,7 +393,6 @@ export function setupAimbot()
         {
             onEnter(args)
             {
-                if (!true) return;
                 if (!_target || !_target.ptr || _target.ptr.isNull()) return;
                 const aim = _aimAt(_target, Date.now());
                 if (!aim) return;
@@ -414,11 +412,6 @@ export function setupAimbot()
 
 export function updateAimbot()
 {
-    if (!true)
-    {
-        _target = null;
-        return;
-    }
     if (scanData.lastUpdate === 0)
     {
         _target = null;
