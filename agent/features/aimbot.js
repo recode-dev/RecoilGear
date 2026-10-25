@@ -16,11 +16,6 @@ import
 from "../core/scanner.js";
 import
 {
-    state
-}
-from "../utils/flags.js";
-import
-{
     BLOCKS_PROJECTILES,
     losCheck
 }
@@ -380,7 +375,7 @@ export function setupAimbot()
         {
             onLeave(retval)
             {
-                if (!state.aimbot) return;
+                if (!true) return;
                 if (!_target || !_target.ptr || _target.ptr.isNull()) return;
                 try
                 {
@@ -399,7 +394,7 @@ export function setupAimbot()
         {
             onEnter(args)
             {
-                if (!state.aimbot) return;
+                if (!true) return;
                 if (!_target || !_target.ptr || _target.ptr.isNull()) return;
                 const aim = _aimAt(_target, Date.now());
                 if (!aim) return;
@@ -419,7 +414,7 @@ export function setupAimbot()
 
 export function updateAimbot()
 {
-    if (!state.aimbot)
+    if (!true)
     {
         _target = null;
         return;

@@ -13,16 +13,6 @@ import
     readScString
 }
 from "./scstring.js";
-import
-{
-    canonBrawlerName
-}
-from "../utils/brawlerName.js";
-import
-{
-    state
-}
-from "../utils/flags.js";
 
 var moduleBase = null;
 var _brawlerNameCache = new Map();
@@ -170,13 +160,13 @@ function _ownerNameByIndex(ownerIndex)
     if (ownerIndex < 0) return null;
     if (ownerIndex === scanData.myPlayerIndex && scanData.myBrawlerName)
     {
-        return canonBrawlerName(scanData.myBrawlerName);
+        return scanData.myBrawlerName;
     }
     for (const enemy of scanData.enemies)
     {
         if (enemy.playerIndex === ownerIndex && enemy.brawlerName)
         {
-            return canonBrawlerName(enemy.brawlerName);
+            return enemy.brawlerName;
         }
     }
     return null;
@@ -587,7 +577,7 @@ export function updateScanner(bm, now)
                         const team = obj.add(offsets.GameObj_team).readU32();
                         if (data.readPointer().equals(vtableProj))
                         {
-                            if (state.autododge && team !== scanData.myTeamId) _captureProjectile(obj, data, team);
+                            if (team !== scanData.myTeamId) _captureProjectile(obj, data, team);
                             continue;
                         }
                         if (team === scanData.myTeamId)
@@ -666,7 +656,7 @@ export function updateScanner(bm, now)
         }
         scanData.enemies = enemies;
         scanData.destroyed = _destroyed.splice(0);
-        if (state.autododge)
+        if (true)
         {
             scanData.projectiles = _updateLiveProjectiles(now);
         }

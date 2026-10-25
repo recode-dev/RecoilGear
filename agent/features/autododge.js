@@ -21,30 +21,6 @@ import
 from "../core/scanner.js";
 import
 {
-    state
-}
-from "../utils/flags.js";
-import
-{
-    canonBrawlerName
-}
-from "../utils/brawlerName.js";
-import
-{
-    fitOf,
-    kindOf
-}
-from "../helpers/dodge_kinds.js";
-import
-{
-    blocksLinear,
-    noteBurstDeath,
-    resetProfiles,
-    shapeHazards
-}
-from "../helpers/dodge_profiles.js";
-import
-{
     BLOCKS_MOVEMENT,
     BLOCKS_PROJECTILES,
     getWallCacheH,
@@ -54,6 +30,14 @@ import
     TILE_SIZE
 }
 from "../utils/wallCache.js";
+
+function fitOf(name) { return { grow: 0.5, pad: 80.0 }; }
+function kindOf(name) { return null; }
+function shapeHazards(p, nowMs) { return null; }
+function blocksLinear(name) { return false; }
+function noteBurstDeath(gid) { }
+function resetProfiles() { }
+function canonBrawlerName(name) { return name; }
 
 const MOVE_INPUT_TYPE = 2;
 const RANGE_FALLBACK = 2800;
@@ -482,7 +466,7 @@ function _clearHeading()
 
 export function updateAutododge()
 {
-    if (!state.autododge) return;
+    if (!true) return;
     if (scanData.lastUpdate === 0) return;
     const now = Date.now();
     const tickMs = _heading ? TUNE.TICK_MS : TUNE.TICK_MS_IDLE;
