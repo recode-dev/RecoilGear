@@ -266,7 +266,6 @@ function _captureProjectile(projectile, data, ownerTeamOverride)
     const fns = getFunctions();
     try
     {
-        if (!_validPtr(data) && fns.LogicProjectileClient_getData) data = fns.LogicProjectileClient_getData(projectile);
         if (!_validPtr(data)) data = fns.LogicGameObjectClient_getData(projectile);
         if (!_validPtr(data)) return;
         const gid = String(fns.LogicGameObjectClient_getGlobalID(projectile));
