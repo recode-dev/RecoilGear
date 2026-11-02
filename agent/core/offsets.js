@@ -1,5 +1,4 @@
 export const offsets = Object.freeze({
-    BattleMode_battleScreenPtr: 0x8,
     BattleMode_objectManagerPtr: 0x28,
     BattleMode_clientInputManager: 0x58,
 
@@ -16,12 +15,11 @@ export const offsets = Object.freeze({
     GameObj_hp: 0xc4,
     LogicGameObjectClient_ownerIndex: 0x3c,
 
-    LogicCharacterClient_body: 0xa0,
-    CharData_brawlerId: 0x35c,
-    HeroData_namePtr: 0x18,
+    LogicCharacterClient_renderBody: 0x20,
+    LogicData_globalId: 0x20,
 
     LogicProjectileClient_ownerTeam: 0x40,
-    LogicProjectileClient_dataName: 0x18,
+    ProjectileClient_data: 0x10,
     Projectile_isIndirect: 0x118,
     ProjectileData_speed: 0x6c,
     ProjectileData_radius: 0x74,

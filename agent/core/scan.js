@@ -32,6 +32,7 @@ var _charsByIndex = new Map();
 export var scanData = {
     ownCharacter: ptr(0),
     battleModeClient: ptr(0),
+    battleScreen: null,
     myTeamId: 0,
     myPlayerIndex: -1,
     myX: 0,
@@ -42,22 +43,6 @@ export var scanData = {
     projectiles: [],
     lastUpdate: 0
 };
-
-function _readBattleScreen(bm)
-{
-    try
-    {
-        if (!bm || bm.isNull()) return null;
-        const screen = bm.add(offsets.BattleMode_battleScreenPtr).readPointer();
-        if (!screen || screen.isNull()) return null;
-        const vtable = screen.readPointer();
-        if (!vtable || vtable.isNull()) return null;
-        return screen;
-    }
-    catch (_)
-    {}
-    return null;
-}
 
 function _earlyTicks(fns, data)
 {
@@ -75,11 +60,12 @@ function _earlyTicks(fns, data)
 
 function _readDataName(data)
 {
+    if (!isValidPtr(data)) return null;
+    const fns = getFunctions();
+    if (!fns.LogicData_getName) return null;
     try
     {
-        const namePtr = data.add(offsets.HeroData_namePtr).readPointer();
-        if (!isValidPtr(namePtr)) return null;
-        const name = readScString(namePtr, 128);
+        const name = readScString(fns.LogicData_getName(data), 128);
         if (!name) return null;
         return (name.indexOf("hero_icon_") === 0 ? name.substring(10) : name).toUpperCase();
     }
@@ -88,28 +74,25 @@ function _readDataName(data)
     return null;
 }
 
-function _readProjectileName(data)
+function _readProjectileName(value)
 {
+    const fns = getFunctions();
+    if (!fns.LogicData_getName || !isValidPtr(value)) return null;
     try
     {
-        const fns = getFunctions();
-        if (fns.LogicData_getName && data && !data.isNull())
-        {
-            const named = readScString(fns.LogicData_getName(data), 128);
-            if (named) return named;
-        }
+        const direct = readScString(fns.LogicData_getName(value), 128);
+        if (direct) return direct;
     }
     catch (_)
     {}
     try
     {
-        const name = data.add(offsets.LogicProjectileClient_dataName).readPointer();
-        return readScString(name, 128);
+        const data = value.add(offsets.ProjectileClient_data).readPointer();
+        if (isValidPtr(data)) return readScString(fns.LogicData_getName(data), 128);
     }
     catch (_)
-    {
-        return null;
-    }
+    {}
+    return null;
 }
 
 function _readOwnerIndex(obj)
@@ -127,14 +110,11 @@ function _readOwnerIndex(obj)
 function _bodyOf(obj)
 {
     if (!isValidPtr(obj)) return obj;
-    if (!offsets.LogicCharacterClient_body) return obj;
+    if (!offsets.LogicCharacterClient_renderBody) return obj;
     try
     {
-        const body = obj.add(offsets.LogicCharacterClient_body).readPointer();
+        const body = obj.add(offsets.LogicCharacterClient_renderBody).readPointer();
         if (!isValidPtr(body) || body.equals(obj)) return obj;
-        const objVt = obj.readPointer();
-        const bodyVt = body.readPointer();
-        if (!isValidPtr(objVt) || !isValidPtr(bodyVt) || !bodyVt.equals(objVt)) return obj;
         return body;
     }
     catch (_)
@@ -281,9 +261,9 @@ function _captureProjectile(projectile, data, ownerTeamOverride)
         let isIndirect = 0;
         try
         {
-            if (offsets.Projectile_isIndirect)
+            if (offsets.Projectile_isIndirect && isValidPtr(data))
             {
-                isIndirect = projectile.add(offsets.Projectile_isIndirect).readU32() | 0;
+                isIndirect = data.add(offsets.Projectile_isIndirect).readU8() | 0;
             }
         }
         catch (_)
@@ -473,7 +453,6 @@ export function updateScanner(bm, now)
         }
         scanData.ownCharacter = own;
         scanData.battleModeClient = bm;
-        scanData.battleScreen = _readBattleScreen(bm);
         scanData.myTeamId = functions.LogicBattleModeClient_getOwnPlayerTeam(bm);
         scanData.myPlayerIndex = functions.LogicBattleModeClient_getOwnPlayerIndex ? functions.LogicBattleModeClient_getOwnPlayerIndex(bm) | 0 : _readOwnerIndex(own);
         _friendlyIdx.clear();
@@ -588,7 +567,7 @@ export function updateScanner(bm, now)
                         {
                             try
                             {
-                                brawlerId = data.add(offsets.CharData_brawlerId).readU8() | 0;
+                                brawlerId = data.add(offsets.LogicData_globalId).readU32() | 0;
                             }
                             catch (_)
                             {}
