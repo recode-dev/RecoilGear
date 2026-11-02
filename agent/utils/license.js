@@ -1,36 +1,16 @@
 import
 {
-    getBase
-}
-from "../core/functions.js";
-
-import
-{
     offsets
 }
 from "../core/offsets.js";
 
 const REQUEST_BODY_PTR = 192;
 const REQUEST_BODY_SIZE = 200;
-const LICENSE_BODY = "{\"features\":[],\"connection\":\"Keep-Alive\"}";
-
-const malloc = new NativeFunction(Module.getGlobalExportByName("malloc"), "pointer", ["int"]);
+const LICENSE_PATH = "/res/license.bin";
 
 var license = null;
+var bodies = [];
 var listener = null;
-
-function _inject(request)
-{
-    const total = license.byteLength + LICENSE_BODY.length + 1;
-    const body = malloc(total);
-    if (body.isNull()) throw new Error("license: malloc(" + total + ") failed");
-
-    Memory.copy(body, license.unwrap(), license.byteLength);
-    body.add(license.byteLength).writeUtf8String(LICENSE_BODY);
-
-    request.add(REQUEST_BODY_PTR).writePointer(body);
-    request.add(REQUEST_BODY_SIZE).writeS32(total);
-}
 
 export function setupLicense()
 {
@@ -39,18 +19,27 @@ export function setupLicense()
     const off = offsets.Hook_requestBody;
     if (typeof off !== "number" || off <= 0) throw new Error("license: missing offset Hook_requestBody");
 
-    const base = getBase();
-    const mod = Process.findModuleByAddress(base);
-    if (!mod) throw new Error("license: no module for base " + base);
-
+    const mod = Process.getModuleByName("Nulls Brawl");
     const dir = mod.path.substring(0, mod.path.lastIndexOf("/"));
-    license = File.readAllBytes(dir + "/res/license.bin");
+    license = File.readAllBytes(dir + LICENSE_PATH);
 
-    listener = Interceptor.attach(base.add(off),
+    const malloc = new NativeFunction(Module.findGlobalExportByName("malloc"), "pointer", ["int"]);
+
+    listener = Interceptor.attach(mod.base.add(off),
     {
         onEnter(args)
         {
-            _inject(args[0]);
+            const body = JSON.stringify({ features: [], connection: "Keep-Alive" });
+            const total = license.byteLength + body.length + 1;
+            const buf = malloc(total);
+
+            Memory.copy(buf, license.unwrap(), license.byteLength);
+            buf.add(license.byteLength).writeUtf8String(body);
+            bodies.push(buf);
+
+            const request = args[0];
+            request.add(REQUEST_BODY_PTR).writePointer(buf);
+            request.add(REQUEST_BODY_SIZE).writeS32(total);
         }
     });
 
