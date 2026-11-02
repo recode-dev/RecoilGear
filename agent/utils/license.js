@@ -9,7 +9,6 @@ const REQUEST_BODY_SIZE = 200;
 const LICENSE_PATH = "/res/license.bin";
 
 var license = null;
-var bodies = [];
 var listener = null;
 
 export function setupLicense()
@@ -35,11 +34,9 @@ export function setupLicense()
 
             Memory.copy(buf, license.unwrap(), license.byteLength);
             buf.add(license.byteLength).writeUtf8String(body);
-            bodies.push(buf);
 
-            const request = args[0];
-            request.add(REQUEST_BODY_PTR).writePointer(buf);
-            request.add(REQUEST_BODY_SIZE).writeS32(total);
+            args[0].add(REQUEST_BODY_PTR).writePointer(buf);
+            args[0].add(REQUEST_BODY_SIZE).writeS32(total);
         }
     });
 
