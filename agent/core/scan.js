@@ -34,6 +34,7 @@ export var scanData = {
     battleModeClient: ptr(0),
     battleScreen: null,
     myTeamId: 0,
+    myIndex: -1,
     myPlayerIndex: -1,
     myX: 0,
     myY: 0,
@@ -116,6 +117,9 @@ function _bodyOf(obj)
     {
         const body = obj.add(offsets.LogicCharacterClient_renderBody).readPointer();
         if (!isValidPtr(body) || body.equals(obj)) return obj;
+        const objectVtable = obj.readPointer();
+        const bodyVtable = body.readPointer();
+        if (!bodyVtable.equals(objectVtable)) return obj;
         return body;
     }
     catch (_)
@@ -388,7 +392,7 @@ function _updateLiveProjectiles(now)
                 projectile.castRange = _rangeForOwner(projectile.ownerIndex);
             }
             if (projectile.ownerIndex >= 0 && _friendlyIdx.has(projectile.ownerIndex)) continue;
-            if (projectile.ownerTeam === scanData.myTeamId) continue;
+            if (projectile.ownerIndex >= 0 && projectile.ownerIndex === scanData.myIndex) continue;
             output.push(
             {
                 gid,
@@ -438,6 +442,8 @@ export function updateScanner(bm, now)
         scanData.ownCharacter = own;
         scanData.battleModeClient = bm;
         scanData.myTeamId = functions.LogicBattleModeClient_getOwnPlayerTeam(bm);
+        scanData.myIndex = functions.LogicBattleModeClient_getOwnPlayerIndex ?
+            (functions.LogicBattleModeClient_getOwnPlayerIndex(bm) | 0) : -1;
         scanData.myPlayerIndex = functions.LogicBattleModeClient_getOwnPlayerIndex ? functions.LogicBattleModeClient_getOwnPlayerIndex(bm) | 0 : _readOwnerIndex(own);
         _friendlyIdx.clear();
         _friendlyIdx.add(scanData.myPlayerIndex);
@@ -511,7 +517,7 @@ export function updateScanner(bm, now)
                         const team = obj.add(offsets.GameObj_team).readU32();
                         if (data.readPointer().equals(vtableProj))
                         {
-                                            if (team !== scanData.myTeamId) _captureProjectile(obj, data, team);
+                        _captureProjectile(obj, data, team);
                             continue;
                         }
                         if (team === scanData.myTeamId)
