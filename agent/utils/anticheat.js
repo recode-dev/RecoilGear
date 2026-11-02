@@ -29,7 +29,7 @@ const TUNE = {
     URL: true,
     SHOP_OWNED: true,
     LICENSE: true,
-    SERVER_HEALTH: true,
+    SERVER_HEALTH: false,
     SHOP_SCALE: true,
     INDICES: false,
     CHAT: true,
