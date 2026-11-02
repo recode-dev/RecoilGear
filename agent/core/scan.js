@@ -41,6 +41,7 @@ export var scanData = {
     myBrawlerName: null,
     enemies: [],
     projectiles: [],
+    friendlySpeed: 0,
     lastUpdate: 0
 };
 
@@ -234,6 +235,10 @@ function _captureProjectile(projectile, data, ownerTeamOverride)
         const speed = Math.max(1, offsets.ProjectileData_speed
             ? data.add(offsets.ProjectileData_speed).readU32() | 0
             : (fns.LogicProjectileData_getSpeed ? fns.LogicProjectileData_getSpeed(data) | 0 : 0));
+        if (ownerTeamOverride !== void 0 && ownerTeamOverride === scanData.myTeamId && speed >= 300 && speed <= 8500)
+        {
+            scanData.friendlySpeed = speed;
+        }
         const radius = Math.max(0, offsets.ProjectileData_radius
             ? data.add(offsets.ProjectileData_radius).readU32() | 0
             : (fns.LogicProjectileData_getRadius ? fns.LogicProjectileData_getRadius(data) | 0 : 0));
@@ -506,7 +511,7 @@ export function updateScanner(bm, now)
                         const team = obj.add(offsets.GameObj_team).readU32();
                         if (data.readPointer().equals(vtableProj))
                         {
-                            if (team !== scanData.myTeamId) _captureProjectile(obj, data, team);
+                                            if (team !== scanData.myTeamId) _captureProjectile(obj, data, team);
                             continue;
                         }
                         if (team === scanData.myTeamId)

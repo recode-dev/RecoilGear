@@ -172,22 +172,33 @@ function _ownProjectileSpeed()
     const now = Date.now();
     if (now - _speedAt < SPEED_REFRESH_MS) return _projectileSpeed;
     _speedAt = now;
+
+    let speed = 0;
     try
     {
         const fns = getFunctions();
         const own = scanData.ownCharacter;
-        if (!own || own.isNull()) return _projectileSpeed;
-        if (!fns.LogicCharacterClient_getWeaponSkill || !fns.LogicSkillData_getProjectileData) return _projectileSpeed;
-        const skill = fns.LogicCharacterClient_getWeaponSkill(own);
-        if (!skill || skill.isNull()) return _projectileSpeed;
-        const data = fns.LogicSkillData_getProjectileData(skill, 0);
-        if (!data || data.isNull()) return _projectileSpeed;
-        const raw = data.add(offsets.ProjectileData_speed).readU32() | 0;
-        if (raw >= 300 && raw <= 8500) _projectileSpeed = raw;
-        _ownBeam = !!(fns.LogicProjectileData_isBeam && fns.LogicProjectileData_isBeam(data));
+        if (own && !own.isNull() && fns.LogicCharacterClient_getWeaponSkill && fns.LogicSkillData_getProjectileData)
+        {
+            const skill = fns.LogicCharacterClient_getWeaponSkill(own);
+            const data = skill && !skill.isNull() ? fns.LogicSkillData_getProjectileData(skill, 0) : null;
+            if (data && !data.isNull())
+            {
+                speed = data.add(offsets.ProjectileData_speed).readU32() | 0;
+                _ownBeam = !!(fns.LogicProjectileData_isBeam && fns.LogicProjectileData_isBeam(data));
+            }
+        }
     }
     catch (_)
     {}
+
+    if (!(speed >= 300 && speed <= 8500))
+    {
+        const observed = scanData.friendlySpeed | 0;
+        if (observed >= 300 && observed <= 8500) speed = observed;
+    }
+
+    if (speed >= 300 && speed <= 8500) _projectileSpeed = speed;
     return _projectileSpeed;
 }
 

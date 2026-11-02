@@ -51,8 +51,11 @@ from "./features/autoaim.js";
 
 let _base = null;
 let _lastBattle = null;
+const SERVER_TICK_MS = 50;
+
 let _installed = false;
 let _ticker = null;
+let _lastLogicAt = 0;
 
 function findModule()
 {
@@ -117,12 +120,16 @@ function tick(bm)
     }
     catch (_)
     {}
-    try
+    if (now - _lastLogicAt >= SERVER_TICK_MS)
     {
-        updateAutododge();
+        _lastLogicAt = now;
+        try
+        {
+            updateAutododge();
+        }
+        catch (_)
+        {}
     }
-    catch (_)
-    {}
 }
 
 export function install()
