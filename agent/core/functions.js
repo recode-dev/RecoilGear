@@ -10,8 +10,15 @@ var _n = null;
 function _nf(name, ret, args)
 {
     const off = offsets[name];
-    if (typeof off !== "number" || off <= 0) throw new Error("functions: missing offset " + name);
-    return new NativeFunction(base.add(off), ret, args);
+    if (typeof off !== "number" || off <= 0) return null;
+    try
+    {
+        return new NativeFunction(base.add(off), ret, args);
+    }
+    catch (_)
+    {
+        return null;
+    }
 }
 
 export function initFunctions(baseIn)

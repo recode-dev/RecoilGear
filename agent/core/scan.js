@@ -297,10 +297,29 @@ function _captureProjectile(projectile, data, ownerTeamOverride)
         }
         const x = fns.LogicGameObjectClient_getX(projectile) | 0;
         const y = fns.LogicGameObjectClient_getY(projectile) | 0;
-        const speed = Math.max(1, data.add(offsets.ProjectileData_speed).readU32() | 0);
-        const radius = Math.max(0, data.add(offsets.ProjectileData_radius).readU32() | 0);
-        const isIndirect = projectile.add(offsets.Projectile_isIndirect).readU32() | 0;
-        const isBeam = !!fns.LogicProjectileData_isBeam(data);
+        const speed = Math.max(1, offsets.ProjectileData_speed
+            ? data.add(offsets.ProjectileData_speed).readU32() | 0
+            : (fns.LogicProjectileData_getSpeed ? fns.LogicProjectileData_getSpeed(data) | 0 : 0));
+        const radius = Math.max(0, offsets.ProjectileData_radius
+            ? data.add(offsets.ProjectileData_radius).readU32() | 0
+            : (fns.LogicProjectileData_getRadius ? fns.LogicProjectileData_getRadius(data) | 0 : 0));
+        let isIndirect = 0;
+        try
+        {
+            if (offsets.Projectile_isIndirect)
+            {
+                isIndirect = projectile.add(offsets.Projectile_isIndirect).readU32() | 0;
+            }
+        }
+        catch (_)
+        {}
+        let isBeam = false;
+        try
+        {
+            isBeam = !!(fns.LogicProjectileData_isBeam && fns.LogicProjectileData_isBeam(data));
+        }
+        catch (_)
+        {}
         let ownerTeam = ownerTeamOverride === void 0 ? 0 : ownerTeamOverride | 0;
         if (ownerTeamOverride === void 0)
         {
@@ -486,21 +505,34 @@ export function updateScanner(bm, now)
         scanData.battleModeClient = bm;
         scanData.battleScreen = _readBattleScreen(bm);
         scanData.myTeamId = functions.LogicBattleModeClient_getOwnPlayerTeam(bm);
-        scanData.myPlayerIndex = functions.LogicBattleModeClient_getOwnPlayerIndex(bm) | 0;
+        scanData.myPlayerIndex = functions.LogicBattleModeClient_getOwnPlayerIndex ? functions.LogicBattleModeClient_getOwnPlayerIndex(bm) | 0 : _readOwnerIndex(own);
         _friendlyIdx.clear();
         _friendlyIdx.add(scanData.myPlayerIndex);
         _charsByIndex.clear();
         _rememberCharacter(scanData.myPlayerIndex, own);
-        const self = _bodyOf(own);
-        scanData.myX = functions.LogicGameObjectClient_getX(self) | 0;
-        scanData.myY = functions.LogicGameObjectClient_getY(self) | 0;
+        try
+        {
+            const self = _bodyOf(own);
+            scanData.myX = functions.LogicGameObjectClient_getX(self) | 0;
+            scanData.myY = functions.LogicGameObjectClient_getY(self) | 0;
+        }
+        catch (_)
+        {
+            scanData.myX = functions.LogicGameObjectClient_getX(own) | 0;
+            scanData.myY = functions.LogicGameObjectClient_getY(own) | 0;
+        }
         scanData.mySpeed = 720;
         const ownData = functions.LogicGameObjectClient_getData(own);
         if (_validPtr(ownData))
         {
-            scanData.myRadius = functions.LogicCharacterData_getCollisionRadius(ownData);
-            const speed = functions.LogicCharacterData_getSpeed(ownData) | 0;
-            if (speed >= 300 && speed <= 3000) scanData.mySpeed = speed;
+            scanData.myRadius = functions.LogicCharacterData_getCollisionRadius(ownData) || 60;
+            try
+            {
+                const speed = functions.LogicCharacterData_getSpeed ? functions.LogicCharacterData_getSpeed(ownData) | 0 : 0;
+                if (speed >= 300 && speed <= 3000) scanData.mySpeed = speed;
+            }
+            catch (_)
+            {}
             const nameRead = _readDataName(ownData);
             if (nameRead) scanData.myBrawlerName = nameRead;
         }
@@ -562,10 +594,22 @@ export function updateScanner(bm, now)
                             brawlerName = _readDataName(data);
                             _brawlerNameCache.set(gid, brawlerName);
                         }
-                        const radius = functions.LogicCharacterData_getCollisionRadius(data) | 0;
+                        let radius = 0;
+                        try
+                        {
+                            radius = functions.LogicCharacterData_getCollisionRadius ? functions.LogicCharacterData_getCollisionRadius(data) | 0 : 0;
+                        }
+                        catch (_)
+                        {}
                         if (!brawlerName && radius <= 0) continue;
                         const kind = brawlerName ? "player" : "spawnable";
-                        const moveSpeed = functions.LogicCharacterData_getSpeed(data) | 0;
+                        let moveSpeed = 0;
+                        try
+                        {
+                            moveSpeed = functions.LogicCharacterData_getSpeed ? functions.LogicCharacterData_getSpeed(data) | 0 : 0;
+                        }
+                        catch (_)
+                        {}
                         const playerIndex = _readOwnerIndex(obj);
                         if (brawlerName) _rememberCharacter(playerIndex, obj);
                         let brawlerId = 0;

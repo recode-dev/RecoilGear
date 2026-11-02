@@ -1,5 +1,6 @@
 import
 {
+    getFunctions,
     initFunctions
 }
 from "./core/functions.js";
@@ -51,16 +52,84 @@ from "./features/autoaim.js";
 let _base = null;
 let _lastBattle = null;
 let _installed = false;
+let _ticker = null;
 
 function findBase()
 {
-    return Process.getModuleByName("Nulls Brawl").base;
+    try
+    {
+        return Process.getModuleByName("Nulls Brawl").base;
+    }
+    catch (_)
+    {}
+    const mods = Process.enumerateModules();
+    for (let i = 0; i < mods.length; i++)
+    {
+        if (mods[i].name.toLowerCase().indexOf("nulls") >= 0) return mods[i].base;
+    }
+    return null;
+}
+
+function battleModeClient()
+{
+    try
+    {
+        const fns = getFunctions();
+        if (!fns.BattleMode_getInstance) return null;
+        const mode = fns.BattleMode_getInstance();
+        if (!mode || mode.isNull()) return null;
+        const client = mode.add(offsets.BattleMode_objectManagerPtr).readPointer();
+        if (!client || client.isNull()) return null;
+        return client;
+    }
+    catch (_)
+    {
+        return null;
+    }
+}
+
+function tick(bm)
+{
+    if (!bm || bm.isNull()) return;
+
+    if (!_lastBattle || !_lastBattle.equals(bm))
+    {
+        _lastBattle = bm;
+        resetScannerCache();
+        resetAutododge();
+        resetAutoaim();
+        notifyBattleModeChanged(bm);
+    }
+
+    const now = Date.now();
+    try
+    {
+        updateScanner(bm, now);
+        updateAutoaim();
+    }
+    catch (e)
+    {
+        return;
+    }
+    try
+    {
+        maybeRefreshWallCache(bm, now);
+    }
+    catch (_)
+    {}
+    try
+    {
+        updateAutododge();
+    }
+    catch (_)
+    {}
 }
 
 export function install()
 {
     if (_installed) return true;
     _base = findBase();
+    if (!_base) return false;
 
     initFunctions(_base);
     setupLicense();
@@ -69,46 +138,28 @@ export function install()
     setupAutododge();
     setupAutoaim();
 
-    Interceptor.attach(_base.add(offsets.LogicBattleModeClient_update),
+    let hooked = false;
+    try
     {
-        onEnter(args)
+        Interceptor.attach(_base.add(offsets.LogicBattleModeClient_update),
         {
-            const bm = args[0];
-            if (!bm || bm.isNull()) return;
+            onEnter(args)
+            {
+                tick(args[0]);
+            }
+        });
+        hooked = true;
+    }
+    catch (_)
+    {}
 
-            if (!_lastBattle || !_lastBattle.equals(bm))
-            {
-                _lastBattle = bm;
-                resetScannerCache();
-                resetAutododge();
-                resetAutoaim();
-                notifyBattleModeChanged(bm);
-            }
-
-            const now = Date.now();
-            try
-            {
-                updateScanner(bm, now);
-                updateAutoaim();
-            }
-            catch (e)
-            {
-                return;
-            }
-            try
-            {
-                maybeRefreshWallCache(bm, now);
-            }
-            catch (_)
-            {}
-            try
-            {
-                updateAutododge();
-            }
-            catch (_)
-            {}
-        }
-    });
+    if (!hooked && !_ticker)
+    {
+        _ticker = setInterval(function ()
+        {
+            tick(battleModeClient());
+        }, 16);
+    }
 
     _installed = true;
     return true;

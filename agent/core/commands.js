@@ -14,19 +14,26 @@ const _zeroBuf = new Uint8Array(CMD_BUF_SIZE).buffer;
 
 export function sendCommand(cmdType, fillFn)
 {
-    const fns = getFunctions();
-    const battle = fns.BattleMode_getInstance();
-    if (!battle || battle.isNull()) return false;
+    try
+    {
+        const fns = getFunctions();
+        const battle = fns.BattleMode_getInstance();
+        if (!battle || battle.isNull()) return false;
 
-    const mgr = battle.add(offsets.BattleMode_clientInputManager).readPointer();
-    if (!mgr || mgr.isNull()) return false;
+        const mgr = battle.add(offsets.BattleMode_clientInputManager).readPointer();
+        if (!mgr || mgr.isNull()) return false;
 
-    const ci = fns.operator_new(CMD_BUF_SIZE);
-    if (!ci || ci.isNull()) return false;
+        const ci = fns.operator_new(CMD_BUF_SIZE);
+        if (!ci || ci.isNull()) return false;
 
-    ci.writeByteArray(_zeroBuf);
-    fns.ClientInput_constructor_int(ci, cmdType | 0);
-    if (fillFn) fillFn(ci, battle);
-    fns.ClientInputManager_addInput(mgr, ci);
-    return true;
+        ci.writeByteArray(_zeroBuf);
+        fns.ClientInput_constructor_int(ci, cmdType | 0);
+        if (fillFn) fillFn(ci, battle);
+        fns.ClientInputManager_addInput(mgr, ci);
+        return true;
+    }
+    catch (_)
+    {
+        return false;
+    }
 }
