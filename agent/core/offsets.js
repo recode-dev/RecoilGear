@@ -79,32 +79,5 @@ export const offsets = Object.freeze({
 
     LogicData_getName: 0x9a4f1c,
 
-    Hook_openUrl: 0xd47ea4,
     Hook_requestBody: 0xbd5f3c,
-    Hook_serverHealth: 0x746bb4,
-    Hook_uiBuild: 0x50ddec,
-    Hook_uiLayerArg: 0x85dccc,
-    Hook_widgetSetPosition: 0x8cbf9c,
-    Hook_shopOwnedCheck: 0x6fe484,
-    Hook_shopListScale: 0xaf726c,
-    Hook_guardShort: 0x8d0904,
-    Hook_guardWide: 0x53f6a0,
-    Hook_forcedReturnZero: 0x78d95c,
-    Hook_forcedReturnOne: 0xae1288,
-
-    Hook_spPatch01: 0x549794,
-    Hook_spPatch02: 0x58b164,
-    Hook_spPatch03: 0x602698,
-    Hook_spPatch04: 0x658fc8,
-    Hook_spPatch05: 0x67fb84,
-    Hook_spPatch06: 0x690810,
-    Hook_spPatch07: 0x6c6c04,
-    Hook_spPatch08: 0x700ccc,
-    Hook_spPatch09: 0x7e61d0,
-    Hook_spPatch10: 0x873d84,
-    Hook_spPatch11: 0x90464c,
-    Hook_spPatch12: 0x685c78,
-    Hook_spPatch13: 0x712a7c,
-    Hook_spPatch14: 0x685b80,
-    Hook_spPatch15: 0x712ad4
 });
