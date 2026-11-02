@@ -13,13 +13,13 @@ import
 {
     scanData
 }
-from "../core/scanner.js";
+from "../core/scan.js";
 import
 {
     BLOCKS_PROJECTILES,
     losCheck
 }
-from "../utils/wallCache.js";
+from "../utils/walls.js";
 
 const SPEED_FALLBACK = 3000;
 const SPEED_REFRESH_MS = 500;

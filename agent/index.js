@@ -16,7 +16,7 @@ import
     resetScannerCache,
     updateScanner
 }
-from "./core/scanner.js";
+from "./core/scan.js";
 
 import
 {
@@ -24,13 +24,13 @@ import
     watchTileChanges,
     maybeRefreshWallCache
 }
-from "./utils/wallCache.js";
+from "./utils/walls.js";
 
 import
 {
-    setupAnticheat
+    setupLicense
 }
-from "./utils/anticheat.js";
+from "./utils/license.js";
 
 import
 {
@@ -79,7 +79,7 @@ export function install()
     watchTileChanges(_base);
     setupAutododge();
     setupAutoaim();
-    setupAnticheat();
+    setupLicense();
 
     Interceptor.attach(_base.add(offsets.LogicBattleModeClient_update),
     {

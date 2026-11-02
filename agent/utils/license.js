@@ -32,7 +32,7 @@ function _attach(name, handlers)
     }
 }
 
-function setupLicense()
+function installLicense()
 {
     try
     {
@@ -69,14 +69,14 @@ function setupLicense()
     });
 }
 
-export function setupAnticheat()
+export function setupLicense()
 {
     if (_ready) return true;
 
     _base = getBase();
     if (!_base) return false;
 
-    setupLicense();
+    installLicense();
 
     try
     {
@@ -89,7 +89,7 @@ export function setupAnticheat()
     return true;
 }
 
-export function resetAnticheat()
+export function resetLicense()
 {
     for (let i = 0; i < _listeners.length; i++)
     {

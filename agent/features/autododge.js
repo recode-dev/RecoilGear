@@ -18,17 +18,7 @@ import
     enableProjectileTracking,
     scanData
 }
-from "../core/scanner.js";
-import
-{
-    state
-}
-from "../utils/flags.js";
-import
-{
-    canonBrawlerName
-}
-from "../utils/brawlerName.js";
+from "../core/scan.js";
 import
 {
     BLOCKS_MOVEMENT,
@@ -39,7 +29,7 @@ import
     losCheck,
     TILE_SIZE
 }
-from "../utils/wallCache.js";
+from "../utils/walls.js";
 
 const MOVE_INPUT_TYPE = 2;
 const RANGE_FALLBACK = 2800;
@@ -141,7 +131,7 @@ export function setAutododgeOptions(opts)
         _skip = new Set();
         for (const name of opts.ignoredBrawlers)
         {
-            const id = canonBrawlerName(name);
+            const id = name;
             if (id) _skip.add(id);
         }
         _muted.clear();
@@ -189,7 +179,7 @@ function _collectLive(myX, myY, myRadius)
         if (!gid) continue;
         live.add(gid);
         const owner = p.ownerName;
-        if (owner && _skip.has(canonBrawlerName(owner) || owner)) _muted.add(gid);
+        if (owner && _skip.has(owner)) _muted.add(gid);
         if (_muted.has(gid)) continue;
         const name = p.name || "";
         const dx = p.x - myX;
@@ -368,7 +358,6 @@ function _clearHeading()
 
 export function updateAutododge()
 {
-    if (!state.autododge) return;
     if (scanData.lastUpdate === 0) return;
     const now = Date.now();
     const tickMs = _heading ? TUNE.TICK_MS : TUNE.TICK_MS_IDLE;
@@ -439,7 +428,6 @@ export function updateAutododge()
     const chosen = _ring[chosenIdx];
     _headingIdx = chosenIdx;
     _heading = chosen;
-    if (state.speedhack) return;
     const tx = Math.round(myX + chosen.x * TUNE.REACH);
     const ty = Math.round(myY + chosen.y * TUNE.REACH);
     if (!isFinite(tx) || !isFinite(ty)) return;
