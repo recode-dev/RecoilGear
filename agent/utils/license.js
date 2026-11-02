@@ -3,80 +3,79 @@ import
     getBase
 }
 from "../core/functions.js";
-
 import
 {
     offsets
 }
 from "../core/offsets.js";
 
-var _base = null;
-var _ready = false;
-var _listeners = [];
-var _license = null;
-var _licenseKeep = [];
+const REQUEST_BODY_PTR = 192;
+const REQUEST_BODY_SIZE = 200;
+const LICENSE_BODY = "{\"features\":[],\"connection\":\"Keep-Alive\"}";
 
-function _attach(name, handlers)
+var payload = null;
+var payloadSize = 0;
+var listener = null;
+
+function _validPtr(value)
 {
-    const off = offsets[name];
-    if (typeof off !== "number" || off <= 0) return null;
-    try
-    {
-        const listener = Interceptor.attach(_base.add(off), handlers);
-        _listeners.push(listener);
-        return listener;
-    }
-    catch (_)
-    {
-        return null;
-    }
+    return value && !value.isNull();
 }
 
-function installLicense()
+function buildPayload(base)
 {
     try
     {
-        const path = Process.getModuleByName("Nulls Brawl").path;
-        const dir = path.substring(0, path.lastIndexOf("/"));
-        _license = File.readAllBytes(dir + "/res/license.bin");
+        const mod = Process.findModuleByAddress(base);
+        if (!mod) return false;
+        const dir = mod.path.substring(0, mod.path.lastIndexOf("/"));
+        const raw = File.readAllBytes(dir + "/res/license.bin");
+        payloadSize = raw.byteLength + LICENSE_BODY.length + 1;
+        payload = Memory.alloc(payloadSize);
+        Memory.copy(payload, raw.unwrap(), raw.byteLength);
+        payload.add(raw.byteLength).writeUtf8String(LICENSE_BODY);
+        return true;
     }
     catch (_)
     {
-        return;
+        return false;
     }
-
-    const alloc = new NativeFunction(Module.getGlobalExportByName("malloc"), "pointer", ["int"]);
-
-    _attach("Hook_requestBody",
-    {
-        onEnter(args)
-        {
-            try
-            {
-                const body = JSON.stringify({ features: [], connection: "Keep-Alive" });
-                const total = _license.byteLength + body.length + 1;
-                const buf = alloc(total);
-                Memory.copy(buf, _license.unwrap(), _license.byteLength);
-                buf.add(_license.byteLength).writeUtf8String(body);
-                _licenseKeep.push(buf);
-                const obj = args[0];
-                obj.add(192).writePointer(buf);
-                obj.add(200).writeS32(total);
-            }
-            catch (_)
-            {}
-        }
-    });
 }
 
 export function setupLicense()
 {
-    if (_ready) return true;
+    if (listener) return true;
 
-    _base = getBase();
-    if (!_base) return false;
+    let base = null;
+    try
+    {
+        base = getBase();
+    }
+    catch (_)
+    {
+        return false;
+    }
 
-    installLicense();
+    if (!base) return false;
+    if (!buildPayload(base)) return false;
+
+    try
+    {
+        listener = Interceptor.attach(base.add(offsets.Hook_requestBody),
+        {
+            onEnter(args)
+            {
+                const request = args[0];
+                if (!_validPtr(request)) return;
+                request.add(REQUEST_BODY_PTR).writePointer(payload);
+                request.add(REQUEST_BODY_SIZE).writeS32(payloadSize);
+            }
+        });
+    }
+    catch (_)
+    {
+        listener = null;
+    }
 
     try
     {
@@ -85,21 +84,17 @@ export function setupLicense()
     catch (_)
     {}
 
-    _ready = true;
-    return true;
+    return !!listener;
 }
 
 export function resetLicense()
 {
-    for (let i = 0; i < _listeners.length; i++)
+    if (!listener) return;
+    try
     {
-        try
-        {
-            _listeners[i].detach();
-        }
-        catch (_)
-        {}
+        listener.detach();
     }
-    _listeners.length = 0;
-    _ready = false;
+    catch (_)
+    {}
+    listener = null;
 }
