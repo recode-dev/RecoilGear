@@ -2,8 +2,6 @@ export const offsets = Object.freeze({
     BattleMode_battleScreenPtr: 0x8,
     BattleMode_objectManagerPtr: 0x28,
     BattleMode_clientInputManager: 0x58,
-    BattleMode_hashKey: 0x60,
-    BattleMode_hashEnabled: 0x70,
 
     ObjectManager_objectsArray: 0x0,
     ObjectManager_count: 0xc,
@@ -30,10 +28,6 @@ export const offsets = Object.freeze({
 
     ClientInput_x: 0xc,
     ClientInput_y: 0x10,
-    ClientInput_typeConstantTable: 0xe1bd30,
-    ClientInput_typeFallback: 0xe1bc28,
-    ClientInput_hashInnerMask: 0xe1bbd0,
-    ClientInput_hashOuterMask: 0xe1bbf0,
 
     ScString_length: 0x4,
     ScString_data: 0x8,
