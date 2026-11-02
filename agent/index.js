@@ -28,12 +28,6 @@ from "./utils/walls.js";
 
 import
 {
-    setupLicense
-}
-from "./utils/license.js";
-
-import
-{
     resetAutododge,
     setupAutododge,
     updateAutododge
@@ -67,7 +61,6 @@ export function install()
     watchTileChanges(_base);
     setupAutododge();
     setupAutoaim();
-    setupLicense();
 
     Interceptor.attach(_base.add(offsets.LogicBattleModeClient_update),
     {

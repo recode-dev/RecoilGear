@@ -74,5 +74,4 @@ export const offsets = Object.freeze({
 
     LogicData_getName: 0x9a4f1c,
 
-    Hook_requestBody: 0xbd5f3c,
 });
