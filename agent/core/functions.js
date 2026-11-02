@@ -5,7 +5,19 @@ import
 from "./offsets.js";
 
 var base = null;
+var image = null;
 var _n = null;
+
+export function isValidPtr(value)
+{
+    return value && !value.isNull();
+}
+
+export function ptrFromU32(lo, hi)
+{
+    if (!lo && !hi) return ptr(0);
+    return ptr("0x" + (hi >>> 0).toString(16).padStart(8, "0") + (lo >>> 0).toString(16).padStart(8, "0"));
+}
 
 function _nf(name, ret, args)
 {
@@ -21,10 +33,11 @@ function _nf(name, ret, args)
     }
 }
 
-export function initFunctions(baseIn)
+export function initFunctions(baseIn, imageIn)
 {
     if (_n) return _n;
     base = baseIn;
+    image = imageIn || null;
 
     _n = {
         BattleMode_getInstance: _nf("BattleMode_getInstance", "pointer", []),
@@ -45,7 +58,6 @@ export function initFunctions(baseIn)
         LogicCharacterData_getSpeed: _nf("LogicCharacterData_getSpeed", "int32", ["pointer"]),
         LogicCharacterData_getCollisionRadius: _nf("LogicCharacterData_getCollisionRadius", "uint32", ["pointer"]),
         LogicBattleModeClient_getTileMap: _nf("LogicBattleModeClient__getTileMap", "pointer", ["pointer"]),
-        LogicProjectileClient_getData: _nf("LogicProjectileClient_getData", "pointer", ["pointer"]),
         LogicCharacterClient_getWeaponSkill: _nf("LogicCharacterClient__getWeaponSkill", "pointer", ["pointer"]),
         LogicSkillData_getCastingRange: _nf("LogicSkillData__getCastingRange", "int32", ["pointer"]),
         LogicSkillData_getProjectileData: _nf("LogicSkillData__getProjectileData", "pointer", ["pointer", "int"]),
@@ -62,6 +74,11 @@ export function getFunctions()
 {
     if (!_n) throw new Error("Functions not initialized! Call initFunctions(base) first.");
     return _n;
+}
+
+export function getImage()
+{
+    return image;
 }
 
 export function getBase()

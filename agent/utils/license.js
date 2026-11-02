@@ -1,5 +1,12 @@
 import
 {
+    getBase,
+    getImage
+}
+from "../core/functions.js";
+
+import
+{
     offsets
 }
 from "../core/offsets.js";
@@ -18,13 +25,14 @@ export function setupLicense()
     const off = offsets.Hook_requestBody;
     if (typeof off !== "number" || off <= 0) throw new Error("license: missing offset Hook_requestBody");
 
-    const mod = Process.getModuleByName("Nulls Brawl");
-    const dir = mod.path.substring(0, mod.path.lastIndexOf("/"));
+    const image = getImage();
+    if (!image) throw new Error("license: image path is not initialized");
+    const dir = image.path.substring(0, image.path.lastIndexOf("/"));
     license = File.readAllBytes(dir + LICENSE_PATH);
 
     const malloc = new NativeFunction(Module.findGlobalExportByName("malloc"), "pointer", ["int"]);
 
-    listener = Interceptor.attach(mod.base.add(off),
+    listener = Interceptor.attach(getBase().add(off),
     {
         onEnter(args)
         {

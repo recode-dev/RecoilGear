@@ -54,18 +54,18 @@ let _lastBattle = null;
 let _installed = false;
 let _ticker = null;
 
-function findBase()
+function findModule()
 {
     try
     {
-        return Process.getModuleByName("Nulls Brawl").base;
+        return Process.getModuleByName("Nulls Brawl");
     }
     catch (_)
     {}
     const mods = Process.enumerateModules();
     for (let i = 0; i < mods.length; i++)
     {
-        if (mods[i].name.toLowerCase().indexOf("nulls") >= 0) return mods[i].base;
+        if (mods[i].name.toLowerCase().indexOf("nulls") >= 0) return mods[i];
     }
     return null;
 }
@@ -128,10 +128,11 @@ function tick(bm)
 export function install()
 {
     if (_installed) return true;
-    _base = findBase();
-    if (!_base) return false;
+    const mod = findModule();
+    if (!mod) return false;
+    _base = mod.base;
 
-    initFunctions(_base);
+    initFunctions(_base, mod);
     setupLicense();
     initScanner(_base);
     watchTileChanges(_base);

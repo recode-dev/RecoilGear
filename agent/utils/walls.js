@@ -1,6 +1,8 @@
 import
 {
-    getFunctions
+    getFunctions,
+    isValidPtr,
+    ptrFromU32
 }
 from "../core/functions.js";
 import
@@ -23,20 +25,9 @@ var needsRebuild = true;
 var lastFailedTs = 0;
 var tileWatchInstalled = false;
 
-function _validPtr(value)
-{
-    return value && !value.isNull();
-}
-
-function ptrFromU32(lo, hi)
-{
-    if (!lo && !hi) return ptr(0);
-    return ptr("0x" + (hi >>> 0).toString(16).padStart(8, "0") + (lo >>> 0).toString(16).padStart(8, "0"));
-}
-
 function _rebuildFrom(tileMap)
 {
-    if (!_validPtr(tileMap)) return false;
+    if (!isValidPtr(tileMap)) return false;
     try
     {
         const width = tileMap.add(offsets.TileMap_Width).readS32();
@@ -45,7 +36,7 @@ function _rebuildFrom(tileMap)
         const total = width * height;
         if (total > MAX_TOTAL_TILES) return false;
         const tiles = tileMap.add(offsets.TileMap_TilesArray).readPointer();
-        if (!_validPtr(tiles)) return false;
+        if (!isValidPtr(tiles)) return false;
 
         const pointerSize = Process.pointerSize;
         const raw = tiles.readByteArray(total * pointerSize);
@@ -69,7 +60,7 @@ function _rebuildFrom(tileMap)
             {
                 continue;
             }
-            if (!_validPtr(tileType)) continue;
+            if (!isValidPtr(tileType)) continue;
             const key = tileType.toString();
             let flags = flagsByType.get(key);
             if (flags === void 0)
@@ -112,7 +103,7 @@ export function notifyBattleModeChanged(battleMode)
 
 export function maybeRefreshWallCache(battleMode, now)
 {
-    if (!needsRebuild || !_validPtr(battleMode)) return;
+    if (!needsRebuild || !isValidPtr(battleMode)) return;
     if (now === void 0) now = Date.now();
     if (now - lastFailedTs < RETRY_MS) return;
     try

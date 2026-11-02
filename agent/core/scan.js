@@ -1,6 +1,8 @@
 import
 {
-    getFunctions
+    getFunctions,
+    isValidPtr,
+    ptrFromU32
 }
 from "./functions.js";
 import
@@ -59,17 +61,6 @@ export var scanData = {
     lastUpdate: 0
 };
 
-function _validPtr(value)
-{
-    return value && !value.isNull();
-}
-
-function ptrFromU32(lo, hi)
-{
-    if (!lo && !hi) return ptr(0);
-    return ptr("0x" + (hi >>> 0).toString(16).padStart(8, "0") + (lo >>> 0).toString(16).padStart(8, "0"));
-}
-
 function _readBattleScreen(bm)
 {
     try
@@ -105,7 +96,7 @@ function _readDataName(data)
     try
     {
         const namePtr = data.add(offsets.HeroData_namePtr).readPointer();
-        if (!_validPtr(namePtr)) return null;
+        if (!isValidPtr(namePtr)) return null;
         const name = readScString(namePtr, 128);
         if (!name) return null;
         return (name.indexOf("hero_icon_") === 0 ? name.substring(10) : name).toUpperCase();
@@ -153,15 +144,15 @@ function _readOwnerIndex(obj)
 
 function _bodyOf(obj)
 {
-    if (!_validPtr(obj)) return obj;
+    if (!isValidPtr(obj)) return obj;
     if (!offsets.LogicCharacterClient_body) return obj;
     try
     {
         const body = obj.add(offsets.LogicCharacterClient_body).readPointer();
-        if (!_validPtr(body) || body.equals(obj)) return obj;
+        if (!isValidPtr(body) || body.equals(obj)) return obj;
         const objVt = obj.readPointer();
         const bodyVt = body.readPointer();
-        if (!_validPtr(objVt) || !_validPtr(bodyVt) || !bodyVt.equals(objVt)) return obj;
+        if (!isValidPtr(objVt) || !isValidPtr(bodyVt) || !bodyVt.equals(objVt)) return obj;
         return body;
     }
     catch (_)
@@ -195,7 +186,7 @@ function _noteCastRange(name, units)
 
 function _harvestSkillData(fns, skillData)
 {
-    if (!_validPtr(skillData) || !fns.LogicSkillData_getCastingRange || !fns.LogicSkillData_getProjectileData) return;
+    if (!isValidPtr(skillData) || !fns.LogicSkillData_getCastingRange || !fns.LogicSkillData_getProjectileData) return;
     try
     {
         const tiles = fns.LogicSkillData_getCastingRange(skillData) | 0;
@@ -204,7 +195,7 @@ function _harvestSkillData(fns, skillData)
         for (let i = 0; i < PROJ_INDEX_MAX; i++)
         {
             const proj = fns.LogicSkillData_getProjectileData(skillData, i);
-            if (!_validPtr(proj)) continue;
+            if (!isValidPtr(proj)) continue;
             _noteCastRange(_readProjectileName(proj), units);
         }
     }
@@ -214,7 +205,7 @@ function _harvestSkillData(fns, skillData)
 
 function _harvestCharacter(character)
 {
-    if (!_validPtr(character)) return false;
+    if (!isValidPtr(character)) return false;
     const fns = getFunctions();
     let found = false;
     try
@@ -222,7 +213,7 @@ function _harvestCharacter(character)
         if (fns.LogicCharacterClient_getWeaponSkill)
         {
             const weapon = fns.LogicCharacterClient_getWeaponSkill(character);
-            if (_validPtr(weapon))
+            if (isValidPtr(weapon))
             {
                 _harvestSkillData(fns, weapon);
                 found = true;
@@ -237,11 +228,11 @@ function _harvestCharacter(character)
         try
         {
             const skill = fns.LogicCharacterClient_getSkillAt(character, slot);
-            if (!_validPtr(skill)) continue;
+            if (!isValidPtr(skill)) continue;
             for (let hyper = 0; hyper < 2; hyper++)
             {
                 const data = fns.LogicSkillClient_getData(skill, hyper);
-                if (!_validPtr(data)) continue;
+                if (!isValidPtr(data)) continue;
                 _harvestSkillData(fns, data);
                 found = true;
             }
@@ -254,7 +245,7 @@ function _harvestCharacter(character)
 
 function _rememberCharacter(index, character)
 {
-    if (index < 0 || !_validPtr(character)) return;
+    if (index < 0 || !isValidPtr(character)) return;
     _charsByIndex.set(index, character);
     const key = character.toString();
     if (_harvestedChars.has(key)) return;
@@ -268,7 +259,7 @@ function _castRangeFor(name, ownerIndex)
     if (ownerIndex >= 0)
     {
         const owner = _charsByIndex.get(ownerIndex);
-        if (_validPtr(owner) && _harvestCharacter(owner) && name)
+        if (isValidPtr(owner) && _harvestCharacter(owner) && name)
         {
             return _rangeByName.get(name) || 0;
         }
@@ -278,13 +269,12 @@ function _castRangeFor(name, ownerIndex)
 
 function _captureProjectile(projectile, data, ownerTeamOverride)
 {
-    if (!_validPtr(projectile)) return;
+    if (!isValidPtr(projectile)) return;
     const fns = getFunctions();
     try
     {
-        if (!_validPtr(data) && fns.LogicProjectileClient_getData) data = fns.LogicProjectileClient_getData(projectile);
-        if (!_validPtr(data)) data = fns.LogicGameObjectClient_getData(projectile);
-        if (!_validPtr(data)) return;
+        if (!isValidPtr(data)) data = fns.LogicGameObjectClient_getData(projectile);
+        if (!isValidPtr(data)) return;
         const gid = String(fns.LogicGameObjectClient_getGlobalID(projectile));
         const existing = _liveProjectiles.get(gid);
         if (existing)
@@ -494,7 +484,7 @@ export function updateScanner(bm, now)
     try
     {
         const own = functions.LogicBattleModeClient_getOwnCharacter(bm);
-        if (!_validPtr(own))
+        if (!isValidPtr(own))
         {
             scanData.ownCharacter = null;
             scanData.battleModeClient = null;
@@ -523,7 +513,7 @@ export function updateScanner(bm, now)
         }
         scanData.mySpeed = 720;
         const ownData = functions.LogicGameObjectClient_getData(own);
-        if (_validPtr(ownData))
+        if (isValidPtr(ownData))
         {
             scanData.myRadius = functions.LogicCharacterData_getCollisionRadius(ownData) || 60;
             try
@@ -539,11 +529,11 @@ export function updateScanner(bm, now)
         const enemies = [];
         const vtableProj = moduleBase.add(offsets.VTABLE_PROJECTILE_DATA);
         const objMgr = bm.add(offsets.BattleMode_objectManagerPtr).readPointer();
-        if (_validPtr(objMgr))
+        if (isValidPtr(objMgr))
         {
             const objects = objMgr.add(offsets.ObjectManager_objectsArray).readPointer();
             const count = objMgr.add(offsets.ObjectManager_count).readU32();
-            if (_validPtr(objects) && count > 0 && count <= 1200)
+            if (isValidPtr(objects) && count > 0 && count <= 1200)
             {
                 const stride = offsets.ObjectManager_ptrStride;
                 let batchView = null;
@@ -571,9 +561,9 @@ export function updateScanner(bm, now)
                         {
                             obj = objects.add(i * stride).readPointer();
                         }
-                        if (!_validPtr(obj)) continue;
+                        if (!isValidPtr(obj)) continue;
                         const data = functions.LogicGameObjectClient_getData(obj);
-                        if (!_validPtr(data)) continue;
+                        if (!isValidPtr(data)) continue;
                         const team = obj.add(offsets.GameObj_team).readU32();
                         if (data.readPointer().equals(vtableProj))
                         {
