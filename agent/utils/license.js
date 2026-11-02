@@ -13,6 +13,8 @@ const REQUEST_BODY_PTR = 192;
 const REQUEST_BODY_SIZE = 200;
 const LICENSE_BODY = "{\"features\":[],\"connection\":\"Keep-Alive\"}";
 
+const malloc = new NativeFunction(Module.getGlobalExportByName("malloc"), "pointer", ["int"]);
+
 var payload = null;
 var payloadSize = 0;
 var listener = null;
@@ -29,7 +31,8 @@ function buildPayload(base)
     const dir = mod.path.substring(0, mod.path.lastIndexOf("/"));
     const raw = File.readAllBytes(dir + "/res/license.bin");
     payloadSize = raw.byteLength + LICENSE_BODY.length + 1;
-    payload = Memory.alloc(payloadSize);
+    payload = malloc(payloadSize);
+    if (payload.isNull()) throw new Error("license: malloc(" + payloadSize + ") failed");
     Memory.copy(payload, raw.unwrap(), raw.byteLength);
     payload.add(raw.byteLength).writeUtf8String(LICENSE_BODY);
 }
