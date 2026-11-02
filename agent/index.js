@@ -1,6 +1,5 @@
 import
 {
-    getFunctions,
     initFunctions
 }
 from "./core/functions.js";
@@ -52,7 +51,6 @@ from "./features/autoaim.js";
 let _base = null;
 let _lastBattle = null;
 let _installed = false;
-let _ticker = null;
 
 function findBase()
 {
@@ -70,61 +68,6 @@ function findBase()
     return null;
 }
 
-function battleModeClient()
-{
-    try
-    {
-        const fns = getFunctions();
-        if (!fns.BattleMode_getInstance) return null;
-        const mode = fns.BattleMode_getInstance();
-        if (!mode || mode.isNull()) return null;
-        const client = mode.add(offsets.BattleMode_objectManagerPtr).readPointer();
-        if (!client || client.isNull()) return null;
-        return client;
-    }
-    catch (_)
-    {
-        return null;
-    }
-}
-
-function tick(bm)
-{
-    if (!bm || bm.isNull()) return;
-
-    if (!_lastBattle || !_lastBattle.equals(bm))
-    {
-        _lastBattle = bm;
-        resetScannerCache();
-        resetAutododge();
-        resetAutoaim();
-        notifyBattleModeChanged(bm);
-    }
-
-    const now = Date.now();
-    try
-    {
-        updateScanner(bm, now);
-        updateAutoaim();
-    }
-    catch (e)
-    {
-        return;
-    }
-    try
-    {
-        maybeRefreshWallCache(bm, now);
-    }
-    catch (_)
-    {}
-    try
-    {
-        updateAutododge();
-    }
-    catch (_)
-    {}
-}
-
 export function install()
 {
     if (_installed) return true;
@@ -138,28 +81,46 @@ export function install()
     setupAutoaim();
     setupAnticheat();
 
-    let hooked = false;
-    try
+    Interceptor.attach(_base.add(offsets.LogicBattleModeClient_update),
     {
-        Interceptor.attach(_base.add(offsets.LogicBattleModeClient_update),
+        onEnter(args)
         {
-            onEnter(args)
-            {
-                tick(args[0]);
-            }
-        });
-        hooked = true;
-    }
-    catch (_)
-    {}
+            const bm = args[0];
+            if (!bm || bm.isNull()) return;
 
-    if (!hooked && !_ticker)
-    {
-        _ticker = setInterval(function ()
-        {
-            tick(battleModeClient());
-        }, 16);
-    }
+            if (!_lastBattle || !_lastBattle.equals(bm))
+            {
+                _lastBattle = bm;
+                resetScannerCache();
+                resetAutododge();
+                resetAutoaim();
+                notifyBattleModeChanged(bm);
+            }
+
+            const now = Date.now();
+            try
+            {
+                updateScanner(bm, now);
+                updateAutoaim();
+            }
+            catch (e)
+            {
+                return;
+            }
+            try
+            {
+                maybeRefreshWallCache(bm, now);
+            }
+            catch (_)
+            {}
+            try
+            {
+                updateAutododge();
+            }
+            catch (_)
+            {}
+        }
+    });
 
     _installed = true;
     return true;
