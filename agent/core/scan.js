@@ -53,7 +53,7 @@ export var scanData = {
     myPlayerIndex: -1,
     myX: 0,
     myY: 0,
-    myRadius: 60,
+    myRadius: 0,
     mySpeed: 720,
     myBrawlerName: null,
     enemies: [],
@@ -515,7 +515,8 @@ export function updateScanner(bm, now)
         const ownData = functions.LogicGameObjectClient_getData(own);
         if (isValidPtr(ownData))
         {
-            scanData.myRadius = functions.LogicCharacterData_getCollisionRadius(ownData) || 60;
+            const getRadius = functions.LogicCharacterData_getCollisionRadius;
+            if (getRadius) scanData.myRadius = getRadius(ownData) | 0;
             try
             {
                 const speed = functions.LogicCharacterData_getSpeed ? functions.LogicCharacterData_getSpeed(ownData) | 0 : 0;
