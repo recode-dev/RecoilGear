@@ -29,7 +29,6 @@ import
 from "../utils/walls.js";
 
 const MOVE_INPUT_TYPE = 2;
-const RANGE_FALLBACK = 2800;
 
 const TUNE = {
     AWARE: 3200,
@@ -115,9 +114,8 @@ function _traveled(p)
 
 function _lifeLeft(p)
 {
-    const maxR = p.castRange > 0 ? p.castRange : RANGE_FALLBACK;
     const flown = _traveled(p);
-    return Math.max(0, maxR - flown);
+    return Math.max(0, p.castRange - flown);
 }
 
 function _collectLive(myX, myY, myRadius)

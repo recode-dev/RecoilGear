@@ -22,10 +22,10 @@ var _activeGidSet = new Set();
 var _liveProjectiles = new Map();
 var _friendlyIdx = new Set();
 var _projectileHooksInstalled = false;
-var CASTING_RANGE_SCALE = 100;
+export const TILE_UNITS = 300;
 var SKILL_SLOT_MAX = 8;
 var PROJ_INDEX_MAX = 4;
-var _rangeByName = new Map();
+var _rangeByData = new Map();
 var _harvestedChars = new Set();
 var _charsByIndex = new Map();
 
@@ -159,11 +159,12 @@ function _ownerNameByIndex(ownerIndex)
     return null;
 }
 
-function _noteCastRange(name, units)
+function _noteRange(data, units)
 {
-    if (!name || units <= 0 || units >= 70000) return;
-    const prev = _rangeByName.get(name) || 0;
-    if (units > prev) _rangeByName.set(name, units);
+    if (!isValidPtr(data) || units <= 0 || units >= 70000) return;
+    const key = data.toString();
+    const prev = _rangeByData.get(key) || 0;
+    if (units > prev) _rangeByData.set(key, units);
 }
 
 function _harvestSkillData(fns, skillData)
@@ -173,12 +174,12 @@ function _harvestSkillData(fns, skillData)
     {
         const tiles = fns.LogicSkillData_getCastingRange(skillData) | 0;
         if (tiles <= 0) return;
-        const units = tiles * CASTING_RANGE_SCALE;
+        const units = tiles * TILE_UNITS;
         for (let i = 0; i < PROJ_INDEX_MAX; i++)
         {
             const proj = fns.LogicSkillData_getProjectileData(skillData, i);
             if (!isValidPtr(proj)) continue;
-            _noteCastRange(_readProjectileName(proj), units);
+            _noteRange(proj, units);
         }
     }
     catch (_)
@@ -234,16 +235,19 @@ function _rememberCharacter(index, character)
     if (_harvestCharacter(character)) _harvestedChars.add(key);
 }
 
-function _castRangeFor(name, ownerIndex)
+function _castRangeFor(data, ownerIndex)
 {
-    const cached = name ? _rangeByName.get(name) || 0 : 0;
-    if (cached > 0) return cached;
-    if (ownerIndex >= 0)
+    if (isValidPtr(data))
+    {
+        const cached = _rangeByData.get(data.toString()) || 0;
+        if (cached > 0) return cached;
+    }
+    if (ownerIndex >= 0 && isValidPtr(data))
     {
         const owner = _charsByIndex.get(ownerIndex);
-        if (isValidPtr(owner) && _harvestCharacter(owner) && name)
+        if (isValidPtr(owner) && _harvestCharacter(owner))
         {
-            return _rangeByName.get(name) || 0;
+            return _rangeByData.get(data.toString()) || 0;
         }
     }
     return 0;
@@ -303,7 +307,7 @@ function _captureProjectile(projectile, data, ownerTeamOverride)
         }
         const ownerIndex = _readOwnerIndex(projectile);
         const name = _readProjectileName(data);
-        const castRange = _castRangeFor(name, ownerIndex);
+        const castRange = _castRangeFor(data, ownerIndex);
         const earlyTicks = _earlyTicks(fns, data);
         const now = Date.now();
         _liveProjectiles.set(gid,
@@ -417,7 +421,7 @@ function _updateLiveProjectiles(now)
             projectile.ownerName = _ownerNameByIndex(projectile.ownerIndex);
             if (projectile.castRange <= 0)
             {
-                projectile.castRange = _castRangeFor(projectile.name, projectile.ownerIndex);
+                projectile.castRange = _castRangeFor(projectile.data, projectile.ownerIndex);
             }
             if (projectile.ownerIndex >= 0 && _friendlyIdx.has(projectile.ownerIndex)) continue;
             if (projectile.ownerTeam === scanData.myTeamId) continue;
@@ -425,6 +429,7 @@ function _updateLiveProjectiles(now)
             {
                 gid,
                 ptr: projectile.ptr,
+                data: projectile.data,
                 name: projectile.name,
                 ownerTeam: projectile.ownerTeam,
                 ownerIndex: projectile.ownerIndex,
@@ -631,6 +636,7 @@ export function updateScanner(bm, now)
 export function resetScannerCache()
 {
     _brawlerNameCache.clear();
+    _rangeByData.clear();
     _liveProjectiles.clear();
     _friendlyIdx.clear();
     _charsByIndex.clear();

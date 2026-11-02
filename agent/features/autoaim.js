@@ -11,6 +11,7 @@ import
 from "../core/offsets.js";
 import
 {
+    TILE_UNITS,
     scanData
 }
 from "../core/scan.js";
@@ -29,7 +30,6 @@ const LATENCY_S = 0.06;
 const LEAD_ITERATIONS = 3;
 const RANGE_FLIGHT_S = 1.1;
 const RANGE_MARGIN = 0.88;
-const RANGE_UNIT = 300;
 const SPEED_CAP_MUL = 1.35;
 const VEL_SMOOTH = 0.6;
 const LEAD_CLAMP = 0.35;
@@ -209,7 +209,7 @@ function _ownRange(speed)
     }
     catch (_)
     {}
-    if (tiles > 0 && tiles <= 40) _rangeCache = tiles * RANGE_UNIT * RANGE_MARGIN;
+    if (tiles > 0 && tiles <= 40) _rangeCache = tiles * TILE_UNITS * RANGE_MARGIN;
     else _rangeCache = 0;
     return _rangeCache > 0 ? _rangeCache : speed * RANGE_FLIGHT_S * RANGE_MARGIN;
 }
