@@ -446,8 +446,6 @@ function _updateLiveProjectiles(now)
                 projectile.vy = projectile.vy * (1 - alpha) + observedVy * alpha;
                 projectile.hasVelocitySample = true;
             }
-            projectile.x = x;
-            projectile.y = y;
             projectile.lastX = x;
             projectile.lastY = y;
             projectile.lastTs = now;

@@ -142,17 +142,6 @@ export function watchTileChanges(base)
     catch (_)
     {}
 }
-
-export function getWallCacheW()
-{
-    return wallsWidth;
-}
-
-export function getWallCacheH()
-{
-    return wallsHeight;
-}
-
 export function losCheck(wx0, wy0, wx1, wy1, checkBit)
 {
     const grid = walls;
