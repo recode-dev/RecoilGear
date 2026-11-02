@@ -28,6 +28,12 @@ from "./utils/wallCache.js";
 
 import
 {
+    setupAnticheat
+}
+from "./utils/anticheat.js";
+
+import
+{
     resetAutododge,
     setupAutododge,
     updateAutododge
@@ -73,6 +79,7 @@ export function install()
     watchTileChanges(_base);
     setupAutododge();
     setupAutoaim();
+    setupAnticheat();
 
     Interceptor.attach(_base.add(offsets.LogicBattleModeClient_update),
     {
