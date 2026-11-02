@@ -4,17 +4,19 @@ import
     getFunctions
 }
 from "../core/functions.js";
+
 import
 {
     offsets
 }
 from "../core/offsets.js";
+
 import
 {
-    TILE_UNITS,
     scanData
 }
 from "../core/scan.js";
+
 import
 {
     BLOCKS_PROJECTILES,
@@ -22,364 +24,150 @@ import
 }
 from "../utils/walls.js";
 
-const SPEED_FALLBACK = 3000;
-const SPEED_REFRESH_MS = 500;
-const SKIP_NAME_PARTS = ["BALL"];
-
-const LATENCY_S = 0.06;
-const LEAD_ITERATIONS = 3;
-const RANGE_FLIGHT_S = 1.1;
-const RANGE_MARGIN = 0.88;
-const SPEED_CAP_MUL = 1.35;
-const VEL_SMOOTH = 0.6;
-const LEAD_CLAMP = 0.35;
-const LEAD_RAMP_DIST = 1200;
-const SPEED_DEFAULT_CAP = 1200;
-const SPEED_SPIKE_MUL = 1.6;
-const STICKY_MARGIN = 1.12;
-const AIM_JITTER = 40;
+const SERVER_TICK_MS = 50;
+const SPEED_MIN = 300;
+const SPEED_MAX = 8500;
+const LEAD_PASSES = 2;
+const MAX_FLIGHT_S = 1.5;
+const MAX_SPEED_EST = 1600;
+const VELOCITY_WINDOW_MS = 250;
 
 var _target = null;
-var _aimX = 0;
-var _aimY = 0;
-var _track = new Map();
-var _projectileSpeed = SPEED_FALLBACK;
+var _aim = null;
+var _speed = 0;
 var _speedAt = 0;
-var _ownBeam = false;
-var _pathFn = null;
-var _pathBuf = null;
-var _rangeCache = 0;
-var _rangeAt = 0;
+var _points = new Map();
 var _hooks = false;
 
 function _isSkipped(name)
 {
-    if (!name) return true;
-    for (let i = 0; i < SKIP_NAME_PARTS.length; i++)
-    {
-        if (name.indexOf(SKIP_NAME_PARTS[i]) >= 0) return true;
-    }
-    return false;
+    return !name || name.indexOf("BALL") >= 0;
 }
 
-function _sample(gid, x, y, moveSpeed, now)
-{
-    const prev = _track.get(gid);
-    let vx = 0;
-    let vy = 0;
-    const cap = moveSpeed > 0 ? moveSpeed * SPEED_CAP_MUL : SPEED_DEFAULT_CAP;
-    if (prev)
-    {
-        const dt = (now - prev.t) / 1000;
-        if (dt >= 0.008 && dt <= 0.4)
-        {
-            const ivx = (x - prev.x) / dt;
-            const ivy = (y - prev.y) / dt;
-            const im = Math.sqrt(ivx * ivx + ivy * ivy);
-            if (im > cap * SPEED_SPIKE_MUL)
-            {
-                vx = prev.vx;
-                vy = prev.vy;
-            }
-            else
-            {
-                vx = ivx * VEL_SMOOTH + prev.vx * (1 - VEL_SMOOTH);
-                vy = ivy * VEL_SMOOTH + prev.vy * (1 - VEL_SMOOTH);
-            }
-        }
-    }
-    const mag = Math.sqrt(vx * vx + vy * vy);
-    if (mag > cap)
-    {
-        vx = vx / mag * cap;
-        vy = vy / mag * cap;
-    }
-    const hist = prev && prev.hist ? prev.hist : [];
-    hist.push({ x, y, t: now });
-    while (hist.length > 8) hist.shift();
-    let juke = false;
-    if (hist.length >= 4)
-    {
-        const first = hist[0];
-        const span = (now - first.t) / 1000;
-        if (span > 0.03)
-        {
-            const mvx = (x - first.x) / span;
-            const mvy = (y - first.y) / span;
-            const meanMag = Math.sqrt(mvx * mvx + mvy * mvy);
-            juke = mag > 1.5 * (meanMag + 40);
-        }
-    }
-    if (juke)
-    {
-        let bx = 0;
-        let by = 0;
-        for (let i = 0; i < hist.length; i++)
-        {
-            bx += hist[i].x;
-            by += hist[i].y;
-        }
-        bx /= hist.length;
-        by /= hist.length;
-        _track.set(gid, { x, y, t: now, vx, vy, hist });
-        return { x: bx, y: by, vx: 0, vy: 0, juke: true };
-    }
-    _track.set(gid, { x, y, t: now, vx, vy, hist });
-    return { x, y, vx, vy, juke: false };
-}
-
-function _solve(mx, my, pred, speed, range)
-{
-    const cdx = pred.x - mx;
-    const cdy = pred.y - my;
-    const curDist = Math.sqrt(cdx * cdx + cdy * cdy);
-    if (_ownBeam)
-    {
-        if (range > 0 && curDist > range) return null;
-        return { x: Math.round(pred.x), y: Math.round(pred.y), t: LATENCY_S };
-    }
-    const leadClamp = LEAD_CLAMP * Math.min(1, curDist / LEAD_RAMP_DIST);
-    const maxLead = curDist * leadClamp;
-    let t = LATENCY_S + curDist / speed;
-    let lx = 0;
-    let ly = 0;
-    for (let i = 0; i < LEAD_ITERATIONS; i++)
-    {
-        lx = pred.vx * t;
-        ly = pred.vy * t;
-        const lm = Math.sqrt(lx * lx + ly * ly);
-        if (lm > maxLead)
-        {
-            lx *= maxLead / lm;
-            ly *= maxLead / lm;
-        }
-        const px = pred.x + lx - mx;
-        const py = pred.y + ly - my;
-        t = LATENCY_S + Math.sqrt(px * px + py * py) / speed;
-    }
-    const ax = pred.x + lx - mx;
-    const ay = pred.y + ly - my;
-    if (range > 0 && Math.sqrt(ax * ax + ay * ay) > range) return null;
-    return {
-        x: Math.round(pred.x + lx),
-        y: Math.round(pred.y + ly),
-        t
-    };
-}
-
-function _ownProjectileSpeed()
+function _speedNow()
 {
     const now = Date.now();
-    if (now - _speedAt < SPEED_REFRESH_MS) return _projectileSpeed;
+    if (now - _speedAt < 500) return _speed;
     _speedAt = now;
 
     let speed = 0;
-    try
+    const fns = getFunctions();
+    const own = scanData.ownCharacter;
+    if (own && !own.isNull() && fns.LogicCharacterClient_getWeaponSkill && fns.LogicSkillData_getProjectileData)
     {
-        const fns = getFunctions();
-        const own = scanData.ownCharacter;
-        if (own && !own.isNull() && fns.LogicCharacterClient_getWeaponSkill && fns.LogicSkillData_getProjectileData)
+        try
         {
             const skill = fns.LogicCharacterClient_getWeaponSkill(own);
             const data = skill && !skill.isNull() ? fns.LogicSkillData_getProjectileData(skill, 0) : null;
-            if (data && !data.isNull())
-            {
-                speed = data.add(offsets.ProjectileData_speed).readU32() | 0;
-                _ownBeam = !!(fns.LogicProjectileData_isBeam && fns.LogicProjectileData_isBeam(data));
-            }
+            if (data && !data.isNull()) speed = data.add(offsets.ProjectileData_speed).readU32() | 0;
         }
-    }
-    catch (_)
-    {}
-
-    if (!(speed >= 300 && speed <= 8500))
-    {
-        const observed = scanData.friendlySpeed | 0;
-        if (observed >= 300 && observed <= 8500) speed = observed;
+        catch (_)
+        {}
     }
 
-    if (speed >= 300 && speed <= 8500) _projectileSpeed = speed;
-    return _projectileSpeed;
+    if (speed < SPEED_MIN) speed = scanData.friendlySpeed | 0;
+    if (speed >= SPEED_MIN && speed <= SPEED_MAX) _speed = speed;
+    return _speed;
 }
 
-function _ownRange(speed)
+function _velocity(key, x, y, now)
 {
-    const now = Date.now();
-    if (now - _rangeAt < SPEED_REFRESH_MS) return _rangeCache > 0 ? _rangeCache : speed * RANGE_FLIGHT_S * RANGE_MARGIN;
-    _rangeAt = now;
-    let tiles = 0;
-    try
+    let history = _points.get(key);
+    if (!history)
     {
-        const fns = getFunctions();
-        const own = scanData.ownCharacter;
-        if (own && !own.isNull() && fns.LogicCharacterClient_getWeaponSkill && fns.LogicSkillData_getCastingRange)
-        {
-            const skill = fns.LogicCharacterClient_getWeaponSkill(own);
-            if (skill && !skill.isNull()) tiles = fns.LogicSkillData_getCastingRange(skill) | 0;
-        }
+        history = [];
+        _points.set(key, history);
     }
-    catch (_)
-    {}
-    if (tiles > 0 && tiles <= 40) _rangeCache = tiles * TILE_UNITS * RANGE_MARGIN;
-    else _rangeCache = 0;
-    return _rangeCache > 0 ? _rangeCache : speed * RANGE_FLIGHT_S * RANGE_MARGIN;
+
+    if (history.length && now - history[history.length - 1].t < 8) return { vx: history.vx || 0, vy: history.vy || 0 };
+
+    history.push({ x: x, y: y, t: now });
+    while (history.length > 1 && now - history[0].t > VELOCITY_WINDOW_MS) history.shift();
+
+    if (now - history[0].t < SERVER_TICK_MS) return { vx: 0, vy: 0 };
+
+    const first = history[0];
+    const last = history[history.length - 1];
+    const dt = (last.t - first.t) / 1000;
+    let vx = (last.x - first.x) / dt;
+    let vy = (last.y - first.y) / dt;
+
+    if (Math.sqrt(vx * vx + vy * vy) > MAX_SPEED_EST)
+    {
+        vx = 0;
+        vy = 0;
+    }
+
+    history.vx = vx;
+    history.vy = vy;
+    return { vx: vx, vy: vy };
 }
 
-function _aimAt(enemy, now)
+function _lead(x, y, vx, vy, speed)
 {
-    if (!enemy || !enemy.ptr || enemy.ptr.isNull()) return null;
-    const fns = getFunctions();
-    const target = _validEnemyPtr(enemy.body) ? enemy.body : enemy.ptr;
-    let ex = enemy.x;
-    let ey = enemy.y;
-    try
-    {
-        ex = fns.LogicGameObjectClient_getX(target) | 0;
-        ey = fns.LogicGameObjectClient_getY(target) | 0;
-    }
-    catch (_)
-    {}
     const mx = scanData.myX;
     const my = scanData.myY;
-    const speed = _ownProjectileSpeed();
-    const pred = _sample(enemy.gid, ex, ey, enemy.moveSpeed, now);
-    const aim = _solve(mx, my, pred, speed, _ownRange(speed));
-    if (!aim) return null;
-    try
-    {
-        const screen = scanData.battleScreen;
-        const own = scanData.ownCharacter;
-        if (screen && !screen.isNull() && own && !own.isNull() && fns.LogicCharacterClient_getWeaponSkill)
-        {
-            const skill = fns.LogicCharacterClient_getWeaponSkill(own);
-            if (skill && !skill.isNull())
-            {
-                const path = _pathCall(screen, own, skill, mx, my, aim.x, aim.y);
-                if (path)
-                {
-                    aim.x = path.x;
-                    aim.y = path.y;
-                }
-            }
-        }
-    }
-    catch (_)
-    {}
-    aim.x += Math.round((Math.random() * 2 - 1) * AIM_JITTER);
-    aim.y += Math.round((Math.random() * 2 - 1) * AIM_JITTER);
-    return aim;
-}
+    let px = x;
+    let py = y;
 
-function _pathCall(screen, own, skill, mx, my, ax, ay)
-{
-    if (!_pathFn)
+    for (let pass = 0; pass < LEAD_PASSES; pass++)
     {
-        _pathFn = new NativeFunction(getBase().add(offsets.BattleScreen__calculateProjectilePath), "void",
-            ["pointer", "pointer", "pointer", "pointer", "int",
-             "float", "float", "float", "float", "float", "float"]);
-        _pathBuf = Memory.alloc(0x40);
+        const distance = Math.sqrt((px - mx) * (px - mx) + (py - my) * (py - my));
+        const flight = distance / speed;
+        if (flight > MAX_FLIGHT_S) return null;
+        px = x + vx * flight;
+        py = y + vy * flight;
     }
-    _pathFn(_pathBuf, screen, own, skill, 0, mx, my, 0, ax, ay, 0);
-    const begin = _pathBuf.readPointer();
-    const end = _pathBuf.add(Process.pointerSize).readPointer();
-    if (!begin || begin.isNull() || !end || end.isNull()) return null;
-    const count = end.sub(begin).toInt32() / 12;
-    if (count < 2 || count > 64) return null;
-    const last = begin.add((count - 1) * 12);
-    const px = last.add(4).readFloat();
-    const py = last.add(8).readFloat();
-    if (!isFinite(px) || !isFinite(py)) return null;
-    if (Math.abs(px) > 40000 || Math.abs(py) > 40000) return null;
+
     return { x: Math.round(px), y: Math.round(py) };
 }
 
-function _validEnemyPtr(p)
-{
-    return p && !p.isNull();
-}
-
-function _pickTarget(now)
+function _pick(now)
 {
     const list = scanData.enemies || [];
     const myTeam = scanData.myTeamId | 0;
     const mx = scanData.myX;
     const my = scanData.myY;
-    const speed = _ownProjectileSpeed();
-    const range = _ownRange(speed);
+
     let best = null;
-    let bestD = Infinity;
-    let bestPred = null;
-    let calm = null;
-    let calmD = Infinity;
-    let calmPred = null;
-    let cur = null;
-    let curD = Infinity;
+    let bestDistance = Infinity;
 
-    for (let i = 0; i < list.length; i++)
+    for (let index = 0; index < list.length; index++)
     {
-        const e = list[i];
-        if (!e || !e.ptr || e.ptr.isNull()) continue;
-        if (e.kind !== "player") continue;
-        if (_isSkipped(e.brawlerName)) continue;
-        if ((e.teamId | 0) === myTeam) continue;
-        if (losCheck(mx, my, e.x, e.y, BLOCKS_PROJECTILES) === false) continue;
-        const pred = _sample(e.gid, e.x, e.y, e.moveSpeed, now);
-        const dx = e.x - mx;
-        const dy = e.y - my;
-        const d = Math.sqrt(dx * dx + dy * dy);
-        if (range > 0 && d > range) continue;
-        if (!pred.juke && d < calmD)
+        const enemy = list[index];
+        if (!enemy || !enemy.ptr || enemy.ptr.isNull()) continue;
+        if (enemy.kind !== "player") continue;
+        if (_isSkipped(enemy.brawlerName)) continue;
+        if ((enemy.teamId | 0) === myTeam) continue;
+        if (losCheck(mx, my, enemy.x, enemy.y, BLOCKS_PROJECTILES) === false) continue;
+
+        const dx = enemy.x - mx;
+        const dy = enemy.y - my;
+        const distance = Math.sqrt(dx * dx + dy * dy);
+        if (distance < bestDistance)
         {
-            calmD = d;
-            calm = e;
-            calmPred = pred;
-        }
-        if (d < bestD)
-        {
-            bestD = d;
-            best = e;
-            bestPred = pred;
-        }
-        if (_target && e.gid === _target.gid)
-        {
-            cur = e;
-            curD = d;
+            bestDistance = distance;
+            best = enemy;
         }
     }
 
-    if (calm && calmD <= bestD * 1.4)
-    {
-        best = calm;
-        bestD = calmD;
-        bestPred = calmPred;
-    }
+    if (!best) return null;
 
-    let pick;
-    let pred;
-    if (cur && best && curD <= bestD * STICKY_MARGIN)
-    {
-        pick = cur;
-        pred = cur.gid === best.gid ? bestPred : _sample(cur.gid, cur.x, cur.y, cur.moveSpeed, now);
-    }
-    else
-    {
-        pick = best;
-        pred = bestPred;
-    }
-    if (!pick || !pred) return null;
+    const velocity = _velocity(best.gid, best.x, best.y, now);
+    const speed = _speedNow();
+    if (speed < SPEED_MIN) return null;
 
-    const aim = _solve(mx, my, pred, speed, range);
-    if (!aim) return null;
-    _aimX = aim.x;
-    _aimY = aim.y;
-    return pick;
+    _aim = _lead(best.x, best.y, velocity.vx, velocity.vy, speed);
+    return _aim ? best : null;
 }
 
 export function setupAutoaim()
 {
     if (_hooks) return;
     _hooks = true;
+
     const base = getBase();
+
     try
     {
         Interceptor.attach(base.add(offsets.BattleScreen_getClosestTargetForAutoshoot),
@@ -387,17 +175,13 @@ export function setupAutoaim()
             onLeave(retval)
             {
                 if (!_target || !_target.ptr || _target.ptr.isNull()) return;
-                try
-                {
-                    retval.replace(_target.ptr);
-                }
-                catch (_)
-                {}
+                try { retval.replace(_target.ptr); } catch (_) {}
             }
         });
     }
     catch (_)
     {}
+
     try
     {
         Interceptor.attach(base.add(offsets.BattleScreen_activateSkill),
@@ -405,13 +189,11 @@ export function setupAutoaim()
             onEnter(args)
             {
                 scanData.battleScreen = args[0];
-                if (!_target || !_target.ptr || _target.ptr.isNull()) return;
-                const aim = _aimAt(_target, Date.now());
-                if (!aim) return;
+                if (!_aim) return;
                 try
                 {
-                    this.context.x1 = aim.x | 0;
-                    this.context.x2 = aim.y | 0;
+                    this.context.x1 = _aim.x | 0;
+                    this.context.x2 = _aim.y | 0;
                 }
                 catch (_)
                 {}
@@ -427,13 +209,16 @@ export function updateAutoaim()
     if (scanData.lastUpdate === 0)
     {
         _target = null;
+        _aim = null;
         return;
     }
-    _target = _pickTarget(Date.now());
+    _target = _pick(Date.now());
+    if (!_target) _aim = null;
 }
 
 export function resetAutoaim()
 {
     _target = null;
-    _track.clear();
+    _aim = null;
+    _points.clear();
 }
