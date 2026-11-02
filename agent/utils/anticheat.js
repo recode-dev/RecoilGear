@@ -26,18 +26,18 @@ const calls = Object.freeze({
 });
 
 const TUNE = {
-    URL: true,
-    SHOP_OWNED: true,
+    URL: false,
+    SHOP_OWNED: false,
     LICENSE: true,
     SERVER_HEALTH: false,
     SHOP_SCALE: false,
     INDICES: false,
-    CHAT: true,
+    CHAT: false,
     CHAT_BUILD: false,
     CHAT_POS: false,
-    CHAT_GUARDS: true,
+    CHAT_GUARDS: false,
     UI_LAYER_ARG: false,
-    FORCED_RETURNS: true,
+    FORCED_RETURNS: false,
 };
 
 const spHooks = Object.freeze([
