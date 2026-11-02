@@ -23,11 +23,8 @@ import
 {
     BLOCKS_MOVEMENT,
     BLOCKS_PROJECTILES,
-    getWallCacheH,
-    getWallCacheW,
     isBlockedWide,
-    losCheck,
-    TILE_SIZE
+    losCheck
 }
 from "../utils/walls.js";
 
@@ -105,40 +102,6 @@ function _syncTuning()
     TUNE.SKIN = Math.max(0, Math.min(120, _options.safetyMargin)) * 2;
 }
 _syncTuning();
-
-export function getDodgeDir()
-{
-    return _heading;
-}
-
-export function setAutododgeOptions(opts)
-{
-    if (!opts || typeof opts !== "object") return;
-    if (typeof opts.reactionSpeed === "number" && isFinite(opts.reactionSpeed))
-    {
-        _options.reactionSpeed = Math.max(0, Math.min(100, opts.reactionSpeed));
-    }
-    if (typeof opts.directionPrecision === "number" && isFinite(opts.directionPrecision))
-    {
-        _options.directionPrecision = Math.max(8, Math.min(128, opts.directionPrecision | 0));
-    }
-    if (typeof opts.safetyMargin === "number" && isFinite(opts.safetyMargin))
-    {
-        _options.safetyMargin = Math.max(0, Math.min(120, opts.safetyMargin));
-    }
-    if (Array.isArray(opts.ignoredBrawlers))
-    {
-        _skip = new Set();
-        for (const name of opts.ignoredBrawlers)
-        {
-            const id = name;
-            if (id) _skip.add(id);
-        }
-        _muted.clear();
-    }
-    _syncTuning();
-}
-
 function _ballR(p)
 {
     return p.radius > 0 ? p.radius : 100;
@@ -295,40 +258,6 @@ function _wallAhead(myX, myY, dir, speed, bodyR)
     }
     return raw;
 }
-
-export function clampMoveTarget(tx, ty)
-{
-    return _clampTarget(tx, ty);
-}
-
-export function sendBattleMove(logic, tx, ty)
-{
-    return _sendMove(logic, tx, ty);
-}
-
-function _clampToMap(v, maxTiles)
-{
-    const max = maxTiles * TILE_SIZE - 1;
-    if (max <= 0) return v;
-    if (v < 0) return 0;
-    if (v > max) return max;
-    return v;
-}
-
-function _clampTarget(tx, ty)
-{
-    const w = getWallCacheW();
-    const h = getWallCacheH();
-    if (w <= 0 || h <= 0) return {
-        x: tx,
-        y: ty
-    };
-    return {
-        x: _clampToMap(tx, w),
-        y: _clampToMap(ty, h)
-    };
-}
-
 function _sendMove(logic, tx, ty)
 {
     if (!logic || logic.isNull()) return false;

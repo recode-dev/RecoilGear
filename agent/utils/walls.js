@@ -15,8 +15,6 @@ const RETRY_MS = 2e3;
 export const TILE_SIZE = 300;
 export const BLOCKS_MOVEMENT = 128;
 export const BLOCKS_PROJECTILES = 64;
-const TRACE_STEP = 40;
-const TRACE_BACKOFF = 75;
 
 var walls = null;
 var wallsWidth = 0;
@@ -191,28 +189,7 @@ export function losCheck(wx0, wy0, wx1, wy1, checkBit)
     }
     return true;
 }
-
-export function traceWallHit(wx, wy, dirX, dirY, maxDist, checkBit)
-{
-    const grid = walls;
-    if (!grid || maxDist <= 0) return maxDist;
-    const width = wallsWidth;
-    const height = wallsHeight;
-    if (width <= 0 || height <= 0) return maxDist;
-    let dist = 0;
-    while (dist < maxDist)
-    {
-        dist += TRACE_STEP;
-        if (dist > maxDist) dist = maxDist;
-        const tx = (wx + dirX * dist) / TILE_SIZE | 0;
-        const ty = (wy + dirY * dist) / TILE_SIZE | 0;
-        if (tx < 0 || tx >= width || ty < 0 || ty >= height) return Math.max(0, dist - TRACE_BACKOFF);
-        if (grid[ty * width + tx] & checkBit) return Math.max(0, dist - TRACE_BACKOFF);
-    }
-    return maxDist;
-}
-
-export function isBlockedAt(wx, wy, checkBit)
+function isBlockedAt(wx, wy, checkBit)
 {
     const grid = walls;
     if (!grid) return false;

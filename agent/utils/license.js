@@ -86,15 +86,3 @@ export function setupLicense()
 
     return !!listener;
 }
-
-export function resetLicense()
-{
-    if (!listener) return;
-    try
-    {
-        listener.detach();
-    }
-    catch (_)
-    {}
-    listener = null;
-}
