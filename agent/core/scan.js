@@ -25,7 +25,7 @@ var _projectileHooksInstalled = false;
 export const TILE_UNITS = 300;
 var SKILL_SLOT_MAX = 8;
 var PROJ_INDEX_MAX = 4;
-var _rangeByData = new Map();
+var _charRange = new Map();
 var _harvestedChars = new Set();
 var _charsByIndex = new Map();
 
@@ -139,33 +139,6 @@ function _ownerNameByIndex(ownerIndex)
     return null;
 }
 
-function _noteRange(data, units)
-{
-    if (!isValidPtr(data) || units <= 0 || units >= 70000) return;
-    const key = data.toString();
-    const prev = _rangeByData.get(key) || 0;
-    if (units > prev) _rangeByData.set(key, units);
-}
-
-function _harvestSkillData(fns, skillData)
-{
-    if (!isValidPtr(skillData) || !fns.LogicSkillData_getCastingRange || !fns.LogicSkillData_getProjectileData) return;
-    try
-    {
-        const tiles = fns.LogicSkillData_getCastingRange(skillData) | 0;
-        if (tiles <= 0) return;
-        const units = tiles * TILE_UNITS;
-        for (let i = 0; i < PROJ_INDEX_MAX; i++)
-        {
-            const proj = fns.LogicSkillData_getProjectileData(skillData, i);
-            if (!isValidPtr(proj)) continue;
-            _noteRange(proj, units);
-        }
-    }
-    catch (_)
-    {}
-}
-
 function _harvestCharacter(character)
 {
     if (!isValidPtr(character)) return false;
@@ -178,8 +151,7 @@ function _harvestCharacter(character)
             const weapon = fns.LogicCharacterClient_getWeaponSkill(character);
             if (isValidPtr(weapon))
             {
-                _harvestSkillData(fns, weapon);
-                found = true;
+                if (isValidPtr(fns.LogicGameObjectClient_getData ? fns.LogicGameObjectClient_getData(character) : null)) found = true;
             }
         }
     }
@@ -196,7 +168,6 @@ function _harvestCharacter(character)
             {
                 const data = fns.LogicSkillClient_getData(skill, hyper);
                 if (!isValidPtr(data)) continue;
-                _harvestSkillData(fns, data);
                 found = true;
             }
         }
@@ -215,22 +186,30 @@ function _rememberCharacter(index, character)
     if (_harvestCharacter(character)) _harvestedChars.add(key);
 }
 
-function _castRangeFor(data, ownerIndex)
+function _rangeForOwner(ownerIndex)
 {
-    if (isValidPtr(data))
-    {
-        const cached = _rangeByData.get(data.toString()) || 0;
-        if (cached > 0) return cached;
-    }
-    if (ownerIndex >= 0 && isValidPtr(data))
-    {
-        const owner = _charsByIndex.get(ownerIndex);
-        if (isValidPtr(owner) && _harvestCharacter(owner))
-        {
-            return _rangeByData.get(data.toString()) || 0;
-        }
-    }
-    return 0;
+    if (ownerIndex < 0) return 0;
+
+    const cached = _charRange.get(ownerIndex) || 0;
+    if (cached > 0) return cached;
+
+    const owner = _charsByIndex.get(ownerIndex);
+    if (!isValidPtr(owner)) return 0;
+
+    const fns = getFunctions();
+    if (!fns.LogicSkillData_getCastingRange) return 0;
+
+    const data = fns.LogicGameObjectClient_getData ? fns.LogicGameObjectClient_getData(owner) : null;
+    if (!isValidPtr(data)) return 0;
+
+    let units = 0;
+    try { units = fns.LogicSkillData_getCastingRange(data) | 0; }
+    catch (_) { return 0; }
+
+    if (units < 100 || units > 20000) return 0;
+
+    _charRange.set(ownerIndex, units);
+    return units;
 }
 
 function _captureProjectile(projectile, data, ownerTeamOverride)
@@ -287,7 +266,7 @@ function _captureProjectile(projectile, data, ownerTeamOverride)
         }
         const ownerIndex = _readOwnerIndex(projectile);
         const name = _readProjectileName(data);
-        const castRange = _castRangeFor(data, ownerIndex);
+        const castRange = _rangeForOwner(ownerIndex);
         const earlyTicks = _earlyTicks(fns, data);
         const now = Date.now();
         _liveProjectiles.set(gid,
@@ -401,7 +380,7 @@ function _updateLiveProjectiles(now)
             projectile.ownerName = _ownerNameByIndex(projectile.ownerIndex);
             if (projectile.castRange <= 0)
             {
-                projectile.castRange = _castRangeFor(projectile.data, projectile.ownerIndex);
+                projectile.castRange = _rangeForOwner(projectile.ownerIndex);
             }
             if (projectile.ownerIndex >= 0 && _friendlyIdx.has(projectile.ownerIndex)) continue;
             if (projectile.ownerTeam === scanData.myTeamId) continue;
@@ -615,7 +594,7 @@ export function updateScanner(bm, now)
 export function resetScannerCache()
 {
     _brawlerNameCache.clear();
-    _rangeByData.clear();
+    _charRange.clear();
     _liveProjectiles.clear();
     _friendlyIdx.clear();
     _charsByIndex.clear();
