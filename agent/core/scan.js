@@ -161,7 +161,7 @@ function _ownerNameByIndex(ownerIndex)
 
 function _noteCastRange(name, units)
 {
-    if (!name || !(units > 0) || units >= 70000) return;
+    if (!name || units <= 0 || units >= 70000) return;
     const prev = _rangeByName.get(name) || 0;
     if (units > prev) _rangeByName.set(name, units);
 }
@@ -415,7 +415,7 @@ function _updateLiveProjectiles(now)
             projectile.lastY = y;
             projectile.lastTs = now;
             projectile.ownerName = _ownerNameByIndex(projectile.ownerIndex);
-            if (!(projectile.castRange > 0))
+            if (projectile.castRange <= 0)
             {
                 projectile.castRange = _castRangeFor(projectile.name, projectile.ownerIndex);
             }

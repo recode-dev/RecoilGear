@@ -61,9 +61,7 @@ let _lastTick = 0;
 let _lastSentX = 1e9;
 let _lastSentY = 1e9;
 let _lastSentAt = 0;
-const _muted = new Set();
 const _ring = [];
-let _skip = new Set();
 const _options = {
     reactionSpeed: 100,
     directionPrecision: 48,
@@ -125,11 +123,9 @@ function _lifeLeft(p)
 function _collectLive(myX, myY, myRadius)
 {
     const out = [];
-    const live = new Set();
     const shots = scanData.projectiles;
     if (!shots || shots.length === 0)
     {
-        if (_muted.size > 0) _muted.clear();
         return out;
     }
     const zoneSq = TUNE.AWARE * TUNE.AWARE;
@@ -140,10 +136,6 @@ function _collectLive(myX, myY, myRadius)
         if (!p) continue;
         const gid = p.gid;
         if (!gid) continue;
-        live.add(gid);
-        const owner = p.ownerName;
-        if (owner && _skip.has(owner)) _muted.add(gid);
-        if (_muted.has(gid)) continue;
         const name = p.name || "";
         const dx = p.x - myX;
         const dy = p.y - myY;
@@ -195,10 +187,6 @@ function _collectLive(myX, myY, myRadius)
             left,
             name
         });
-    }
-    for (const k of _muted)
-    {
-        if (!live.has(k)) _muted.delete(k);
     }
     return out;
 }
@@ -373,7 +361,6 @@ export function updateAutododge()
 
 export function resetAutododge()
 {
-    _muted.clear();
     _clearHeading();
     _lastDangerTs = 0;
     _lastTick = 0;
