@@ -53,7 +53,6 @@ export var scanData = {
     myPlayerIndex: -1,
     myX: 0,
     myY: 0,
-    myRadius: 0,
     mySpeed: 720,
     myBrawlerName: null,
     enemies: [],
