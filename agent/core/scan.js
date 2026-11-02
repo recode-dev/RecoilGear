@@ -281,7 +281,6 @@ function _captureProjectile(projectile, data, ownerTeamOverride)
         {
             existing.ptr = projectile;
             existing.data = data;
-            existing.lastSeenAt = Date.now();
             if (ownerTeamOverride !== void 0) existing.ownerTeam = ownerTeamOverride | 0;
             return;
         }
@@ -348,7 +347,6 @@ function _captureProjectile(projectile, data, ownerTeamOverride)
             lastX: x,
             lastY: y,
             lastTs: now,
-            lastSeenAt: now,
             hasVelocitySample: false,
             vx: 0,
             vy: 0
@@ -413,11 +411,6 @@ function _updateLiveProjectiles(now)
         try
         {
             if (projectile.ptr.isNull())
-            {
-                _liveProjectiles.delete(gid);
-                continue;
-            }
-            if (now - (projectile.lastSeenAt || 0) > 800)
             {
                 _liveProjectiles.delete(gid);
                 continue;
