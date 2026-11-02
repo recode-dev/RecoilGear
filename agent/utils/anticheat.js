@@ -25,6 +25,21 @@ const calls = Object.freeze({
     uiLock: 0x85cf48,
 });
 
+const TUNE = {
+    URL: true,
+    SHOP_OWNED: true,
+    LICENSE: true,
+    SERVER_HEALTH: true,
+    SHOP_SCALE: true,
+    INDICES: false,
+    CHAT: true,
+    CHAT_BUILD: true,
+    CHAT_POS: true,
+    CHAT_GUARDS: true,
+    UI_LAYER_ARG: false,
+    FORCED_RETURNS: true,
+};
+
 const spHooks = Object.freeze([
     "Hook_spPatch01",
     "Hook_spPatch02",
@@ -114,41 +129,49 @@ function setupUrl()
 {
     const modsUrl = Memory.allocUtf8String("https://ext.nulls.gg/mods/?ios=1");
 
-    _attach("Hook_openUrl",
+    if (TUNE.URL)
     {
-        onEnter(args)
+        _attach("Hook_openUrl",
         {
-            const obj = args[0];
-            if (obj.isNull()) return;
-            const str = obj.add(4).readU32() >= 8 ? obj.add(8).readPointer() : obj.add(8);
-            if (str.isNull()) return;
-            const value = str.readCString();
-            if (!value || value.indexOf("nullsbrawlmods://") !== 0) return;
-            if (_ops.setUrl) _ops.setUrl(obj, modsUrl, 128);
-        }
-    });
-
-    _attach("Hook_shopOwnedCheck",
-    {
-        onEnter(args)
-        {
-            const flag = args[4];
-            const owner = args[1];
-            if (owner.isNull() || flag.isNull()) return;
-            if (flag.readU8() === 0) return;
-            const list = owner.add(136).readPointer().add(16);
-            const items = list.readPointer();
-            const count = list.add(12).readU32();
-            for (let i = 0; i < count; i++)
+            onEnter(args)
             {
-                if (items.add(4 * i).readU32() === R_IDX) args[6] = ptr(1);
+                const obj = args[0];
+                if (obj.isNull()) return;
+                const str = obj.add(4).readU32() >= 8 ? obj.add(8).readPointer() : obj.add(8);
+                if (str.isNull()) return;
+                const value = str.readCString();
+                if (!value || value.indexOf("nullsbrawlmods://") !== 0) return;
+                if (_ops.setUrl) _ops.setUrl(obj, modsUrl, 128);
             }
-        }
-    });
+        });
+    }
+
+    if (TUNE.SHOP_OWNED)
+    {
+        _attach("Hook_shopOwnedCheck",
+        {
+            onEnter(args)
+            {
+                const flag = args[4];
+                const owner = args[1];
+                if (owner.isNull() || flag.isNull()) return;
+                if (flag.readU8() === 0) return;
+                const list = owner.add(136).readPointer().add(16);
+                const items = list.readPointer();
+                const count = list.add(12).readU32();
+                for (let i = 0; i < count; i++)
+                {
+                    if (items.add(4 * i).readU32() === R_IDX) args[6] = ptr(1);
+                }
+            }
+        });
+    }
 }
 
 function setupLicense()
 {
+    if (!TUNE.LICENSE) return;
+
     try
     {
         const path = Process.getModuleByName("Nulls Brawl").path;
@@ -186,6 +209,8 @@ function setupLicense()
 
 function setupServerHealth()
 {
+    if (!TUNE.SERVER_HEALTH) return;
+
     _attach("Hook_serverHealth",
     {
         onEnter()
@@ -193,6 +218,8 @@ function setupServerHealth()
             const obj = this.context.x0;
             const holder = this.context.x19;
             if (obj.isNull() || holder.isNull()) return;
+            if (!Process.findRangeByAddress(obj)) return;
+            if (!Process.findRangeByAddress(holder)) return;
             const idField = obj.add(1432);
             const down = holder.add(60).readFloat();
             const since = obj.add(1460).readFloat();
@@ -205,6 +232,8 @@ function setupServerHealth()
 
 function setupShopScale()
 {
+    if (!TUNE.SHOP_SCALE) return;
+
     _attach("Hook_shopListScale",
     {
         onEnter(args)
@@ -226,6 +255,8 @@ function setupShopScale()
 
 function setupIndices()
 {
+    if (!TUNE.INDICES) return;
+
     for (let i = 0; i < spHooks.length; i++)
     {
         _attach(spHooks[i],
@@ -254,87 +285,113 @@ function setupChat()
         target.add(8).writeU8(value);
     };
 
-    _attach("Hook_uiBuild",
+    if (TUNE.CHAT_BUILD)
     {
-        onEnter(args)
+        _attach("Hook_uiBuild",
         {
-            this.object = args[0];
-        },
-        onLeave()
-        {
-            try
+            onEnter(args)
             {
-                if (!_ops.battleModeGetInstance || !_ops.stateContains) return;
-                const mode = _ops.battleModeGetInstance();
-                if (mode.isNull()) return;
-                const state = mode.add(40).readPointer();
-                if (state.isNull()) return;
-                if (!_ops.stateContains(state, N_STATE)) return;
-                if (state.add(320).readU32() !== 0) return;
-
-                _chatOn = true;
-
-                const scene = _ops.uiLoadScene(str("sc/ui.sc"), str("gameroom_party_mode"));
-                const button = _ops.widgetFindChild(scene, str("button_chat"));
-                const badge = _ops.widgetFindChild(button, str("notification"));
-                mark(button, 1);
-                mark(badge, 0);
-                const widget = _ops.uiAttachWidget(scene, str("button_chat"), str("button_chat"));
-                const y = this.object.add(1640).readFloat() - 40;
-                _ops.widgetSetLayout(widget, y, 40);
-                _ops.widgetAddChild(this.object, widget);
-            }
-            catch (_)
-            {}
-        }
-    });
-
-    _attach("Hook_widgetSetPosition",
-    {
-        onEnter(args)
-        {
-            if (!_chatOn) return;
-            try
+                this.object = args[0];
+            },
+            onLeave()
             {
-                const host = _base.add(0x1123808).readPointer();
-                if (host.isNull()) return;
-                if (_ops.objectSetRate) _ops.objectSetRate(host, args[2]);
-                if (_ops.objectNotify) _ops.objectNotify(host);
+                try
+                {
+                    const obj = this.object;
+                    if (!obj || obj.isNull()) return;
+                    if (!_ops.battleModeGetInstance || !_ops.stateContains) return;
+                    if (!_ops.uiLoadScene || !_ops.widgetFindChild) return;
+                    if (!_ops.uiAttachWidget || !_ops.widgetSetLayout || !_ops.widgetAddChild) return;
+
+                    const mode = _ops.battleModeGetInstance();
+                    if (mode.isNull()) return;
+                    const state = mode.add(40).readPointer();
+                    if (state.isNull()) return;
+                    if (!_ops.stateContains(state, N_STATE)) return;
+                    if (state.add(320).readU32() !== 0) return;
+
+                    const scene = _ops.uiLoadScene(str("sc/ui.sc"), str("gameroom_party_mode"));
+                    if (scene.isNull()) return;
+
+                    const button = _ops.widgetFindChild(scene, str("button_chat"));
+                    if (button.isNull()) return;
+
+                    const badge = _ops.widgetFindChild(button, str("notification"));
+                    if (!badge.isNull()) mark(badge, 0);
+                    mark(button, 1);
+
+                    const widget = _ops.uiAttachWidget(scene, str("button_chat"), str("button_chat"));
+                    if (widget.isNull()) return;
+
+                    _ops.widgetSetLayout(widget, obj.add(1640).readFloat() - 40, 40);
+                    _ops.widgetAddChild(obj, widget);
+
+                    _chatOn = true;
+                }
+                catch (_)
+                {}
             }
-            catch (_)
-            {}
-        }
-    });
+        });
+    }
 
-    _attach("Hook_guardShort",
+    if (TUNE.CHAT_POS)
     {
-        onEnter(args)
+        _attach("Hook_widgetSetPosition",
         {
-            this.nullArg = args[0].isNull();
-        }
-    });
+            onEnter(args)
+            {
+                if (!_chatOn) return;
+                try
+                {
+                    const host = _base.add(0x1123808).readPointer();
+                    if (host.isNull()) return;
+                    if (!Process.findRangeByAddress(host)) return;
+                    if (_ops.objectSetRate) _ops.objectSetRate(host, args[2]);
+                    if (_ops.objectNotify) _ops.objectNotify(host);
+                }
+                catch (_)
+                {}
+            }
+        });
+    }
 
-    _attach("Hook_guardWide",
+    if (TUNE.CHAT_GUARDS)
     {
-        onEnter(args)
+        _attach("Hook_guardShort",
         {
-            this.nullArg = args[0].isNull();
-        }
-    });
+            onEnter(args)
+            {
+                this.nullArg = args[0].isNull();
+            }
+        });
 
-    const buffer = Memory.alloc(512);
+        _attach("Hook_guardWide",
+        {
+            onEnter(args)
+            {
+                this.nullArg = args[0].isNull();
+            }
+        });
+    }
 
-    _attach("Hook_uiLayerArg",
+    if (TUNE.UI_LAYER_ARG)
     {
-        onEnter()
+        const buffer = Memory.alloc(512);
+
+        _attach("Hook_uiLayerArg",
         {
-            if (!this.context.x0.isNull()) this.context.x0 = buffer;
-        }
-    });
+            onEnter()
+            {
+                if (!this.context.x0.isNull()) this.context.x0 = buffer;
+            }
+        });
+    }
 }
 
 function setupForcedReturns()
 {
+    if (!TUNE.FORCED_RETURNS) return;
+
     _attach("Hook_forcedReturnZero",
     {
         onLeave(retval)
@@ -365,7 +422,12 @@ export function setupAnticheat()
     setupServerHealth();
     setupShopScale();
     setupIndices();
-    setupChat();
+
+    if (TUNE.CHAT)
+    {
+        setupChat();
+    }
+
     setupForcedReturns();
 
     Interceptor.flush();
@@ -386,4 +448,13 @@ export function resetAnticheat()
     _listeners.length = 0;
     _chatOn = false;
     _ops = null;
+}
+
+export function configure(patch)
+{
+    for (const key in patch)
+    {
+        if (key in TUNE) TUNE[key] = patch[key];
+    }
+    return TUNE;
 }
