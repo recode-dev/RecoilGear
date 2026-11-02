@@ -54,25 +54,13 @@ let _installed = false;
 
 function findBase()
 {
-    try
-    {
-        return Process.getModuleByName("Nulls Brawl").base;
-    }
-    catch (_)
-    {}
-    const mods = Process.enumerateModules();
-    for (let i = 0; i < mods.length; i++)
-    {
-        if (mods[i].name.toLowerCase().indexOf("nulls") >= 0) return mods[i].base;
-    }
-    return null;
+    return Process.getModuleByName("Nulls Brawl").base;
 }
 
 export function install()
 {
     if (_installed) return true;
     _base = findBase();
-    if (!_base) return false;
 
     initFunctions(_base);
     initScanner(_base);

@@ -24,65 +24,31 @@ function _validPtr(value)
 
 function buildPayload(base)
 {
-    try
-    {
-        const mod = Process.findModuleByAddress(base);
-        if (!mod) return false;
-        const dir = mod.path.substring(0, mod.path.lastIndexOf("/"));
-        const raw = File.readAllBytes(dir + "/res/license.bin");
-        payloadSize = raw.byteLength + LICENSE_BODY.length + 1;
-        payload = Memory.alloc(payloadSize);
-        Memory.copy(payload, raw.unwrap(), raw.byteLength);
-        payload.add(raw.byteLength).writeUtf8String(LICENSE_BODY);
-        return true;
-    }
-    catch (_)
-    {
-        return false;
-    }
+    const mod = Process.findModuleByAddress(base);
+    if (!mod) throw new Error("license: module not found for base " + base);
+    const dir = mod.path.substring(0, mod.path.lastIndexOf("/"));
+    const raw = File.readAllBytes(dir + "/res/license.bin");
+    payloadSize = raw.byteLength + LICENSE_BODY.length + 1;
+    payload = Memory.alloc(payloadSize);
+    Memory.copy(payload, raw.unwrap(), raw.byteLength);
+    payload.add(raw.byteLength).writeUtf8String(LICENSE_BODY);
 }
 
 export function setupLicense()
 {
-    if (listener) return true;
+    const base = getBase();
+    buildPayload(base);
 
-    let base = null;
-    try
+    listener = Interceptor.attach(base.add(offsets.Hook_requestBody),
     {
-        base = getBase();
-    }
-    catch (_)
-    {
-        return false;
-    }
-
-    if (!base) return false;
-    if (!buildPayload(base)) return false;
-
-    try
-    {
-        listener = Interceptor.attach(base.add(offsets.Hook_requestBody),
+        onEnter(args)
         {
-            onEnter(args)
-            {
-                const request = args[0];
-                if (!_validPtr(request)) return;
-                request.add(REQUEST_BODY_PTR).writePointer(payload);
-                request.add(REQUEST_BODY_SIZE).writeS32(payloadSize);
-            }
-        });
-    }
-    catch (_)
-    {
-        listener = null;
-    }
+            const request = args[0];
+            if (!_validPtr(request)) return;
+            request.add(REQUEST_BODY_PTR).writePointer(payload);
+            request.add(REQUEST_BODY_SIZE).writeS32(payloadSize);
+        }
+    });
 
-    try
-    {
-        Interceptor.flush();
-    }
-    catch (_)
-    {}
-
-    return !!listener;
+    Interceptor.flush();
 }

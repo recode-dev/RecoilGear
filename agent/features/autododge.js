@@ -29,7 +29,6 @@ import
 from "../utils/walls.js";
 
 const MOVE_INPUT_TYPE = 2;
-const RANGE_FALLBACK = 2800;
 
 const TUNE = {
     AWARE: 3200,
@@ -104,7 +103,7 @@ function _syncTuning()
 _syncTuning();
 function _ballR(p)
 {
-    return p.radius > 0 ? p.radius : 100;
+    return p.radius;
 }
 
 function _traveled(p)
@@ -117,7 +116,7 @@ function _traveled(p)
 
 function _lifeLeft(p)
 {
-    const maxR = p.castRange > 0 ? p.castRange : RANGE_FALLBACK;
+    const maxR = p.castRange;
     const flown = _traveled(p);
     return Math.max(0, maxR - flown);
 }
@@ -144,7 +143,7 @@ function _collectLive(myX, myY, myRadius)
         const owner = p.ownerName;
         if (owner && _skip.has(owner)) _muted.add(gid);
         if (_muted.has(gid)) continue;
-        const name = p.name || "";
+        const name = p.name;
         const dx = p.x - myX;
         const dy = p.y - myY;
         if (dx * dx + dy * dy > zoneSq) continue;
