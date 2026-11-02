@@ -28,6 +28,12 @@ from "./utils/walls.js";
 
 import
 {
+    setupLicense
+}
+from "./utils/license.js";
+
+import
+{
     resetAutododge,
     setupAutododge,
     updateAutododge
@@ -57,6 +63,7 @@ export function install()
     _base = findBase();
 
     initFunctions(_base);
+    setupLicense();
     initScanner(_base);
     watchTileChanges(_base);
     setupAutododge();
