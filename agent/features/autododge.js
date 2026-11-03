@@ -303,6 +303,49 @@ function _bounceBudget(p) {
     return budget;
 }
 
+/*
+ * Where a shot physically gets to: it can never fly further than its remaining distance
+ * budget (`left`, logic units) nor further than the planning horizon allows.
+ */
+function _sweptEnd(x, y, vx, vy, left) {
+    const vlen = length(vx, vy);
+    if (!(vlen > 1)) return null;
+    let span = vlen * TUNE.HORIZON_S;
+    if (left >= 0 && left < span) span = left;
+    const end = normalize(
+        {
+            x: vx,
+            y: vy
+        },
+        span | 0
+    );
+    return { x: x + end.x, y: y + end.y };
+}
+
+/*
+ * Does this shot actually reach me at all? Two independent outs:
+ *  - range: it expires before it arrives (remaining budget shorter than the gap);
+ *  - line: it flies past to my left or right and never crosses my hitbox.
+ * Shots failing either test are noise - dodging them only gives away position.
+ * A shot that is still steering gets slack for the curve it can still add.
+ */
+function _reachesMe(p, myX, myY, bodyR, shotR, vx, vy, left) {
+    const gap = distance(p.x, p.y, myX, myY) - bodyR - shotR;
+    if (left >= 0 && left < 0.85 * LogicMath.max(0, gap)) return false;
+    const contact = bodyR + shotR + TUNE.ENGAGE;
+    if (p.isIndirect && p.hasTarget) {
+        // A thrown shot flies over everything and only collides where it lands, so the
+        // landing point is the only thing that can touch my hitbox.
+        return distance(p.targetX, p.targetY, myX, myY) <= contact;
+    }
+    const end = _sweptEnd(p.x, p.y, vx, vy, left);
+    if (!end) return distance(p.x, p.y, myX, myY) <= contact;
+    let miss = LogicMath.getDistanceToLine(p.x, p.y, end.x, end.y, myX, myY);
+    // A shot that is still steering can curve onto me; give it slack for the curve.
+    if (_steerActive(p) || p.homing) miss -= LogicMath.min(400, 0.35 * LogicMath.max(0, left));
+    return miss <= contact;
+}
+
 /* Steering only bends a shot inside [steerIgnoreTicks, +steerLifeTime]; outside that
  * window even a homing projectile flies straight and is much easier to read. */
 function _steerActive(p) {
@@ -398,7 +441,6 @@ function _collectLive(myX, myY, myRadius, now) {
         if (left <= 10) continue;
         const travel = spd >= 1 ? spd : p.speed > 0 ? p.speed : 0;
         const gap = distance(p.x, p.y, myX, myY) - bodyR - shotR;
-        if (left < 0.85 * LogicMath.max(0, gap)) continue;
         if (!_heading) {
             if (travel > 0) {
                 if (gap / travel > TUNE.ENGAGE_S) continue;
@@ -416,15 +458,17 @@ function _collectLive(myX, myY, myRadius, now) {
             // projected path inside the planning horizon instead of trusting it.
             if (!pathEngineActive(now) && !(p.travelDistance > 0))
                 left = LogicMath.min(left, TUNE.HORIZON_S * travel);
-        } else if (p.bouncing) {
-            left = LogicMath.min(left, 0.9);
         }
+        // Ignore what cannot touch me: a shot that passes to my left/right without grazing
+        // the hitbox, or one whose range ends before it reaches me.
+        if (!_reachesMe(p, myX, myY, bodyR, shotR, vx, vy, left)) continue;
         out.push({
             x: p.x,
             y: p.y,
             vx: blob ? 0 : vx,
             vy: blob ? 0 : vy,
             rad,
+            hitRad: shotR + bodyR + radPad,
             left,
             owner: p.ownerIndex,
             sx: p.spawnX,
@@ -443,6 +487,8 @@ function _mergeGroup(arr, px, py) {
     const alongPlayer = (px - ref.x) * ux + (py - ref.y) * uy;
     let lo = 0;
     let hi = 0;
+    let hitLo = 0;
+    let hitHi = 0;
     let left = Infinity;
     for (let i = 0; i < arr.length; i++) {
         const t = arr[i];
@@ -458,8 +504,13 @@ function _mergeGroup(arr, px, py) {
             }
         }
         const off = (fx - ref.x) * -uy + (fy - ref.y) * ux;
+        // Two bands: the padded keep-out band, and the distance at which the volley
+        // actually touches the hitbox.
+        const contact = t.hitRad > 0 ? t.hitRad : t.rad;
         lo = LogicMath.min(lo, off - t.rad);
         hi = LogicMath.max(hi, off + t.rad);
+        hitLo = LogicMath.min(hitLo, off - contact);
+        hitHi = LogicMath.max(hitHi, off + contact);
         left = LogicMath.min(left, t.left);
     }
     const mid = (lo + hi) / 2;
@@ -471,6 +522,7 @@ function _mergeGroup(arr, px, py) {
         vx: ref.vx,
         vy: ref.vy,
         rad: half,
+        hitRad: (hitHi - hitLo) / 2,
         left,
         owner: ref.owner
     };
@@ -532,7 +584,7 @@ function _clearanceFor(threats, myX, myY, mvx, mvy) {
         const reach = distance(t.x, t.y, myX, myY);
         const spd = length(t.vx, t.vy);
         let maxT = TUNE.HORIZON_S;
-        if (spd > 1) maxT = LogicMath.clamp((LogicMath.max(0, t.left) + reach) / spd, 0, maxT);
+        if (spd > 1) maxT = LogicMath.min(maxT, LogicMath.max(0, t.left) / spd);
         const vrx = t.vx - mvx;
         const vry = t.vy - mvy;
         const vlen = length(vrx, vry);
@@ -571,37 +623,28 @@ function _clearanceFor(threats, myX, myY, mvx, mvy) {
     return minClear;
 }
 
-function _pathEnd(t, px, py) {
-    const vlen = length(t.vx, t.vy);
-    if (!(vlen > 1)) return null;
-    const reach = distance(t.x, t.y, px, py);
-    const span = LogicMath.clamp((LogicMath.max(0, t.left) + reach) / vlen, 0, TUNE.HORIZON_S);
-    const end = normalize(
-        {
-            x: t.vx,
-            y: t.vy
-        },
-        (vlen * span) | 0
-    );
-    return { x: t.x + end.x, y: t.y + end.y };
+function _pathEnd(t) {
+    // Same physical budget as the filter: a threat's projected path can never be longer
+    // than the distance the shot can still fly.
+    return _sweptEnd(t.x, t.y, t.vx, t.vy, t.left);
 }
 
 function _pathsHitMe(threats, px, py) {
     for (let i = 0; i < threats.length; i++) {
         const t = threats[i];
-        const end = _pathEnd(t, px, py);
+        const end = _pathEnd(t);
         const endX = end ? end.x : t.x;
         const endY = end ? end.y : t.y;
-        if (segmentHitsCircle(t.x, t.y, endX, endY, px, py, t.rad + TUNE.ENGAGE)) return true;
+        if (segmentHitsCircle(t.x, t.y, endX, endY, px, py, t.hitRad)) return true;
     }
     return false;
 }
 
-function _threatPaths(threats, px, py) {
+function _threatPaths(threats) {
     const out = [];
     for (let i = 0; i < threats.length; i++) {
         const t = threats[i];
-        const end = _pathEnd(t, px, py);
+        const end = _pathEnd(t);
         if (!end) continue;
         out.push({
             x1: t.x,
@@ -806,7 +849,7 @@ export function updateAutododge() {
     }
 
     const bodyR = _frameMargin();
-    const paths = _threatPaths(hazards, myX, myY);
+    const paths = _threatPaths(hazards);
     const inDanger = _pathsHitMe(hazards, myX, myY);
     if (inDanger) _lastDangerTs = now;
 
