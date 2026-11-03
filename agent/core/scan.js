@@ -22,7 +22,6 @@ var _activeGidSet = new Set();
 var _liveProjectiles = new Map();
 var _friendlyIdx = new Set();
 var _projectileHooksInstalled = false;
-export const TILE_UNITS = 300;
 var SKILL_SLOT_MAX = 8;
 var _charRange = new Map();
 var _harvestedChars = new Set();

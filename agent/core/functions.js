@@ -22,15 +22,8 @@ export function ptrFromU32(lo, hi)
 function _nf(name, ret, args)
 {
     const off = offsets[name];
-    if (typeof off !== "number" || off <= 0) return null;
-    try
-    {
-        return new NativeFunction(base.add(off), ret, args);
-    }
-    catch (_)
-    {
-        return null;
-    }
+    if (typeof off !== "number" || off <= 0) throw new Error("functions: missing offset " + name);
+    return new NativeFunction(base.add(off), ret, args);
 }
 
 export function initFunctions(baseIn, imageIn)

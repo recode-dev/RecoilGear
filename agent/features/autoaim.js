@@ -11,7 +11,6 @@ import
 from "../core/offsets.js";
 import
 {
-    TILE_UNITS,
     scanData
 }
 from "../core/scan.js";
@@ -22,7 +21,6 @@ import
 }
 from "../utils/walls.js";
 
-const SPEED_FALLBACK = 3000;
 const SPEED_REFRESH_MS = 500;
 const SKIP_NAME_PARTS = ["BALL"];
 
@@ -40,7 +38,7 @@ var _target = null;
 var _aimX = 0;
 var _aimY = 0;
 var _track = new Map();
-var _projectileSpeed = SPEED_FALLBACK;
+var _projectileSpeed = 0;
 var _speedAt = 0;
 var _ownBeam = false;
 var _rangeCache = 0;
@@ -179,27 +177,25 @@ function _ownProjectileSpeed()
     return _projectileSpeed;
 }
 
-function _ownRange(speed)
+function _ownRange()
 {
     const now = Date.now();
-    if (now - _rangeAt < SPEED_REFRESH_MS) return _rangeCache > 0 ? _rangeCache : speed * RANGE_FLIGHT_S * RANGE_MARGIN;
+    if (now - _rangeAt < SPEED_REFRESH_MS) return _rangeCache;
     _rangeAt = now;
-    let tiles = 0;
-    try
-    {
-        const fns = getFunctions();
-        const own = scanData.ownCharacter;
-        if (own && !own.isNull() && fns.LogicCharacterClient_getWeaponSkill && fns.LogicSkillData_getCastingRange)
-        {
-            const skill = fns.LogicCharacterClient_getWeaponSkill(own);
-            if (skill && !skill.isNull()) tiles = fns.LogicSkillData_getCastingRange(skill) | 0;
-        }
-    }
-    catch (_)
-    {}
-    if (tiles > 0 && tiles <= 40) _rangeCache = tiles * TILE_UNITS * RANGE_MARGIN;
-    else _rangeCache = 0;
-    return _rangeCache > 0 ? _rangeCache : speed * RANGE_FLIGHT_S * RANGE_MARGIN;
+    _rangeCache = 0;
+
+    const fns = getFunctions();
+    const own = scanData.ownCharacter;
+    if (!own || own.isNull() || !fns.LogicGameObjectClient_getData || !fns.LogicSkillData_getCastingRange) return 0;
+
+    const data = fns.LogicGameObjectClient_getData(own);
+    if (!data || data.isNull()) return 0;
+
+    const units = fns.LogicSkillData_getCastingRange(data) | 0;
+    if (units < 100 || units > 20000) return 0;
+
+    _rangeCache = units;
+    return _rangeCache;
 }
 
 function _aimAt(enemy, now)
@@ -221,7 +217,7 @@ function _aimAt(enemy, now)
     const speed = _ownProjectileSpeed();
     const pred = _sample(enemy.gid, ex, ey, enemy.moveSpeed, now);
     if (!pred) return null;
-    const aim = _solve(mx, my, pred, speed, _ownRange(speed));
+    const aim = _solve(mx, my, pred, speed, _ownRange());
     if (!aim) return null;
     return aim;
 }
@@ -239,7 +235,7 @@ function _pickTarget(now)
     const mx = scanData.myX;
     const my = scanData.myY;
     const speed = _ownProjectileSpeed();
-    const range = _ownRange(speed);
+    const range = _ownRange();
     let best = null;
     let bestD = Infinity;
     let bestPred = null;
