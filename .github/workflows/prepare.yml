@@ -3,143 +3,335 @@ name: prepare
 on:
   push:
     branches: [main]
+    paths-ignore:
+      - "**/*.md"
+      - LICENSE
+      - .gitignore
   pull_request:
+    paths-ignore:
+      - "**/*.md"
+      - LICENSE
+      - .gitignore
   workflow_dispatch:
 
 permissions:
-  contents: write
+  contents: read
 
 concurrency:
-  group: prepare-${{ github.ref }}
+  group: prepare-${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
+env:
+  NODE_VERSION: "24"
+  PRETTIER_VERSION: "3.9.10"
+  ESLINT_VERSION: "10.14.0"
+
+defaults:
+  run:
+    shell: bash --noprofile --norc -Eeuo pipefail {0}
+
 jobs:
-  prepare:
-    if: github.event_name != 'push' || !startsWith(github.event.head_commit.message, 'chore(prepare)')
+  heal:
+    name: heal
+    if: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' && !startsWith(github.event.head_commit.message, 'chore(prepare)') }}
     runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write
     steps:
-      - name: checkout
-        uses: actions/checkout@v4
+      - name: harden runner
+        uses: step-security/harden-runner@46b06cea07f9e64621fdf066ba77ac6915163d43
         with:
-          ref: ${{ github.head_ref || github.ref_name }}
+          egress-policy: audit
+
+      - name: checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          ref: ${{ github.ref_name }}
           fetch-depth: 0
+          persist-credentials: true
 
       - name: node
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1
         with:
-          node-version: 24
+          node-version: ${{ env.NODE_VERSION }}
 
       - name: tools
-        run: npm install --global prettier@3 eslint@9
-
-      - name: eslint config
         run: |
-          cat > "$RUNNER_TEMP/eslint.config.mjs" <<'CFG'
+          npm install --global --no-fund --no-audit \
+            "prettier@${PRETTIER_VERSION}" \
+            "eslint@${ESLINT_VERSION}"
+
+      - name: config
+        run: |
+          cat > "${RUNNER_TEMP}/prettier.json" <<'PRETTIER'
+          {
+              "printWidth": 100,
+              "tabWidth": 4,
+              "useTabs": false,
+              "semi": true,
+              "singleQuote": false,
+              "trailingComma": "none",
+              "arrowParens": "always",
+              "bracketSpacing": true,
+              "endOfLine": "lf"
+          }
+          PRETTIER
+          cat > "${RUNNER_TEMP}/eslint.config.mjs" <<'ESLINT'
           export default [
               {
-                  files: ['**/*.js'],
+                  files: ["**/*.js"],
                   languageOptions: {
                       ecmaVersion: 2022,
-                      sourceType: 'module',
+                      sourceType: "module",
                       globals: {
-                          ptr: 'readonly',
-                          NULL: 'readonly',
-                          Memory: 'readonly',
-                          NativeFunction: 'readonly',
-                          NativePointer: 'readonly',
-                          Module: 'readonly',
-                          Process: 'readonly',
-                          Interceptor: 'readonly',
-                          File: 'readonly',
-                          Script: 'readonly',
-                          send: 'readonly',
-                          recv: 'readonly',
-                          rpc: 'readonly',
-                          setTimeout: 'readonly',
-                          clearTimeout: 'readonly',
-                          setInterval: 'readonly',
-                          clearInterval: 'readonly',
-                          console: 'readonly'
+                          ptr: "readonly",
+                          NULL: "readonly",
+                          Memory: "readonly",
+                          NativeFunction: "readonly",
+                          NativeCallback: "readonly",
+                          NativePointer: "readonly",
+                          Module: "readonly",
+                          Process: "readonly",
+                          Interceptor: "readonly",
+                          File: "readonly",
+                          Script: "readonly",
+                          Thread: "readonly",
+                          send: "readonly",
+                          recv: "readonly",
+                          rpc: "readonly",
+                          setTimeout: "readonly",
+                          clearTimeout: "readonly",
+                          setInterval: "readonly",
+                          clearInterval: "readonly",
+                          console: "readonly"
                       }
                   },
+                  linterOptions: { reportUnusedDisableDirectives: "error" },
                   rules: {
-                      'no-unused-vars': ['error', { args: 'none', caughtErrors: 'none', varsIgnorePattern: '^_' }],
-                      'no-undef': 'error',
-                      'no-redeclare': 'error',
-                      'no-dupe-keys': 'error',
-                      'no-dupe-args': 'error',
-                      'no-duplicate-case': 'error',
-                      'no-unreachable': 'error',
-                      'no-unreachable-loop': 'error',
-                      'no-constant-condition': ['error', { checkLoops: false }],
-                      'no-empty': ['error', { allowEmptyCatch: true }],
-                      'no-fallthrough': 'error',
-                      'no-self-assign': 'error',
-                      'no-self-compare': 'error',
-                      'no-unmodified-loop-condition': 'error',
-                      'no-use-before-define': ['error', { functions: false, classes: false }],
-                      'eqeqeq': ['error', 'smart'],
-                      'no-eval': 'error',
-                      'no-implied-eval': 'error',
-                      'no-new-func': 'error',
-                      'no-debugger': 'error',
-                      'no-console': 'error',
-                      'prefer-const': 'error',
-                      'no-var': 'off'
+                      "no-unused-vars": ["error", { args: "none", caughtErrors: "none", varsIgnorePattern: "^_" }],
+                      "no-undef": "error",
+                      "no-redeclare": "error",
+                      "no-dupe-keys": "error",
+                      "no-dupe-args": "error",
+                      "no-duplicate-case": "error",
+                      "no-unreachable": "error",
+                      "no-unreachable-loop": "error",
+                      "no-constant-condition": ["error", { checkLoops: false }],
+                      "no-empty": ["error", { allowEmptyCatch: true }],
+                      "no-fallthrough": "error",
+                      "no-self-assign": "error",
+                      "no-self-compare": "error",
+                      "no-unmodified-loop-condition": "error",
+                      "no-use-before-define": ["error", { functions: false, classes: false }],
+                      "eqeqeq": ["error", "smart"],
+                      "no-eval": "error",
+                      "no-implied-eval": "error",
+                      "no-new-func": "error",
+                      "no-debugger": "error",
+                      "no-console": "error",
+                      "prefer-const": "error"
                   }
               }
           ];
-          CFG
-
-      - name: syntax
-        run: |
-          set -e
-          while IFS= read -r file; do
-            node --check "$file"
-          done < <(find agent -name '*.js' -type f)
+          ESLINT
 
       - name: strip debug
         run: |
-          find agent -name '*.js' -type f -print0 | xargs -0 -r sed -i -E \
-            -e '/^[[:space:]]*console\.(log|debug|info|warn|error)\(.*\);[[:space:]]*$/d' \
-            -e '/^[[:space:]]*debugger;[[:space:]]*$/d'
+          while IFS= read -r -d '' file; do
+            sed -i -E \
+              -e '/^[[:space:]]*console\.(log|debug|info|warn|error)\(.*\);[[:space:]]*$/d' \
+              -e '/^[[:space:]]*debugger;[[:space:]]*$/d' \
+              "$file"
+          done < <(find agent -type f -name '*.js' -print0)
 
       - name: prettier
         run: |
-          prettier --write "agent/**/*.js" \
-            --print-width 100 \
-            --tab-width 4 \
-            --semi \
-            --no-single-quote \
-            --trailing-comma none \
-            --arrow-parens always \
-            --bracket-spacing \
-            --end-of-line lf
+          prettier --config "${RUNNER_TEMP}/prettier.json" --write "agent/**/*.js"
 
       - name: eslint fix
-        run: eslint --config "$RUNNER_TEMP/eslint.config.mjs" agent --fix || true
+        run: |
+          eslint --config "${RUNNER_TEMP}/eslint.config.mjs" --fix agent || true
 
       - name: commit and push
-        if: github.event_name != 'pull_request'
         run: |
           git config user.name "prepare"
           git config user.email "prepare@users.noreply.github.com"
           git add -A
+          summary="${GITHUB_STEP_SUMMARY:-/dev/null}"
           if git diff --cached --quiet; then
-            echo "nothing to fix"
-          else
-            git commit -m "chore(prepare): format and lint"
-            git push
+            echo "nothing to heal" >> "$summary"
+            exit 0
           fi
+          git commit -m "chore(prepare): format and lint"
+          if ! git push origin "HEAD:${GITHUB_REF_NAME}"; then
+            git pull --rebase --autostash
+            git push origin "HEAD:${GITHUB_REF_NAME}"
+          fi
+          echo "healed in $(git rev-parse --short HEAD)" >> "$summary"
 
-      - name: verify
-        run: eslint --config "$RUNNER_TEMP/eslint.config.mjs" agent
+  verify:
+    name: verify
+    needs: [heal]
+    if: ${{ always() && needs.heal.result != 'failure' && needs.heal.result != 'cancelled' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    steps:
+      - name: harden runner
+        uses: step-security/harden-runner@46b06cea07f9e64621fdf066ba77ac6915163d43
+        with:
+          egress-policy: audit
 
-      - name: diff guard
-        if: github.event_name == 'pull_request'
+      - name: checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          ref: ${{ github.head_ref || github.ref_name }}
+          persist-credentials: false
+
+      - name: node
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+
+      - name: tools
         run: |
-          if ! git diff --quiet; then
-            echo "::error::formatting or lint fixes were required, run prepare locally"
-            git --no-pager diff --stat
-            exit 1
-          fi
+          npm install --global --no-fund --no-audit \
+            "prettier@${PRETTIER_VERSION}" \
+            "eslint@${ESLINT_VERSION}"
+
+      - name: config
+        run: |
+          cat > "${RUNNER_TEMP}/prettier.json" <<'PRETTIER'
+          {
+              "printWidth": 100,
+              "tabWidth": 4,
+              "useTabs": false,
+              "semi": true,
+              "singleQuote": false,
+              "trailingComma": "none",
+              "arrowParens": "always",
+              "bracketSpacing": true,
+              "endOfLine": "lf"
+          }
+          PRETTIER
+          cat > "${RUNNER_TEMP}/eslint.config.mjs" <<'ESLINT'
+          export default [
+              {
+                  files: ["**/*.js"],
+                  languageOptions: {
+                      ecmaVersion: 2022,
+                      sourceType: "module",
+                      globals: {
+                          ptr: "readonly",
+                          NULL: "readonly",
+                          Memory: "readonly",
+                          NativeFunction: "readonly",
+                          NativeCallback: "readonly",
+                          NativePointer: "readonly",
+                          Module: "readonly",
+                          Process: "readonly",
+                          Interceptor: "readonly",
+                          File: "readonly",
+                          Script: "readonly",
+                          Thread: "readonly",
+                          send: "readonly",
+                          recv: "readonly",
+                          rpc: "readonly",
+                          setTimeout: "readonly",
+                          clearTimeout: "readonly",
+                          setInterval: "readonly",
+                          clearInterval: "readonly",
+                          console: "readonly"
+                      }
+                  },
+                  linterOptions: { reportUnusedDisableDirectives: "error" },
+                  rules: {
+                      "no-unused-vars": ["error", { args: "none", caughtErrors: "none", varsIgnorePattern: "^_" }],
+                      "no-undef": "error",
+                      "no-redeclare": "error",
+                      "no-dupe-keys": "error",
+                      "no-dupe-args": "error",
+                      "no-duplicate-case": "error",
+                      "no-unreachable": "error",
+                      "no-unreachable-loop": "error",
+                      "no-constant-condition": ["error", { checkLoops: false }],
+                      "no-empty": ["error", { allowEmptyCatch: true }],
+                      "no-fallthrough": "error",
+                      "no-self-assign": "error",
+                      "no-self-compare": "error",
+                      "no-unmodified-loop-condition": "error",
+                      "no-use-before-define": ["error", { functions: false, classes: false }],
+                      "eqeqeq": ["error", "smart"],
+                      "no-eval": "error",
+                      "no-implied-eval": "error",
+                      "no-new-func": "error",
+                      "no-debugger": "error",
+                      "no-console": "error",
+                      "prefer-const": "error"
+                  }
+              }
+          ];
+          ESLINT
+
+      - name: actionlint
+        uses: raven-actions/actionlint@3d39aea434753780c3b3d4a1a31c854b4dbf49d7
+        with:
+          fail-on-error: true
+
+      - name: zizmor
+        uses: zizmorcore/zizmor-action@45d7276c9ca790aabd705e31ca99c6185c3e76dd
+        with:
+          advanced-security: false
+          min-severity: high
+          annotations: true
+
+      - name: syntax
+        run: |
+          failed=0
+          while IFS= read -r -d '' file; do
+            node --check "$file" || failed=1
+          done < <(find agent -type f -name '*.js' -print0)
+          exit "$failed"
+
+      - name: lint
+        run: |
+          eslint --config "${RUNNER_TEMP}/eslint.config.mjs" --max-warnings 0 agent
+
+      - name: format
+        run: |
+          prettier --config "${RUNNER_TEMP}/prettier.json" --check "agent/**/*.js"
+
+      - name: manifest
+        run: |
+          : > "${RUNNER_TEMP}/agent-manifest.txt"
+          while IFS= read -r -d '' file; do
+            sha256sum "$file" >> "${RUNNER_TEMP}/agent-manifest.txt"
+          done < <(find agent -type f -name '*.js' -print0 | sort -z)
+
+      - name: artifact
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+        with:
+          name: agent-${{ github.sha }}
+          path: |
+            agent
+            ${{ runner.temp }}/agent-manifest.txt
+          if-no-files-found: error
+          retention-days: 14
+          compression-level: 9
+
+      - name: summary
+        run: |
+          summary="${GITHUB_STEP_SUMMARY:-/dev/null}"
+          {
+            echo "### prepare"
+            echo ""
+            echo "| item | value |"
+            echo "| --- | --- |"
+            echo "| commit | \`$(git rev-parse --short HEAD)\` |"
+            echo "| node | \`$(node --version)\` |"
+            echo "| prettier | \`$(prettier --version)\` |"
+            echo "| eslint | \`$(eslint --version)\` |"
+            echo "| files | $(find agent -type f -name '*.js' | wc -l) |"
+          } >> "$summary"
