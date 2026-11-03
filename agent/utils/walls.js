@@ -14,10 +14,12 @@ from "../core/offsets.js";
 const MAX_MAP_TILES = 120;
 const MAX_TOTAL_TILES = MAX_MAP_TILES * MAX_MAP_TILES;
 const RETRY_MS = 2e3;
-export const TILE_SIZE = 300;
+let tileSize = 300;
 export const BLOCKS_MOVEMENT = 128;
 export const BLOCKS_PROJECTILES = 64;
 
+var pathFinder = null;
+var probeOut = null;
 var walls = null;
 var wallsWidth = 0;
 var wallsHeight = 0;
@@ -25,11 +27,36 @@ var needsRebuild = true;
 var lastFailedTs = 0;
 var tileWatchInstalled = false;
 
+function _syncTileSize()
+{
+    try
+    {
+        const fn = getFunctions().LogicTileMap_tileToLogic;
+        if (!fn) return;
+        const a = fn(0) | 0;
+        const b = fn(1) | 0;
+        const size = b - a;
+        if (size >= 100 && size <= 2000) tileSize = size;
+    }
+    catch (_)
+    {}
+}
+
 function _rebuildFrom(tileMap)
 {
     if (!isValidPtr(tileMap)) return false;
     try
     {
+        _syncTileSize();
+        try
+        {
+            const pf = tileMap.add(offsets.TileMap_pathFinder).readPointer();
+            pathFinder = isValidPtr(pf) ? pf : null;
+        }
+        catch (_)
+        {
+            pathFinder = null;
+        }
         const width = tileMap.add(offsets.TileMap_Width).readS32();
         const height = tileMap.add(offsets.TileMap_Height).readS32();
         if (width <= 0 || width > MAX_MAP_TILES || height <= 0 || height > MAX_MAP_TILES) return false;
@@ -139,10 +166,10 @@ export function losCheck(wx0, wy0, wx1, wy1, checkBit)
     if (!grid) return true;
     const width = wallsWidth;
     const height = wallsHeight;
-    let cx = wx0 / TILE_SIZE | 0;
-    let cy = wy0 / TILE_SIZE | 0;
-    const tx = wx1 / TILE_SIZE | 0;
-    const ty = wy1 / TILE_SIZE | 0;
+    let cx = wx0 / tileSize | 0;
+    let cy = wy0 / tileSize | 0;
+    const tx = wx1 / tileSize | 0;
+    const ty = wy1 / tileSize | 0;
     if (cx === tx && cy === ty) return true;
     const dx = Math.abs(tx - cx);
     const dy = -Math.abs(ty - cy);
@@ -176,10 +203,31 @@ function isBlockedAt(wx, wy, checkBit)
     const width = wallsWidth;
     const height = wallsHeight;
     if (width <= 0 || height <= 0) return false;
-    const tx = wx / TILE_SIZE | 0;
-    const ty = wy / TILE_SIZE | 0;
+    const tx = wx / tileSize | 0;
+    const ty = wy / tileSize | 0;
     if (tx < 0 || tx >= width || ty < 0 || ty >= height) return false;
     return !!(grid[ty * width + tx] & checkBit);
+}
+
+export function firstWallHit(wx0, wy0, wx1, wy1)
+{
+    const fn = getFunctions().LogicGamePlayUtil_getClosestPathfinderCollision;
+    if (!fn || !isValidPtr(pathFinder)) return -1;
+    try
+    {
+        if (!probeOut) probeOut = Memory.alloc(8);
+        probeOut.writeS32(0);
+        probeOut.add(4).writeS32(0);
+        const hit = fn(0, wx0 | 0, wy0 | 0, wx1 | 0, wy1 | 0, pathFinder, probeOut, 1, 1) | 0;
+        const hx = probeOut.readS32() | 0;
+        const hy = probeOut.add(4).readS32() | 0;
+        if (!(hit & 1)) return Math.round(Math.hypot(wx1 - wx0, wy1 - wy0));
+        return Math.max(0, Math.round(Math.hypot(hx - wx0, hy - wy0)));
+    }
+    catch (_)
+    {
+        return -1;
+    }
 }
 
 export function isBlockedWide(wx, wy, radius, checkBit)

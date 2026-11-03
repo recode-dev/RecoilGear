@@ -23,6 +23,7 @@ import
 {
     BLOCKS_MOVEMENT,
     BLOCKS_PROJECTILES,
+    firstWallHit,
     isBlockedWide,
     losCheck
 }
@@ -505,7 +506,19 @@ function _crossesPath(paths, px, py, stepX, stepY)
 
 function _wallAhead(myX, myY, dir, speed, bodyR)
 {
-    const step = speed * TUNE.PROBE_T;
+    const reach = speed * TUNE.PROBE_T * TUNE.PROBE_N;
+    const step = normalize(
+    {
+        x: dir.x,
+        y: dir.y
+    }, reach | 0);
+    const hit = firstWallHit(myX, myY, myX + step.x, myY + step.y);
+    if (hit >= 0)
+    {
+        if (hit >= reach) return 0;
+        const room = LogicMath.clamp(hit / reach, 0, 1);
+        return TUNE.WALL_HIT * (1 - room) * TUNE.PROBE_N;
+    }
     let raw = 0;
     for (let s = 1; s <= TUNE.PROBE_N; s++)
     {
@@ -513,7 +526,7 @@ function _wallAhead(myX, myY, dir, speed, bodyR)
         {
             x: dir.x,
             y: dir.y
-        }, (step * s) | 0);
+        }, (speed * TUNE.PROBE_T * s) | 0);
         const px = myX + probe.x;
         const py = myY + probe.y;
         if (isBlockedWide(px, py, bodyR, BLOCKS_MOVEMENT))

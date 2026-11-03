@@ -153,9 +153,7 @@ function _readProjectileField(data, off, min, max)
 
 function _readProjectileRadius(data)
 {
-    let r = _readProjectileField(data, offsets.ProjectileData_radiusField, 1, 2000);
-    if (!r) r = _readProjectileField(data, offsets.ProjectileData_radius, 1, 2000);
-    return r;
+    return _readProjectileField(data, offsets.ProjectileData_radiusField, 1, 2000);
 }
 
 function _readProjectileFlags(data)

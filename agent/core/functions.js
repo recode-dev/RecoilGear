@@ -43,6 +43,8 @@ export function initFunctions(baseIn, imageIn)
         LogicGameObjectClient_getGlobalID: _nf("LogicGameObjectClient_getGlobalID", "uint32", ["pointer"]),
         LogicGameObjectClient_getData: _nf("LogicGameObjectClient_getData", "pointer", ["pointer"]),
         LogicProjectileData_isBeam: _nf("LogicProjectileData_isBeam", "uint32", ["pointer"]),
+        LogicTileMap_tileToLogic: _nf("LogicTileMap_tileToLogic", "int32", ["int32"]),
+        LogicGamePlayUtil_getClosestPathfinderCollision: _nf("LogicGamePlayUtil_getClosestPathfinderCollision", "uint32", ["int32", "int32", "int32", "int32", "int32", "pointer", "pointer", "uint32", "uint8"]),
         LogicCharacterData_getSpeed: _nf("LogicCharacterData_getSpeed", "int32", ["pointer"]),
         LogicCharacterData_getCollisionRadius: _nf("LogicCharacterData_getCollisionRadius", "uint32", ["pointer"]),
         LogicBattleModeClient_getTileMap: _nf("LogicBattleModeClient__getTileMap", "pointer", ["pointer"]),

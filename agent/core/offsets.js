@@ -8,6 +8,7 @@ export const offsets = Object.freeze({
     ObjectManager_count: 0xc,
     ObjectManager_ptrStride: 0x8,
 
+    TileMap_pathFinder: 0x60,
     TileMap_Width: 0xc4,
     TileMap_Height: 0xc8,
     TileMap_TilesArray: 0x20,
@@ -21,7 +22,6 @@ export const offsets = Object.freeze({
     ProjectileClient_targetX: 0x200,
     ProjectileClient_targetY: 0x204,
     Projectile_isIndirect: 0x118,
-    ProjectileData_radius: 0x74,
     ProjectileData_speedField: 0x124,
     ProjectileData_radiusField: 0x130,
     ProjectileData_passesEnvironment: 0x23c,
@@ -39,6 +39,8 @@ export const offsets = Object.freeze({
     BattleScreen_activateSkill: 0x7a0084,
     BattleScreen_getClosestTargetForAutoshoot: 0x7b67ec,
     LogicTile__setData: 0x9401fc,
+    LogicTileMap_tileToLogic: 0x943040,
+    LogicGamePlayUtil_getClosestPathfinderCollision: 0xaf5d10,
     LogicProjectileClient_ctor: 0xa313f8,
     LogicProjectileClient_destruct: 0xa31470,
 
