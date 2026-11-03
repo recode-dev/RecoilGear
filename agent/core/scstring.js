@@ -1,5 +1,3 @@
-import { offsets } from "./offsets.js";
-
 const DEFAULT_MAX_LENGTH = 256;
 
 export function readScString(value, maxLength = DEFAULT_MAX_LENGTH) {
