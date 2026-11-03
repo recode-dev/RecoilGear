@@ -8,7 +8,7 @@ export const TILE_UNITS = 100;
 export const TICKS_PER_SEC = 20;
 const TICK_MS = 1000 / TICKS_PER_SEC;
 export const BEAM_TICKS = 18000;
-const DATA_ROW_OFF = 0x68; // v69: [data+0x68] — ридер таблиц (доказано getIntValueFromColumn)
+const DATA_ROW_OFF = 0x68;
 const COLUMN_SPAN = 48;
 const STALE_MS = 10000;
 const DEFAULT_PROJECTILE_RADIUS = 40;
@@ -78,7 +78,6 @@ function _ptrKey(value) {
     }
 }
 
-// Прямое чтение поля [obj+0x10]: доказано LogicGameObjectClient_getData (v69).
 export function dataFieldOf(obj) {
     if (!isValidPtr(obj)) return ptr(0);
     try {
@@ -169,7 +168,6 @@ function _installCoreHooks(base) {
                     if (!isValidPtr(this.obj)) return;
                     const key = _ptrKey(this.obj);
                     if (!key) return;
-                    // v69: угол — целое число градусов (getMoveAngle: ldr w0,[x0,#0xb0]).
                     const deg = this.obj.add(offsets.CharacterClient_moveAngle).readS32() | 0;
                     if (deg < -720 || deg > 720) return;
                     if (_angleCache.size > CACHE_MAX) _angleCache.clear();
@@ -236,7 +234,6 @@ function _readMoveAngle(obj) {
     const fns = getFunctions();
     if (fns.LogicCharacterClient_getMoveAngle) {
         try {
-            // v69: getMoveAngle возвращает int-градусы, а не float (ldr w0,[x0,#0xb0]).
             const deg = fns.LogicCharacterClient_getMoveAngle(obj) | 0;
             if (_validAngleDeg(deg)) return (deg * Math.PI) / 180;
         } catch (_) {}
@@ -768,14 +765,12 @@ function _readProjectileMeta(projectile, data, speed, rangeUnits, beam) {
         travel = travelDistance(ticks, speed);
     }
     if (fns.LogicProjectileClient_getType) {
-        // v69: геттер типа — метод ProjectileData, вызывается с data (доказано decode).
         try {
             const t = fns.LogicProjectileClient_getType(data) | 0;
             if (t >= 0 && t <= 20) typeId = t;
         } catch (_) {}
     }
     if (typeId < 0) {
-        // Поле типа лежит в ProjectileData (+0x28c), не в клиенте (клиент всего 0x230 байт).
         const t = _readClientU32(data, offsets.ProjectileData_typeField, 20);
         if (t >= 0) typeId = t;
     }
@@ -860,7 +855,6 @@ function _readProjectileTarget(projectile, data, x, y) {
         if (hit) return hit;
     } catch (_) {}
     if (fns.LogicProjectileClient_getTargetX && fns.LogicProjectileClient_getTargetY) {
-        // getTargetX/getTargetY — методы клиента (читают [x+0x1ec]/[x+0x1f0]).
         try {
             const hit = _validTarget(
                 fns.LogicProjectileClient_getTargetX(projectile) | 0,
@@ -926,8 +920,6 @@ function _captureProjectile(projectile, data, now) {
         if (!(radius > 0)) radius = DEFAULT_PROJECTILE_RADIUS;
         const x = _fieldS32(projectile, offsets.GameObj_x);
         const y = _fieldS32(projectile, offsets.GameObj_y);
-        // Позиция объекта выставляется decode/setPosition; при (0,0) спавн
-        // достаём на первом тике, где позиция реальна (spawnPending).
         const spawnReady = x !== 0 || y !== 0;
         const target = _readProjectileTarget(projectile, data, x, y);
         const flags = _readProjectileFlags(data);
@@ -953,8 +945,6 @@ function _captureProjectile(projectile, data, now) {
             beam = data.add(offsets.ProjectileData_isBeamField).readU8() & 1;
         } catch (_) {}
         const ownerIndex = _readOwnerIndex(projectile);
-        // v69 (Ghidra): targetObject = [proj+0xa0], lifeTicks = [proj+0x1e8],
-        // stun = [proj+0x220], эффект = [proj+0x228] — доказано decode/ctor.
         const targetObj = _readPtrField(projectile, offsets.ProjectileClient_targetObject);
         const entry = {
             gid: key,
@@ -1125,8 +1115,6 @@ function _installProjectileHooks(base) {
                 this.data = args[1];
             },
             onLeave() {
-                // Позиция/id ещё не инициализированы (base-ctor обнуляет их),
-                // тяжёлый захват делает decode-hook; здесь только прогрев кэша data.
                 try {
                     if (isValidPtr(this.projectile) && isValidPtr(this.data)) {
                         const key = _ptrKey(this.projectile);
@@ -1214,7 +1202,6 @@ function _updateLiveProjectiles(now) {
                 _liveProjectiles.delete(gid);
                 continue;
             }
-            // v69: getX/getY == [obj+0x30]/[obj+0x34] — читаем напрямую, без натив-вызовов.
             const x = _fieldS32(entry.ptr, offsets.GameObj_x);
             const y = _fieldS32(entry.ptr, offsets.GameObj_y);
             const dt = (now - entry.lastTs) / 1000;
@@ -1251,7 +1238,6 @@ function _updateLiveProjectiles(now) {
             entry.x = x;
             entry.y = y;
             if (entry.spawnPending && (x !== 0 || y !== 0)) {
-                // Спавн зафиксирован только когда позиция реальна.
                 entry.spawnX = x;
                 entry.spawnY = y;
                 entry.spawnPending = false;
@@ -1368,8 +1354,6 @@ export function updateScanner(bm, now) {
         }
         scanData.ownCharacter = own;
         scanData.battleModeClient = bm;
-        // v69: поле 0xe4 у BattleModeClient не является командой; команда — [char+0x40]
-        // (доказано base-decode: код 0x119, старшие биты).
         scanData.myTeamId = own.add(offsets.GameObj_team).readU32();
         scanData.myPlayerIndex = _readOwnerIndex(own);
         _friendlyIdx.clear();
@@ -1412,7 +1396,6 @@ export function updateScanner(bm, now) {
                             obj = objects.add(i * stride).readPointer();
                         }
                         if (!isValidPtr(obj)) continue;
-                        // v69: getData(obj) == [obj+0x10] (ldr x0,[x0,#0x10]) — читаем напрямую.
                         const data = dataFieldOf(obj);
                         if (!isValidPtr(data)) continue;
                         const team = obj.add(offsets.GameObj_team).readU32();
@@ -1426,7 +1409,6 @@ export function updateScanner(bm, now) {
                             continue;
                         }
                         if (obj.add(offsets.GameObj_hp).readU32() === 0) continue;
-                        // Имена кэшируются по data: у одного бойца они общие.
                         const dataKey = _ptrKey(data);
                         let brawlerName;
                         if (dataKey) {
@@ -1444,7 +1426,6 @@ export function updateScanner(bm, now) {
                         const playerIndex = _readOwnerIndex(obj);
                         if (brawlerName) _rememberCharacter(playerIndex, obj);
                         enemies.push({
-                            // v69: [+8] globalId не заполняется — ключом служит сам объект.
                             gid: _ptrKey(obj),
                             ptr: obj,
                             x: _fieldS32(obj, offsets.GameObj_x),
@@ -1463,7 +1444,6 @@ export function updateScanner(bm, now) {
         }
         _scanCount++;
         if ((_scanCount & 63) === 0) {
-            // Имена иммутабельны в бою; изредка сбрасываем кэш от мёртвых указателей.
             _brawlerNameCache.clear();
             if (_charSpeedByData.size > 256) _charSpeedByData.clear();
         }

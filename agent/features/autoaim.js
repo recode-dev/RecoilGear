@@ -105,7 +105,6 @@ function _sample(gid, x, y, moveSpeed, moveAngle, now) {
     }
     track.lastSeen = now;
 
-    // Кольцевой буфер вместо push/shift: ноль аллокаций в горячем пути.
     const h = track.hist;
     const slot = h[track.histHead];
     slot.x = x;
@@ -263,7 +262,6 @@ function _readInt(data, off, getter, min, max) {
 function _ownProjectileSpeed() {
     const now = Date.now();
     if (_projectileSpeed >= 300 && now - _speedAt < SPEED_REFRESH_MS) return _projectileSpeed;
-    // Не перечитываем нативные поля каждый кадр, если прошлая попытка не удалась.
     if (_projectileSpeed < 300 && _speedFailAt > 0 && now - _speedFailAt < SPEED_FAIL_RETRY_MS)
         return _projectileSpeed;
 
@@ -543,7 +541,6 @@ function _pickTarget(now) {
     }
     if (!pick || !pred) return null;
 
-    // Прунинг мёртвых треков: не копим историю исчезнувших врагов.
     if (_track.size > 24) {
         for (const [key, tr] of _track) {
             if (now - tr.lastSeen > TRACK_PRUNE_MS) _track.delete(key);

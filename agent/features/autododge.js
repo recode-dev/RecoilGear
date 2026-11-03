@@ -161,8 +161,6 @@ function segmentHitAlong(x1, y1, x2, y2, x3, y3, x4, y4) {
     if (den === 0) return -1;
     const ta = ((x3 - x1) * by - (y3 - y1) * bx) / den;
     const tb = ((x3 - x1) * ay - (y3 - y1) * ax) / den;
-    // ta≈0 — пересечение в точке старта: это ВЫХОД из зоны опасности,
-    // а не вход в неё, такие пересечения не штрафуем.
     if (ta < 0.02 || ta > 1 || tb < 0 || tb > 1) return -1;
     return ta * length(ax, ay);
 }
@@ -360,17 +358,15 @@ function _collectLive(myX, myY, myRadius, now) {
         if (p.attachArea) rad += 30;
         if (p.trail) rad += LogicMath.min(200, p.trailMin || 0) / 2;
 
-        // Метатели: снаряд идёт по дуге через стены, опасна ТОЛЬКО точка приземления.
-        // Уклонение — отойти от точки падения, а не от линии полёта.
         if (indirect && p.hasTarget && !boomerang && !grapples && !attaches) {
             const lx = p.targetX;
             const ly = p.targetY;
             const dist = distance(p.x, p.y, lx, ly);
             const left = p.seg > 0 ? p.seg : -1;
-            if (left >= 0 && left < dist) continue; // не долетит до своей цели
+            if (left >= 0 && left < dist) continue;
             const flight = p.speed > 0 ? p.speed : 0;
             const t2land = flight > 0 ? dist / flight : 0;
-            if (!_heading && t2land > TUNE.ENGAGE_S) continue; // рано: ещё не близко к посадке
+            if (!_heading && t2land > TUNE.ENGAGE_S) continue;
             if (distance(lx, ly, myX, myY) > rad + 150) continue;
             out.push({
                 x: lx,
@@ -378,7 +374,6 @@ function _collectLive(myX, myY, myRadius, now) {
                 vx: 0,
                 vy: 0,
                 rad: rad,
-                // зона взрыва шире корпуса снаряда: опасная зона = padded-радиус
                 hitRad: rad,
                 left: -1,
                 chase: 0,
@@ -397,7 +392,6 @@ function _collectLive(myX, myY, myRadius, now) {
         }
         let spd = length(vx, vy);
         let chase = 0;
-        // Хоминг/прилипающие: перпендикулярный уход бессмысленен — модель погони.
         if ((p.homing && _steerActive(p)) || attaches) {
             chase = 1;
             if (spd > 1) {
@@ -578,14 +572,10 @@ function _clearanceFor(threats, myX, myY, mvx, mvy) {
         if (spd > 1) maxT = LogicMath.min(maxT, LogicMath.max(0, t.left) / spd);
         let dist;
         if (t.chase) {
-            // Погоня: бок не спасает, clearance растёт только от радиального отхода.
             const away = reach > 1 ? -(mvx * relx + mvy * rely) / reach : 0;
             dist = reach + (away - spd) * maxT;
             if (dist < 0) dist = 0;
         } else if (length(t.vx, t.vy) < 1) {
-            // Статичная угроза (мина/точка приземления): метрика ухода —
-            // расстояние через горизонт, а не минимум траектории (иначе все
-            // направления, кроме «навстречу», неразличимы).
             const away = reach > 1 ? -(mvx * relx + mvy * rely) / reach : 0;
             dist = reach + away * maxT;
         } else {
@@ -627,7 +617,6 @@ function _pathsHitMe(threats, px, py) {
     for (let i = 0; i < threats.length; i++) {
         const t = threats[i];
         if (t.chase) {
-            // Догоняющий снаряд: опасно, если он успеет закрыть дистанцию за горизонт.
             const reach = distance(t.x, t.y, px, py);
             const spd = length(t.vx, t.vy);
             const maxT =
