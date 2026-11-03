@@ -1,6 +1,16 @@
 import { getBase, getFunctions, isValidPtr } from "../core/functions.js";
 import { offsets } from "../core/offsets.js";
-import { scanData } from "../core/scan.js";
+import {
+    BEAM_TICKS,
+    TICKS_PER_SEC,
+    rangeScaleCalibrated,
+    enableProjectileTracking,
+    onDataReload,
+    scanData,
+    travelDistance,
+    travelFor,
+    weaponRangeUnits
+} from "../core/scan.js";
 import { BLOCKS_PROJECTILES, losCheck } from "../utils/walls.js";
 
 const MAXI = 0x7fffffff;
@@ -38,6 +48,13 @@ const MAX_ACCEL = 6000;
 const LEAD_PASSES = 3;
 const MAX_FLIGHT_S = 3;
 const STICKY_MARGIN = 1.12;
+// The engine steps projectile flight per server tick (getTravelTicks), so lead is
+// solved on the same grid instead of continuously.
+const TICK_S = 1 / TICKS_PER_SEC;
+// Steering/homing shots curve toward the aim direction: the engine corrects part of
+// the miss, so the raw lead is damped.
+const STEER_LEAD_FACTOR = 0.75;
+const LINEUP_BONUS = 220;
 
 var _target = null;
 var _aimX = 0;
@@ -47,7 +64,11 @@ var _projectileSpeed = 0;
 var _speedAt = 0;
 var _ownBeam = false;
 var _ownPierces = false;
+var _ownPiercesChars = false;
 var _ownShotR = 0;
+var _ownTicks = 0;
+var _ownTravel = 0;
+var _ownSteerLife = 0;
 var _rangeCache = 0;
 var _rangeAt = 0;
 var _hooks = false;
@@ -147,6 +168,15 @@ function _flightTime(rx, ry, vx, vy, speed) {
     return best;
 }
 
+/* Quantises a flight time onto the server tick grid and never exceeds the shot's own
+ * travel ticks (the projectile detonates/disappears after that many ticks). */
+function _snapTicks(t) {
+    if (!(_ownTicks > 0) || !isFinite(t) || t <= 0) return t;
+    const maxT = _ownTicks >= BEAM_TICKS ? MAX_FLIGHT_S : _ownTicks * TICK_S;
+    const snapped = Math.round(t / TICK_S) * TICK_S;
+    return Math.min(snapped > 0 ? snapped : TICK_S, maxT);
+}
+
 function _solve(mx, my, pred, speed, range) {
     const pocket = (_ownShotR > 0 ? _ownShotR : 0) + (pred.rad > 0 ? pred.rad : 0);
     if (_ownBeam) return { x: Math.round(pred.x), y: Math.round(pred.y), t: 0 };
@@ -157,26 +187,31 @@ function _solve(mx, my, pred, speed, range) {
     }
     if (!(speed > 0)) return { x: Math.round(pred.x), y: Math.round(pred.y), t: 0 };
 
+    const lead = _ownSteerLife > 0 ? STEER_LEAD_FACTOR : 1;
+    const pvx = pred.vx * lead;
+    const pvy = pred.vy * lead;
+    const pax = pred.ax * lead;
+    const pay = pred.ay * lead;
     let px = pred.x;
     let py = pred.y;
-    let t = _flightTime(pred.x - mx, pred.y - my, pred.vx, pred.vy, speed);
+    let t = _flightTime(pred.x - mx, pred.y - my, pvx, pvy, speed);
 
     if (t > 0) {
         for (let pass = 0; pass < LEAD_PASSES; pass++) {
-            px = pred.x + pred.vx * t + 0.5 * pred.ax * t * t;
-            py = pred.y + pred.vy * t + 0.5 * pred.ay * t * t;
+            px = pred.x + pvx * t + 0.5 * pax * t * t;
+            py = pred.y + pvy * t + 0.5 * pay * t * t;
             const flown = distance(px, py, mx, my) - pocket;
             if (!(flown > 0)) break;
-            t = flown / speed;
+            t = _snapTicks(flown / speed);
         }
     } else {
         for (let pass = 0; pass < LEAD_PASSES; pass++) {
             const flightTo = distance(px, py, mx, my) - pocket;
             if (range > 0 && flightTo > range) return null;
-            const flight = flightTo > 0 ? flightTo / speed : 0;
+            const flight = flightTo > 0 ? _snapTicks(flightTo / speed) : 0;
             if (flight > MAX_FLIGHT_S) return null;
-            px = pred.x + pred.vx * flight + 0.5 * pred.ax * flight * flight;
-            py = pred.y + pred.vy * flight + 0.5 * pred.ay * flight * flight;
+            px = pred.x + pvx * flight + 0.5 * pax * flight * flight;
+            py = pred.y + pvy * flight + 0.5 * pay * flight * flight;
         }
         return { x: Math.round(px), y: Math.round(py), t: 0 };
     }
@@ -184,6 +219,20 @@ function _solve(mx, my, pred, speed, range) {
     if (range > 0 && distance(px, py, mx, my) - pocket > range) return null;
     if (t > MAX_FLIGHT_S) return null;
     return { x: Math.round(px), y: Math.round(py), t: t };
+}
+
+function _readInt(data, off, getter, min, max) {
+    if (getter) {
+        try {
+            const v = getter(data) | 0;
+            if (v >= min && v <= max) return v;
+        } catch (_) {}
+    }
+    try {
+        const v = data.add(off).readS32() | 0;
+        if (v >= min && v <= max) return v;
+    } catch (_) {}
+    return 0;
 }
 
 function _ownProjectileSpeed() {
@@ -205,19 +254,71 @@ function _ownProjectileSpeed() {
             const data =
                 skill && !skill.isNull() ? fns.LogicSkillData_getProjectileData(skill, 0) : null;
             if (data && !data.isNull()) {
+                engineSpeed = _readInt(
+                    data,
+                    offsets.ProjectileData_speedField,
+                    fns.LogicProjectileData_getSpeed,
+                    300,
+                    8500
+                );
                 _ownBeam = data.add(offsets.ProjectileData_isBeamField).readU8() > 0;
-                const field = data.add(offsets.ProjectileData_speedField).readS32() | 0;
-                if (field >= 300 && field <= 8500) engineSpeed = field;
                 const passes = data.add(offsets.ProjectileData_passesEnvironment).readU8() & 1;
                 const pierces = data.add(offsets.ProjectileData_piercesEnvironment).readU8() & 1;
                 _ownPierces = (passes | pierces) === 1;
                 try {
-                    const rad = data.add(offsets.ProjectileData_radiusField).readS32() | 0;
-                    if (rad >= 1 && rad <= 2000) _ownShotR = rad;
-                    else _ownShotR = 0;
+                    _ownPiercesChars =
+                        (data.add(offsets.ProjectileData_piercesCharacters).readU8() & 1) === 1;
                 } catch (_) {
-                    _ownShotR = 0;
+                    _ownPiercesChars = false;
                 }
+                let rad = _readInt(
+                    data,
+                    offsets.ProjectileData_radiusField,
+                    fns.LogicProjectileData_getRadius,
+                    1,
+                    2000
+                );
+                if (!(rad > 0) && fns.LogicCharacterData_getProjectileStartRadius) {
+                    try {
+                        const ownData = fns.LogicGameObjectClient_getData(own);
+                        if (ownData && !ownData.isNull()) {
+                            const start =
+                                fns.LogicCharacterData_getProjectileStartRadius(ownData) | 0;
+                            if (start >= 1 && start <= 2000) rad = start;
+                        }
+                    } catch (_) {}
+                }
+                _ownShotR = rad;
+                try {
+                    const steer = data.add(offsets.ProjectileData_steerStrength).readFloat();
+                    const life = _readInt(
+                        data,
+                        offsets.ProjectileData_steerLifeTime,
+                        null,
+                        1,
+                        20000
+                    );
+                    _ownSteerLife = steer > 0 && life > 0 ? life : 0;
+                } catch (_) {
+                    _ownSteerLife = 0;
+                }
+                // Flight length comes from the same tick math the server uses
+                // (getTravelTicks: ticks = round(range*20/speed), beam -> 18000).
+                const learned = travelFor(data);
+                const tiles = weaponRangeUnits(own);
+                const speedForTicks = engineSpeed > 0 ? engineSpeed : scanData.measuredSpeed | 0;
+                const calibrated = rangeScaleCalibrated();
+                _ownTicks = learned && learned.ticks > 0 ? learned.ticks : 0;
+                if (!(_ownTicks > 0) && calibrated && tiles > 0 && speedForTicks > 0) {
+                    _ownTicks = Math.max(1, Math.round((tiles * TICKS_PER_SEC) / speedForTicks));
+                }
+                _ownTravel =
+                    learned && learned.range > 0
+                        ? learned.range
+                        : calibrated
+                          ? travelDistance(_ownTicks, speedForTicks)
+                          : 0;
+                if (_ownTicks >= BEAM_TICKS) _ownBeam = true;
             }
         }
     } catch (_) {}
@@ -233,29 +334,26 @@ function _ownProjectileSpeed() {
     return _projectileSpeed;
 }
 
+/*
+ * Effective range in logic subunits: (skills.csv castingRange + rangeAdd) * 100, or the
+ * real flight distance when the engine's own getTravelTicks call has been observed.
+ */
 function _ownRange() {
     const now = Date.now();
     if (now - _rangeAt < SPEED_REFRESH_MS) return _rangeCache;
     _rangeAt = now;
     _rangeCache = 0;
 
-    const fns = getFunctions();
     const own = scanData.ownCharacter;
-    if (
-        !own ||
-        own.isNull() ||
-        !fns.LogicCharacterClient_getWeaponSkill ||
-        !fns.LogicSkillData_getCastingRange
-    )
-        return 0;
+    if (!own || own.isNull()) return 0;
 
-    const weapon = fns.LogicCharacterClient_getWeaponSkill(own);
-    if (!weapon || weapon.isNull()) return 0;
-
-    const units = fns.LogicSkillData_getCastingRange(weapon) | 0;
-    if (units < 100 || units > 20000) return 0;
-
-    _rangeCache = units;
+    const tiles = weaponRangeUnits(own);
+    const flight = _ownTravel > 0 ? _ownTravel : 0;
+    if (flight > 0 && (tiles <= 0 || (flight >= tiles * 0.8 && flight <= tiles * 1.6))) {
+        _rangeCache = flight;
+    } else {
+        _rangeCache = tiles;
+    }
     return _rangeCache;
 }
 
@@ -284,6 +382,31 @@ function _aimAt(enemy, now) {
     const aim = _solve(mx, my, pred, speed, _ownRange());
     if (!aim) return null;
     return aim;
+}
+
+/* How many other bodies sit behind `target` on the same ray - piercing shots clear a
+ * whole lane, so a lined-up pack is worth more than a lone close target. */
+function _lineupHits(list, mx, my, target, pocket) {
+    const ax = target.x - mx;
+    const ay = target.y - my;
+    const len = length(ax, ay);
+    if (len < 1) return 0;
+    const ux = ax / len;
+    const uy = ay / len;
+    let hits = 0;
+    for (let i = 0; i < list.length; i++) {
+        const other = list[i];
+        if (!other || other === target) continue;
+        if (other.kind !== "player") continue;
+        if (_isSkipped(other.brawlerName)) continue;
+        const rx = other.x - mx;
+        const ry = other.y - my;
+        const along = rx * ux + ry * uy;
+        if (along <= 0 || along > len * 1.6) continue;
+        const off = Math.abs(rx * -uy + ry * ux);
+        if (off <= pocket + (other.radius > 0 ? other.radius : 60)) hits++;
+    }
+    return hits;
 }
 
 function _pickTarget(now) {
@@ -319,20 +442,24 @@ function _pickTarget(now) {
         };
         pred.rad = e.radius | 0;
         const d = distance(e.x, e.y, mx, my);
-        if (range > 0 && d - (_ownShotR > 0 ? _ownShotR : 0) - pred.rad > range) continue;
-        if (d < calmD) {
-            calmD = d;
+        const pocket = (_ownShotR > 0 ? _ownShotR : 0) + pred.rad;
+        if (range > 0 && d - pocket > range) continue;
+        const score = _ownPiercesChars
+            ? d - _lineupHits(list, mx, my, e, pocket) * LINEUP_BONUS
+            : d;
+        if (score < calmD) {
+            calmD = score;
             calm = e;
             calmPred = pred;
         }
-        if (d < bestD) {
-            bestD = d;
+        if (score < bestD) {
+            bestD = score;
             best = e;
             bestPred = pred;
         }
         if (_target && e.gid === _target.gid) {
             cur = e;
-            curD = d;
+            curD = score;
         }
     }
 
@@ -364,10 +491,28 @@ function _pickTarget(now) {
     return pick;
 }
 
+function _resetWeaponCache() {
+    _projectileSpeed = 0;
+    _speedAt = 0;
+    _rangeCache = 0;
+    _rangeAt = 0;
+    _ownShotR = 0;
+    _ownTicks = 0;
+    _ownTravel = 0;
+    _ownSteerLife = 0;
+    _ownBeam = false;
+    _ownPierces = false;
+    _ownPiercesChars = false;
+}
+
 export function setupAutoaim() {
     if (_hooks) return;
     _hooks = true;
     const base = getBase();
+    try {
+        enableProjectileTracking();
+        onDataReload(_resetWeaponCache);
+    } catch (_) {}
     try {
         Interceptor.attach(base.add(offsets.BattleScreen_getClosestTargetForAutoshoot), {
             onLeave(retval) {
@@ -404,11 +549,5 @@ export function updateAutoaim() {
 export function resetAutoaim() {
     _target = null;
     _track.clear();
-    _projectileSpeed = 0;
-    _speedAt = 0;
-    _ownBeam = false;
-    _ownPierces = false;
-    _ownShotR = 0;
-    _rangeCache = 0;
-    _rangeAt = 0;
+    _resetWeaponCache();
 }

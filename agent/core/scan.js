@@ -1,7 +1,25 @@
 import { getFunctions, isValidPtr, ptrFromU32 } from "./functions.js";
 import { offsets } from "./offsets.js";
 import { readScString } from "./scstring.js";
+import { tileSizeUnits } from "../utils/walls.js";
 const GUARD = 0xb504;
+
+/*
+ * v69 projectile range chain (see v69_dalnost_snarjada):
+ *   skills.csv castingRange (TILES) -> LogicSkillData::getCastingRangeTiles (0x9DE9CC)
+ *   + LogicGamePlayUtil::getRangeAddSubtiles -> (tiles + rangeAdd) * 100 subunits
+ *   -> getTravelTicks(data, range, speed) (0xA3192C):
+ *        ticks = max(1, round(range * 20 / speed)), beams return 18000
+ *   -> flight distance = ticks * speed / 20
+ * getRangeAddSubtiles has no standalone function in v69, so the bonus is learned
+ * from the ranges the engine itself feeds into getTravelTicks.
+ */
+export const TILE_UNITS = 100;
+export const TICKS_PER_SEC = 20;
+const TICK_MS = 1000 / TICKS_PER_SEC;
+export const BEAM_TICKS = 18000;
+const DATA_ROW_OFF = 0x8; // LogicData::getRow(), from the getCastingRangeTiles getter body
+const COLUMN_SPAN = 48; // CSV columns probed when a getter/field read is dead
 
 function length(x, y) {
     if (x > GUARD || x < -GUARD || y > GUARD || y < -GUARD) return 46340;
@@ -21,6 +39,14 @@ var _charRange = new Map();
 var _weaponMeta = new Map();
 var _speedByData = new Map();
 var _charsByIndex = new Map();
+var _learnedTravel = new Map();
+var _rangeBonus = new Map();
+var _rangeScale = 0;
+var _columnCache = new Map();
+var _colCands = new Map();
+var _reloadCallbacks = [];
+var _dataHooksInstalled = false;
+var _insideTravelCall = false;
 
 export var scanData = {
     ownCharacter: ptr(0),
@@ -34,7 +60,8 @@ export var scanData = {
     enemies: [],
     projectiles: [],
     measuredSpeed: 0,
-    lastUpdate: 0
+    lastUpdate: 0,
+    pathRanAt: 0
 };
 
 function _readDataName(data) {
@@ -91,6 +118,155 @@ function _rememberCharacter(index, character) {
     _charsByIndex.set(index, character);
 }
 
+function _roundDiv(a, b) {
+    if (b === 0) return 0;
+    return Math.round(a / b);
+}
+
+/*
+ * Mirror of LogicProjectile::getTravelTicks (v69 RVA 0xA3192C). Used when the native
+ * call is unavailable so aim/dodge still get tick-quantised flight numbers.
+ */
+export function travelTicks(rangeUnits, speed, beam) {
+    if (beam) return BEAM_TICKS;
+    if (!(rangeUnits > 0) || !(speed > 0)) return 0;
+    return Math.max(1, _roundDiv(rangeUnits * TICKS_PER_SEC, speed));
+}
+
+export function travelDistance(ticks, speed) {
+    if (!(ticks > 0) || ticks >= BEAM_TICKS || !(speed > 0)) return 0;
+    return Math.round((ticks * speed) / TICKS_PER_SEC);
+}
+
+function _learnTravel(key, a1, a2, ticks) {
+    if (!key || !(ticks >= 0)) return;
+    if (ticks >= BEAM_TICKS) {
+        if (!_learnedTravel.has(key))
+            _learnedTravel.set(key, { ticks: BEAM_TICKS, range: 0, speed: 0, beam: true });
+        return;
+    }
+    if (ticks <= 0) return;
+    const pairs = a1 <= a2 ? [a1, a2, a2, a1] : [a2, a1, a1, a2];
+    for (let i = 0; i < 4; i += 2) {
+        const range = pairs[i];
+        const speed = pairs[i + 1];
+        if (range < 50 || range > 30000 || speed < 50 || speed > 20000) continue;
+        if (Math.abs(travelTicks(range, speed, false) - ticks) > 1) continue;
+        const prev = _learnedTravel.get(key);
+        if (prev && prev.range === range && prev.ticks === ticks) return;
+        _learnedTravel.set(key, {
+            ticks: ticks,
+            range: range,
+            speed: speed,
+            beam: false
+        });
+        return;
+    }
+}
+
+function _learnedFor(projectile, data) {
+    if (isValidPtr(projectile)) {
+        const hit = _learnedTravel.get(projectile.toString());
+        if (hit) return hit;
+    }
+    if (isValidPtr(data)) {
+        const hit = _learnedTravel.get(data.toString());
+        if (hit) return hit;
+    }
+    return null;
+}
+
+export function travelFor(data) {
+    if (!isValidPtr(data)) return null;
+    return _learnedTravel.get(data.toString()) || null;
+}
+
+function _callTravelTicks(data, rangeUnits, speed) {
+    if (!isValidPtr(data) || !(rangeUnits > 0) || !(speed > 0)) return 0;
+    const fn = getFunctions().LogicProjectileClient_getTravelTicks;
+    if (!fn) return 0;
+    _insideTravelCall = true;
+    try {
+        const ticks = fn(data, rangeUnits, speed) | 0;
+        if (ticks <= 0 || ticks > BEAM_TICKS) return 0;
+        if (ticks >= BEAM_TICKS) return ticks;
+        // Cross-check against the documented formula; anything else means the call did
+        // not land on the travel-ticks body we expect and the result must be ignored.
+        if (Math.abs(travelTicks(rangeUnits, speed, false) - ticks) > 1) return 0;
+        return ticks;
+    } catch (_) {
+    } finally {
+        _insideTravelCall = false;
+    }
+    return 0;
+}
+
+function _weaponSkillFor(character) {
+    if (!isValidPtr(character)) return null;
+    const fns = getFunctions();
+    if (!fns.LogicCharacterClient_getWeaponSkill) return null;
+    try {
+        const skill = fns.LogicCharacterClient_getWeaponSkill(character);
+        if (isValidPtr(skill)) return skill;
+    } catch (_) {}
+    return null;
+}
+
+/*
+ * Logic units per castingRange column unit. The v69 note derives the range as
+ * (castingRange + rangeAdd) * 100 while the older C++ assist multiplies the same column by
+ * a full tile (300). Rather than trusting one of them, the multiplier is calibrated from
+ * the ranges the engine feeds to getTravelTicks and defaults to the documented 100.
+ */
+function _calibrateRangeScale(tiles, rangeUnits) {
+    if (!(tiles >= 1 && tiles <= 64) || !(rangeUnits >= 100 && rangeUnits <= 30000)) return false;
+    const per = rangeUnits / tiles;
+    const tile = tileSizeUnits();
+    const candidates = [tile, Math.floor(tile / 3), TILE_UNITS];
+    let best = 0;
+    for (let i = 0; i < candidates.length; i++) {
+        const c = candidates[i];
+        if (!(c > 0)) continue;
+        const ratio = per / c;
+        if (ratio < 0.95 || ratio > 2) continue;
+        if (c > best) best = c;
+    }
+    if (!(best > 0) || best === _rangeScale) return false;
+    _rangeScale = best;
+    _charRange.clear();
+    _rangeBonus.clear();
+    return true;
+}
+
+function _rangeScaleUnits() {
+    return _rangeScale > 0 ? _rangeScale : TILE_UNITS;
+}
+
+/*
+ * True once the engine has shown us the range it actually flies a projectile with. Until
+ * then every derived range is an unverified guess and callers must not gate on it.
+ */
+export function rangeScaleCalibrated() {
+    return _rangeScale > 0;
+}
+
+/* skills.csv castingRange, in tiles (LogicSkillData__getCastingRange = 0x9DE9CC). */
+function _castingRangeTiles(character) {
+    const skill = _weaponSkillFor(character);
+    if (!skill) return 0;
+    const fns = getFunctions();
+    if (!fns.LogicSkillData_getCastingRange) return 0;
+    try {
+        const tiles = fns.LogicSkillData_getCastingRange(skill) | 0;
+        if (tiles >= 1 && tiles <= 64) return tiles;
+    } catch (_) {}
+    return 0;
+}
+
+/*
+ * Effective weapon range in logic subunits: (castingRange + rangeAdd) * 100.
+ * rangeAdd is learned from the ranges the engine feeds to getTravelTicks.
+ */
 function _rangeForOwner(ownerIndex) {
     if (ownerIndex < 0) return 0;
 
@@ -100,33 +276,35 @@ function _rangeForOwner(ownerIndex) {
     const owner = _charsByIndex.get(ownerIndex);
     if (!isValidPtr(owner)) return 0;
 
-    const fns = getFunctions();
-    if (!fns.LogicSkillData_getCastingRange) return 0;
+    const tiles = _castingRangeTiles(owner);
+    if (tiles <= 0) return 0;
+    if (!rangeScaleCalibrated()) return 0;
 
-    let units = 0;
-    if (fns.LogicCharacterClient_getWeaponSkill) {
-        const skill = fns.LogicCharacterClient_getWeaponSkill(owner);
-        if (isValidPtr(skill)) {
-            try {
-                const v = fns.LogicSkillData_getCastingRange(skill) | 0;
-                if (v >= 100 && v <= 20000) units = v;
-            } catch (_) {}
-        }
-    }
-    if (units <= 0 && fns.LogicGameObjectClient_getData) {
-        const data = fns.LogicGameObjectClient_getData(owner);
-        if (isValidPtr(data)) {
-            try {
-                const v = fns.LogicSkillData_getCastingRange(data) | 0;
-                if (v >= 100 && v <= 20000) units = v;
-            } catch (_) {}
-        }
-    }
-
-    if (units < 100 || units > 20000) return 0;
-
+    const units = tiles * _rangeScaleUnits() + (_rangeBonus.get(ownerIndex) || 0);
     _charRange.set(ownerIndex, units);
     return units;
+}
+
+export function weaponRangeUnits(character) {
+    if (!isValidPtr(character)) return 0;
+    const tiles = _castingRangeTiles(character);
+    if (tiles <= 0 || !rangeScaleCalibrated()) return 0;
+    const index = _readOwnerIndex(character);
+    return tiles * _rangeScaleUnits() + (index >= 0 ? _rangeBonus.get(index) || 0 : 0);
+}
+
+function _learnRangeBonus(ownerIndex, projectile, data, owner) {
+    if (ownerIndex < 0 || !isValidPtr(owner)) return;
+    const learned = _learnedFor(projectile, data);
+    if (!learned || !(learned.range > 0)) return;
+    const tiles = _castingRangeTiles(owner);
+    if (tiles <= 0) return;
+    _calibrateRangeScale(tiles, learned.range);
+    const bonus = learned.range - tiles * _rangeScaleUnits();
+    if (bonus < 0 || bonus > 4 * _rangeScaleUnits()) return;
+    if ((_rangeBonus.get(ownerIndex) || 0) === bonus) return;
+    _rangeBonus.set(ownerIndex, bonus);
+    _charRange.delete(ownerIndex);
 }
 
 function _readProjectileField(data, off, min, max) {
@@ -139,8 +317,167 @@ function _readProjectileField(data, off, min, max) {
     }
 }
 
+function _dataRow(data) {
+    try {
+        const row = data.add(DATA_ROW_OFF).readPointer();
+        return isValidPtr(row) ? row : null;
+    } catch (_) {
+        return null;
+    }
+}
+
+function _columnInt(data, col) {
+    const fns = getFunctions();
+    if (fns.LogicProjectileData_getIntValueFromColumn) {
+        try {
+            return fns.LogicProjectileData_getIntValueFromColumn(data, col) | 0;
+        } catch (_) {}
+    }
+    const row = _dataRow(data);
+    if (!row) return 0;
+    if (fns.LogicDataReader_byIndex) {
+        try {
+            return fns.LogicDataReader_byIndex(row, col) | 0;
+        } catch (_) {}
+    }
+    if (fns.LogicDataReader_byIndex2) {
+        try {
+            return fns.LogicDataReader_byIndex2(row, col) | 0;
+        } catch (_) {}
+    }
+    return 0;
+}
+
+function _columnBool(data, col) {
+    const fns = getFunctions();
+    if (fns.LogicProjectileData_getBoolValueFromColumn) {
+        try {
+            return fns.LogicProjectileData_getBoolValueFromColumn(data, col) ? 1 : 0;
+        } catch (_) {}
+    }
+    if (fns.LogicProjectileData_getBoolValueFromColumnAlt) {
+        try {
+            return fns.LogicProjectileData_getBoolValueFromColumnAlt(data, col) ? 1 : 0;
+        } catch (_) {}
+    }
+    const row = _dataRow(data);
+    if (row && fns.LogicDataReader_byIndex3) {
+        try {
+            return fns.LogicDataReader_byIndex3(row, col) ? 1 : 0;
+        } catch (_) {}
+    }
+    return 0;
+}
+
+/*
+ * projectiles.csv column indices are shared by every row, so a column can be
+ * recovered by fingerprinting: keep only the columns whose value matches the
+ * (trusted) field value on every sampled row. Runs a bounded number of times per
+ * field and is only used to recover reads that the getter/field cannot serve.
+ */
+function _probeColumn(kind, read, data, value) {
+    let st = _colCands.get(kind);
+    if (!st) {
+        st = { cols: new Set(), rounds: 1 };
+        for (let col = 0; col < COLUMN_SPAN; col++) {
+            if (read(data, col) === value) st.cols.add(col);
+        }
+        _colCands.set(kind, st);
+    } else if (st.cols && st.rounds < 10) {
+        st.rounds++;
+        for (const col of Array.from(st.cols)) {
+            if (read(data, col) !== value) st.cols.delete(col);
+        }
+    } else {
+        return;
+    }
+    if (st.cols.size === 1) _columnCache.set(kind, st.cols.values().next().value);
+    else if (st.cols.size === 0) {
+        st.cols = null;
+        _columnCache.set(kind, -1);
+    }
+}
+
+function _readProjectileInt(data, off, kind, min, max, getter) {
+    let value = 0;
+    if (getter) {
+        try {
+            const v = getter(data) | 0;
+            if (v >= min && v <= max) value = v;
+        } catch (_) {}
+    }
+    if (!(value > 0)) value = _readProjectileField(data, off, min, max);
+    if (value > 0) {
+        if (_columnCache.get(kind) === void 0) _probeColumn(kind, _columnInt, data, value);
+        return value;
+    }
+    const known = _columnCache.get(kind);
+    if (known > 0) {
+        const v = _columnInt(data, known) | 0;
+        if (v >= min && v <= max) return v;
+        return 0;
+    }
+    if (known === void 0) {
+        for (let col = 0; col < COLUMN_SPAN; col++) {
+            const v = _columnInt(data, col) | 0;
+            if (v >= min && v <= max) {
+                _columnCache.set(kind, col);
+                return v;
+            }
+        }
+        _columnCache.set(kind, -1);
+    }
+    return 0;
+}
+
+function _readProjectileBool(data, off, kind) {
+    let field = -1;
+    try {
+        field = data.add(off).readU8() & 1;
+    } catch (_) {}
+    if (field >= 0) {
+        if (_columnCache.get(kind) === void 0) _probeColumn(kind, _columnBool, data, field);
+        return field;
+    }
+    const known = _columnCache.get(kind);
+    if (known > 0) return _columnBool(data, known);
+    return 0;
+}
+
 function _readProjectileRadius(data) {
-    return _readProjectileField(data, offsets.ProjectileData_radiusField, 1, 2000);
+    const fns = getFunctions();
+    return _readProjectileInt(
+        data,
+        offsets.ProjectileData_radiusField,
+        "radius",
+        1,
+        2000,
+        fns.LogicProjectileData_getRadius
+    );
+}
+
+function _readProjectileSpeed(data) {
+    const fns = getFunctions();
+    return _readProjectileInt(
+        data,
+        offsets.ProjectileData_speedField,
+        "speed",
+        1,
+        20000,
+        fns.LogicProjectileData_getSpeed
+    );
+}
+
+function _characterSpeed(data) {
+    if (!isValidPtr(data)) return 0;
+    const fns = getFunctions();
+    try {
+        if (fns.LogicCharacterData_getSpeed) {
+            const v = fns.LogicCharacterData_getSpeed(data) | 0;
+            if (v > 0) return v;
+        }
+    } catch (_) {}
+    return _readProjectileField(data, offsets.CharacterData_speedField, 1, 6000);
 }
 
 export function collisionRadius(data) {
@@ -165,7 +502,65 @@ function _readProjectileFlags(data) {
     try {
         pierces = data.add(offsets.ProjectileData_piercesEnvironment).readU8() & 1;
     } catch (_) {}
-    return { passes: !!passes, pierces: !!pierces };
+    const piercesChars = _readProjectileBool(
+        data,
+        offsets.ProjectileData_piercesCharacters,
+        "piercesChars"
+    );
+    if (!pierces)
+        pierces = _flagFrom(getFunctions().LogicProjectileClient_piercesEnvironment, data, data);
+    return { passes: !!passes, pierces: !!pierces, piercesChars: !!piercesChars };
+}
+
+function _readProjectileU8(data, off, kind, min, max) {
+    try {
+        const v = data.add(off).readU8();
+        if (v >= min && v <= max) {
+            if (_columnCache.get(kind) === void 0) _probeColumn(kind, _columnInt, data, v);
+            return v;
+        }
+    } catch (_) {}
+    const known = _columnCache.get(kind);
+    if (known > 0) {
+        const v = _columnInt(data, known) | 0;
+        if (v >= min && v <= max) return v;
+    }
+    return 0;
+}
+
+function _readBounceKeep(data) {
+    const percent = _readProjectileU8(
+        data,
+        offsets.ProjectileData_bouncePercent,
+        "bouncePercent",
+        1,
+        100
+    );
+    return percent > 0 ? percent / 100 : 0;
+}
+
+/*
+ * 0x9CD5E0-0x9CDD70 is one contiguous block of projectile *data* accessors (getSpeed,
+ * getRadius, the column readers and these flags), so the data pointer is tried first and
+ * the client object only as a fallback.
+ */
+function _flagFrom(fn, data, projectile) {
+    if (!fn) return 0;
+    try {
+        if (fn(data)) return 1;
+    } catch (_) {}
+    try {
+        if (fn(projectile)) return 1;
+    } catch (_) {}
+    return 0;
+}
+
+function _readClientU32(obj, off, max) {
+    try {
+        const v = obj.add(off).readU32();
+        if (v <= max) return v;
+    } catch (_) {}
+    return -1;
 }
 
 function _volleyMs(weapon) {
@@ -176,37 +571,124 @@ function _volleyMs(weapon) {
     return 0;
 }
 
-function _readProjectileMeta(projectile, data) {
+function _readProjectileMeta(projectile, data, speed, rangeUnits, beam) {
     const fns = getFunctions();
     let preMs = _readProjectileField(data, offsets.ProjectileData_preExplosionMs, 1, 60000);
-    let lifeMs = 0;
     let typeId = -1;
-    const homing = _readProjectileField(data, offsets.ProjectileData_isHomingMissile, 0, 1);
-    const bouncing = _readProjectileField(data, offsets.ProjectileData_isBouncing, 0, 1);
     let steer = 0;
+    let isBeam = !!beam;
+    let homing = _readProjectileBool(data, offsets.ProjectileData_isHomingMissile, "homing");
+    let bouncing = _readProjectileBool(data, offsets.ProjectileData_isBouncing, "bouncing");
+    const steerIgnoreTicks = _readProjectileInt(
+        data,
+        offsets.ProjectileData_steerIgnoreTicks,
+        "steerIgnore",
+        1,
+        400,
+        null
+    );
+    const steerLifeRaw = _readProjectileInt(
+        data,
+        offsets.ProjectileData_steerLifeTime,
+        "steerLife",
+        1,
+        20000,
+        null
+    );
+    const bounceAdd = _readProjectileInt(
+        data,
+        offsets.ProjectileData_distanceAddFromBounce,
+        "bounceAdd",
+        1,
+        3000,
+        null
+    );
+    const bounceMax = _readProjectileInt(
+        data,
+        offsets.ProjectileData_maxDistanceBounces,
+        "bounceMax",
+        1,
+        20000,
+        null
+    );
+    const bounceKeep = _readBounceKeep(data);
+    const rehit = _readProjectileBool(data, offsets.ProjectileData_canHitAgainAfterBounce, "rehit");
     if (fns.LogicProjectileClient_getPreExplosionTimeMs && !(preMs > 0)) {
         try {
             const v = fns.LogicProjectileClient_getPreExplosionTimeMs(data) | 0;
             if (v > 0 && v <= 60000) preMs = v;
         } catch (_) {}
     }
-    if (fns.LogicProjectileClient_getTravelTicks) {
-        try {
-            const ticks = fns.LogicProjectileClient_getTravelTicks(projectile) | 0;
-            if (ticks > 0 && ticks <= 3000) lifeMs = ticks * 20;
-        } catch (_) {}
+    // The data-side accessors are authoritative when the CSV byte is stale/zero.
+    if (!homing) homing = _flagFrom(fns.LogicProjectileClient_isHomingMissile, data, projectile);
+    if (!bouncing) bouncing = _flagFrom(fns.LogicProjectileClient_isBouncing, data, projectile);
+    // getTravelTicks(data, range, speed): ticks = max(1, round(range*20/speed)), beam -> 18000
+    const learned = _learnedFor(projectile, data);
+    let ticks = 0;
+    if (learned && learned.ticks > 0) {
+        ticks = learned.ticks;
+        if (learned.beam) isBeam = true;
+    }
+    if (!(ticks > 0)) ticks = _callTravelTicks(data, rangeUnits, speed);
+    if (!(ticks > 0)) ticks = travelTicks(rangeUnits, speed, isBeam);
+    if (ticks >= BEAM_TICKS) isBeam = true;
+    let lifeMs = 0;
+    let travel = 0;
+    if (isBeam || ticks >= BEAM_TICKS) {
+        lifeMs = Infinity;
+        travel = rangeUnits > 0 ? rangeUnits : 0;
+    } else if (ticks > 0) {
+        lifeMs = ticks * TICK_MS;
+        travel = travelDistance(ticks, speed);
     }
     if (fns.LogicProjectileClient_getType) {
-        try {
-            const t = fns.LogicProjectileClient_getType(projectile) | 0;
-            if (t >= 0 && t <= 20) typeId = t;
-        } catch (_) {}
+        const holders = [data, projectile];
+        for (let i = 0; i < holders.length; i++) {
+            try {
+                const t = fns.LogicProjectileClient_getType(holders[i]) | 0;
+                if (t >= 0 && t <= 20) {
+                    typeId = t;
+                    break;
+                }
+            } catch (_) {}
+        }
+    }
+    if (typeId < 0) {
+        const t = _readClientU32(projectile, offsets.ProjectileClient_typeField, 20);
+        if (t >= 0) typeId = t;
     }
     try {
         const v = data.add(offsets.ProjectileData_steerStrength).readFloat();
         if (v > 0 && v <= 1000) steer = v;
     } catch (_) {}
-    return { preMs, lifeMs, typeId, homing: !!homing, bouncing: !!bouncing, steer };
+    const travelType = _readClientU32(projectile, offsets.ProjectileClient_travelType, 16);
+    let beamCopy = 0;
+    try {
+        beamCopy = projectile.add(offsets.ProjectileClient_isBeamCopy).readU8() & 1;
+    } catch (_) {}
+    if (beamCopy) isBeam = true;
+    const steerIgnoreMs = steerIgnoreTicks > 0 ? steerIgnoreTicks * TICK_MS : 0;
+    const steerLifeMs =
+        steerLifeRaw > 0 ? (steerLifeRaw > 400 ? steerLifeRaw : steerLifeRaw * TICK_MS) : 0;
+    return {
+        preMs,
+        lifeMs,
+        ticks,
+        travel,
+        typeId,
+        travelType,
+        isBeam,
+        beamCopy: !!beamCopy,
+        homing: !!homing,
+        bouncing: !!bouncing,
+        steer,
+        steerIgnoreMs,
+        steerLifeMs,
+        bounceAdd,
+        bounceMax,
+        bounceKeep,
+        rehit: !!rehit
+    };
 }
 
 function _weaponForOwner(ownerIndex) {
@@ -237,17 +719,41 @@ function _weaponForOwner(ownerIndex) {
     return out;
 }
 
-function _readProjectileTarget(projectile, x, y) {
+function _validTarget(tx, ty, x, y) {
+    if (tx === 0 && ty === 0) return null;
+    if (tx > 100000 || tx < -100000 || ty > 100000 || ty < -100000) return null;
+    if (tx === x && ty === y) return null;
+    return { x: tx, y: ty };
+}
+
+function _readProjectileTarget(projectile, data, x, y) {
+    const fns = getFunctions();
+    // Field read first: +0x1ec/+0x1f0 on the client object is the layout proven on v69.
     try {
-        const tx = projectile.add(offsets.ProjectileClient_targetX).readS32() | 0;
-        const ty = projectile.add(offsets.ProjectileClient_targetY).readS32() | 0;
-        if (tx === 0 && ty === 0) return null;
-        if (tx > 100000 || tx < -100000 || ty > 100000 || ty < -100000) return null;
-        if (tx === x && ty === y) return null;
-        return { x: tx, y: ty };
-    } catch (_) {
-        return null;
+        const hit = _validTarget(
+            projectile.add(offsets.ProjectileClient_targetX).readS32() | 0,
+            projectile.add(offsets.ProjectileClient_targetY).readS32() | 0,
+            x,
+            y
+        );
+        if (hit) return hit;
+    } catch (_) {}
+    if (fns.LogicProjectileClient_getTargetX && fns.LogicProjectileClient_getTargetY) {
+        const holders = [projectile, data];
+        for (let i = 0; i < holders.length; i++) {
+            if (!isValidPtr(holders[i])) continue;
+            try {
+                const hit = _validTarget(
+                    fns.LogicProjectileClient_getTargetX(holders[i]) | 0,
+                    fns.LogicProjectileClient_getTargetY(holders[i]) | 0,
+                    x,
+                    y
+                );
+                if (hit) return hit;
+            } catch (_) {}
+        }
     }
+    return null;
 }
 
 function _captureProjectile(projectile, data) {
@@ -265,10 +771,10 @@ function _captureProjectile(projectile, data) {
         }
         const x = fns.LogicGameObjectClient_getX(projectile) | 0;
         const y = fns.LogicGameObjectClient_getY(projectile) | 0;
-        const dataSpeed = _readProjectileField(data, offsets.ProjectileData_speedField, 1, 20000);
+        const dataSpeed = _readProjectileSpeed(data);
         const radius = _readProjectileRadius(data);
         const flags = _readProjectileFlags(data);
-        const target = _readProjectileTarget(projectile, x, y);
+        const target = _readProjectileTarget(projectile, data, x, y);
         let isIndirect = 0;
         try {
             if (offsets.Projectile_isIndirect && isValidPtr(data)) {
@@ -287,7 +793,8 @@ function _captureProjectile(projectile, data) {
         const ownerIndex = _readOwnerIndex(projectile);
         const name = _readProjectileName(data);
         const castRange = _rangeForOwner(ownerIndex);
-        const meta = _readProjectileMeta(projectile, data);
+        _learnRangeBonus(ownerIndex, projectile, data, _charsByIndex.get(ownerIndex));
+        const meta = _readProjectileMeta(projectile, data, dataSpeed, castRange, isBeam);
         let seekX = 0;
         let seekY = 0;
         if (meta.homing && (scanData.myX || scanData.myY)) {
@@ -319,15 +826,27 @@ function _captureProjectile(projectile, data) {
             hasTarget: !!target,
             passesEnv: flags.passes,
             piercesEnv: flags.pierces,
-            isIndirect: isIndirect,
-            isBeam,
+            piercesChars: flags.piercesChars,
+            isIndirect: isIndirect || meta.travelType > 0,
+            isBeam: meta.isBeam,
+            beamCopy: meta.beamCopy,
+            travelType: meta.travelType,
             castRange,
             preMs: meta.preMs,
             lifeMs: meta.lifeMs,
+            ticks: meta.ticks,
+            travelDistance: meta.travel,
             typeId: meta.typeId,
             homing: meta.homing,
             bouncing: meta.bouncing,
             steer: meta.steer,
+            steerIgnoreMs: meta.steerIgnoreMs,
+            steerLifeMs: meta.steerLifeMs,
+            bounceAdd: meta.bounceAdd,
+            bounceMax: meta.bounceMax,
+            bounceKeep: meta.bounceKeep,
+            rehit: meta.rehit,
+            spawnTs: now,
             weapon: _weaponForOwner(ownerIndex),
             lastX: x,
             lastY: y,
@@ -343,6 +862,102 @@ function _removeProjectile(projectile) {
     try {
         const gid = String(getFunctions().LogicGameObjectClient_getGlobalID(projectile));
         _liveProjectiles.delete(gid);
+    } catch (_) {}
+}
+
+/*
+ * Observes LogicProjectileClient_getTravelTicks (v69 0xA3192C). The engine calls it as
+ * getTravelTicks(data, range, speed) from calculateProjectilePath / projectile setup, so
+ * the observed pair is the exact range (in subunits, castingRange + rangeAdd already
+ * applied) and speed the game itself flies the projectile with.
+ */
+function _installTravelTicksHook(base) {
+    try {
+        Interceptor.attach(base.add(offsets.LogicProjectileClient_getTravelTicks), {
+            onEnter(args) {
+                this.key = args[0].toString();
+                this.a1 = args[1].toUInt32();
+                this.a2 = args[2].toUInt32();
+            },
+            onLeave(retval) {
+                if (_insideTravelCall) return;
+                _learnTravel(this.key, this.a1, this.a2, retval.toInt32());
+            }
+        });
+    } catch (_) {}
+}
+
+/* BattleScreen::calculateProjectilePath (v69 0x7B3AE8) - client trajectory engine. */
+function _installProjectilePathHook(base) {
+    try {
+        Interceptor.attach(base.add(offsets.CalculateProjectilePath), {
+            onEnter() {
+                scanData.pathRanAt = Date.now();
+            }
+        });
+    } catch (_) {}
+}
+
+export function pathEngineActive(now) {
+    return scanData.pathRanAt > 0 && (now || Date.now()) - scanData.pathRanAt < 1500;
+}
+
+export function onDataReload(callback) {
+    if (typeof callback === "function") _reloadCallbacks.push(callback);
+}
+
+function _notifyDataReload() {
+    _charRange.clear();
+    _weaponMeta.clear();
+    _learnedTravel.clear();
+    _rangeBonus.clear();
+    _columnCache.clear();
+    _colCands.clear();
+    for (const [, projectile] of _liveProjectiles) {
+        projectile.castRange = 0;
+        projectile.travelDistance = 0;
+        projectile.ticks = 0;
+    }
+    for (const callback of _reloadCallbacks) {
+        try {
+            callback();
+        } catch (_) {}
+    }
+}
+
+/*
+ * LogicData createReferences runs when a data table is (re)built; every cached column
+ * index, casting range and speed we derived from it is stale afterwards.
+ */
+function _installDataReloadHooks(base) {
+    if (_dataHooksInstalled) return;
+    _dataHooksInstalled = true;
+    const names = [
+        "LogicProjectileData_createReferences",
+        "LogicSkillData_createReferences",
+        "LogicCharacterData_createReferences"
+    ];
+    for (const name of names) {
+        const off = offsets[name];
+        if (typeof off !== "number" || off <= 0) continue;
+        try {
+            Interceptor.attach(base.add(off), { onLeave: _notifyDataReload });
+        } catch (_) {}
+    }
+    // Character decode = the client (re)read a character: index/range may have changed.
+    try {
+        Interceptor.attach(base.add(offsets.LogicCharacterClient_decode), {
+            onEnter(args) {
+                this.character = args[0];
+            },
+            onLeave() {
+                const index = _readOwnerIndex(this.character);
+                if (index < 0) return;
+                _charRange.delete(index);
+                _rangeBonus.delete(index);
+                _rememberCharacter(index, this.character);
+            }
+        });
     } catch (_) {}
 }
 
@@ -367,6 +982,20 @@ function _installProjectileHooks(base) {
             }
         });
     } catch (_) {}
+    // Networked projectiles are populated in decode, sometimes before the ctor hook lands.
+    try {
+        Interceptor.attach(base.add(offsets.LogicProjectileClient_decode), {
+            onEnter(args) {
+                this.projectile = args[0];
+            },
+            onLeave() {
+                _captureProjectile(this.projectile, null);
+            }
+        });
+    } catch (_) {}
+    _installTravelTicksHook(base);
+    _installProjectilePathHook(base);
+    _installDataReloadHooks(base);
 }
 
 function _updateLiveProjectiles(now) {
@@ -413,7 +1042,7 @@ function _updateLiveProjectiles(now) {
                     }
                 }
             }
-            const liveTarget = _readProjectileTarget(projectile.ptr, x, y);
+            const liveTarget = _readProjectileTarget(projectile.ptr, projectile.data, x, y);
             if (liveTarget) {
                 projectile.targetX = liveTarget.x;
                 projectile.targetY = liveTarget.y;
@@ -426,6 +1055,23 @@ function _updateLiveProjectiles(now) {
             projectile.lastTs = now;
             if (projectile.castRange <= 0) {
                 projectile.castRange = _rangeForOwner(projectile.ownerIndex);
+            }
+            if (!(projectile.travelDistance > 0)) {
+                const learned = _learnedFor(projectile.ptr, projectile.data);
+                if (learned && learned.ticks > 0) {
+                    _learnRangeBonus(
+                        projectile.ownerIndex,
+                        projectile.ptr,
+                        projectile.data,
+                        _charsByIndex.get(projectile.ownerIndex)
+                    );
+                    projectile.ticks = learned.ticks;
+                    projectile.travelDistance =
+                        learned.range > 0
+                            ? learned.range
+                            : travelDistance(learned.ticks, learned.speed || projectile.speed);
+                    if (learned.beam) projectile.isBeam = true;
+                }
             }
             if (projectile.ownerIndex >= 0 && _friendlyIdx.has(projectile.ownerIndex)) continue;
             if (projectile.ownerIndex >= 0 && projectile.ownerIndex === scanData.myPlayerIndex)
@@ -446,15 +1092,27 @@ function _updateLiveProjectiles(now) {
                 piercesEnv: !!projectile.piercesEnv,
                 isIndirect: !!projectile.isIndirect,
                 isBeam: !!projectile.isBeam,
+                beamCopy: !!projectile.beamCopy,
+                travelType: projectile.travelType || 0,
+                piercesChars: !!projectile.piercesChars,
                 castRange: projectile.castRange || 0,
                 preMs: projectile.preMs || 0,
                 lifeMs: projectile.lifeMs || 0,
+                ticks: projectile.ticks || 0,
+                travelDistance: projectile.travelDistance || 0,
+                ageMs: Math.max(0, now - (projectile.spawnTs || now)),
                 typeId: projectile.typeId,
                 homing: projectile.homing,
                 seekX: projectile.seekX,
                 seekY: projectile.seekY,
                 bouncing: projectile.bouncing,
                 steer: projectile.steer || 0,
+                steerIgnoreMs: projectile.steerIgnoreMs || 0,
+                steerLifeMs: projectile.steerLifeMs || 0,
+                bounceAdd: projectile.bounceAdd || 0,
+                bounceMax: projectile.bounceMax || 0,
+                bounceKeep: projectile.bounceKeep || 0,
+                rehit: !!projectile.rehit,
                 volleyMs: _volleyMs(projectile.weapon),
                 ownerIndex: projectile.ownerIndex,
                 vx: projectile.vx,
@@ -493,12 +1151,8 @@ export function updateScanner(bm, now) {
         const ownData = functions.LogicGameObjectClient_getData(own);
         if (isValidPtr(ownData)) {
             scanData.myRadius = collisionRadius(ownData) | 0;
-            try {
-                const speed = functions.LogicCharacterData_getSpeed
-                    ? functions.LogicCharacterData_getSpeed(ownData) | 0
-                    : 0;
-                if (speed >= 300 && speed <= 3000) scanData.mySpeed = speed;
-            } catch (_) {}
+            const ownSpeed = _characterSpeed(ownData);
+            if (ownSpeed >= 300 && ownSpeed <= 3000) scanData.mySpeed = ownSpeed;
         }
         const enemies = [];
         const vtableProj = moduleBase.add(offsets.VTABLE_PROJECTILE_DATA);
@@ -548,12 +1202,7 @@ export function updateScanner(bm, now) {
                         const radius = collisionRadius(data) | 0;
                         if (!brawlerName && radius <= 0) continue;
                         const kind = brawlerName ? "player" : "spawnable";
-                        let moveSpeed = 0;
-                        try {
-                            moveSpeed = functions.LogicCharacterData_getSpeed
-                                ? functions.LogicCharacterData_getSpeed(data) | 0
-                                : 0;
-                        } catch (_) {}
+                        const moveSpeed = _characterSpeed(data);
                         const playerIndex = _readOwnerIndex(obj);
                         if (brawlerName) _rememberCharacter(playerIndex, obj);
                         enemies.push({
@@ -595,6 +1244,12 @@ export function resetScannerCache() {
     _friendlyIdx.clear();
     _charsByIndex.clear();
     _speedByData.clear();
+    _learnedTravel.clear();
+    _rangeBonus.clear();
+    _columnCache.clear();
+    _colCands.clear();
+    _rangeScale = 0;
+    scanData.pathRanAt = 0;
     scanData.projectiles = [];
     scanData.measuredSpeed = 0;
     scanData.myRadius = 0;

@@ -88,8 +88,11 @@ export function initFunctions(baseIn, imageIn) {
             "int32",
             ["pointer"]
         ),
+        // getTravelTicks(data, rangeSubunits, speed) -> ticks, 18000 for beams
         LogicProjectileClient_getTravelTicks: _nf("LogicProjectileClient_getTravelTicks", "int32", [
-            "pointer"
+            "pointer",
+            "int32",
+            "int32"
         ]),
         LogicProjectileClient_getType: _nf("LogicProjectileClient_getType", "int32", ["pointer"]),
         LogicProjectileClient_isBeam: _nf("LogicProjectileClient_isBeam", "uint32", ["pointer"]),
@@ -102,6 +105,50 @@ export function initFunctions(baseIn, imageIn) {
         LogicSkillData_getMsBetweenAttacks: _nf("LogicSkillData_getMsBetweenAttacks", "int32", [
             "pointer"
         ]),
+        LogicProjectileClient_getTargetX: _nf("LogicProjectileClient_getTargetX", "int32", [
+            "pointer"
+        ]),
+        LogicProjectileClient_getTargetY: _nf("LogicProjectileClient_getTargetY", "int32", [
+            "pointer"
+        ]),
+        LogicProjectileClient_piercesEnvironment: _nf(
+            "LogicProjectileClient_piercesEnvironment",
+            "uint32",
+            ["pointer"]
+        ),
+        LogicProjectileClient_isHomingMissile: _nf(
+            "LogicProjectileClient_isHomingMissile",
+            "uint32",
+            ["pointer"]
+        ),
+        LogicProjectileClient_isBouncing: _nf("LogicProjectileClient_isBouncing", "uint32", [
+            "pointer"
+        ]),
+        LogicProjectileData_getSpeed: _nf("LogicProjectileData_getSpeed", "int32", ["pointer"]),
+        LogicProjectileData_getRadius: _nf("LogicProjectileData_getRadius", "int32", ["pointer"]),
+        LogicProjectileData_getIntValueFromColumn: _nf(
+            "LogicProjectileData_getIntValueFromColumn",
+            "int32",
+            ["pointer", "int"]
+        ),
+        LogicProjectileData_getBoolValueFromColumn: _nf(
+            "LogicProjectileData_getBoolValueFromColumn",
+            "uint32",
+            ["pointer", "int"]
+        ),
+        LogicProjectileData_getBoolValueFromColumnAlt: _nf(
+            "LogicProjectileData_getBoolValueFromColumnAlt",
+            "uint32",
+            ["pointer", "int"]
+        ),
+        LogicCharacterData_getProjectileStartRadius: _nf(
+            "LogicCharacterData_getProjectileStartRadius",
+            "int32",
+            ["pointer"]
+        ),
+        LogicDataReader_byIndex: _nf("LogicDataReader_byIndex", "int32", ["pointer", "int"]),
+        LogicDataReader_byIndex2: _nf("LogicDataReader_byIndex2", "int32", ["pointer", "int"]),
+        LogicDataReader_byIndex3: _nf("LogicDataReader_byIndex3", "uint32", ["pointer", "int"]),
         operator_new: _nf("operator_new", "pointer", ["ulong"])
     };
     Object.freeze(_n);

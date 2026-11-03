@@ -1,7 +1,13 @@
 import { sendCommand } from "../core/commands.js";
 import { getFunctions } from "../core/functions.js";
 import { offsets } from "../core/offsets.js";
-import { collisionRadius, enableProjectileTracking, scanData } from "../core/scan.js";
+import {
+    collisionRadius,
+    enableProjectileTracking,
+    onDataReload,
+    pathEngineActive,
+    scanData
+} from "../core/scan.js";
 import {
     BLOCKS_MOVEMENT,
     BLOCKS_PROJECTILES,
@@ -262,14 +268,55 @@ function _traveled(p) {
     return length(p.x - sx, p.y - sy);
 }
 
+/*
+ * Remaining flight budget in logic units. travelDistance is the tick-quantised length of
+ * the shot (ticks * speed / 20, getTravelTicks); castRange is the (tiles + rangeAdd) * 100
+ * fallback. Piercing/bouncing shots keep going, so their budget is extended.
+ */
 function _lifeLeft(p) {
     const toTarget = p.hasTarget ? distance(p.x, p.y, p.targetX, p.targetY) : Infinity;
-    if (!(p.castRange > 0)) return toTarget;
+    const reach = p.travelDistance > 0 ? p.travelDistance : p.castRange;
+    if (!(reach > 0)) return toTarget;
     const flown = _traveled(p);
-    return Math.max(0, LogicMath.min(p.castRange - flown, toTarget));
+    let left = LogicMath.min(reach - flown, toTarget);
+    // A shot that pierces characters survives the first body on its line.
+    if (p.piercesChars && toTarget !== Infinity) left = reach - flown;
+    return LogicMath.max(0, left) + _bounceBudget(p);
 }
 
-function _collectLive(myX, myY, myRadius) {
+/* Extra reach a bouncing shot gains after each bounce (projectiles.csv bounce columns). */
+function _bounceBudget(p) {
+    if (!p.bouncing || !(p.bounceAdd > 0)) return 0;
+    const keep = p.bounceKeep > 0 && p.bounceKeep <= 1 ? p.bounceKeep : 0.5;
+    // MaxDistanceBounces reads either as a hop count (small values) or as an absolute
+    // distance budget in subunits; both are clamped to a sane number of bounces.
+    let hops = 2;
+    if (p.bounceMax > 0 && p.bounceMax <= 12) hops = p.bounceMax;
+    else if (p.bounceMax > 12) hops = LogicMath.clamp(Math.floor(p.bounceMax / 200), 1, 6);
+    let budget = 0;
+    let factor = 1;
+    for (let i = 0; i < hops; i++) {
+        factor *= keep;
+        budget += p.bounceAdd * factor;
+        if (!p.rehit) break;
+    }
+    return budget;
+}
+
+/* Steering only bends a shot inside [steerIgnoreTicks, +steerLifeTime]; outside that
+ * window even a homing projectile flies straight and is much easier to read. */
+function _steerActive(p) {
+    if (!(p.steer > 0) && !p.homing) return false;
+    const ignore = p.steerIgnoreMs > 0 ? p.steerIgnoreMs : 0;
+    const life = p.steerLifeMs > 0 ? p.steerLifeMs : 0;
+    if (ignore <= 0 && life <= 0) return true;
+    const age = p.ageMs > 0 ? p.ageMs : 0;
+    if (age < ignore) return false;
+    if (life > 0 && age > ignore + life) return false;
+    return true;
+}
+
+function _collectLive(myX, myY, myRadius, now) {
     const out = [];
     const shots = scanData.projectiles;
     if (!shots || shots.length === 0) {
@@ -283,7 +330,7 @@ function _collectLive(myX, myY, myRadius) {
         const gid = p.gid;
         if (!gid) continue;
         if (distanceSquared(p.x, p.y, myX, myY) > zoneSq) continue;
-        const indirect = !!p.isIndirect;
+        const indirect = !!p.isIndirect || (p.travelType | 0) > 0;
         let radPad = 0;
         let vx = p.vx;
         let vy = p.vy;
@@ -305,7 +352,7 @@ function _collectLive(myX, myY, myRadius) {
             vy = (dir.y / 1000) * shotSpeed;
             spd = length(vx, vy);
         }
-        if (p.homing && spd > 1 && (p.seekX || p.seekY)) {
+        if (p.homing && spd > 1 && (p.seekX || p.seekY) && _steerActive(p)) {
             vx = p.seekX * spd;
             vy = p.seekY * spd;
             radPad = 60;
@@ -315,7 +362,7 @@ function _collectLive(myX, myY, myRadius) {
         let rad = shotR + bodyR + 60 + shotR * 0.45 + radPad;
         if (p.preMs > 0) rad += LogicMath.min(80, shotR);
         if (p.bouncing) rad += 30;
-        const lockPath = !!p.isBeam;
+        const lockPath = !!p.isBeam || !!p.beamCopy;
         const blob = !lockPath && !indirect && spd < 120;
         if (blob && distance(p.x, p.y, myX, myY) > rad + 150) continue;
         const skipAlong = blob || indirect;
@@ -349,19 +396,29 @@ function _collectLive(myX, myY, myRadius) {
         }
         let left = _lifeLeft(p);
         if (left <= 10) continue;
+        const travel = spd >= 1 ? spd : p.speed > 0 ? p.speed : 0;
         const gap = distance(p.x, p.y, myX, myY) - bodyR - shotR;
-        if (left < 0.85 * Math.max(0, gap)) continue;
+        if (left < 0.85 * LogicMath.max(0, gap)) continue;
         if (!_heading) {
-            const travel = spd >= 1 ? spd : p.speed > 0 ? p.speed : 0;
             if (travel > 0) {
                 if (gap / travel > TUNE.ENGAGE_S) continue;
             } else if (gap > TUNE.ENGAGE_NEAR) continue;
         }
-        if (!skipAlong && spd >= 1 && playerAlong > left + shotR) continue;
-        if (p.lifeMs > 0) left = LogicMath.min(left, p.lifeMs / 1000);
-        if (p.bouncing) left = LogicMath.min(left, 0.9);
-        if (p.preMs > 0) left += p.preMs / 1000;
-        if (p.volleyMs > 0) left += p.volleyMs / 1000;
+        // Piercing shots stay lethal after they cross us, so keep them as threats.
+        if (!skipAlong && spd >= 1 && !p.piercesChars && playerAlong > left + shotR) continue;
+        // `left` is a distance budget: turn millisecond values into units via travel speed.
+        if (travel > 0) {
+            if (p.lifeMs > 0 && isFinite(p.lifeMs))
+                left = LogicMath.min(left, (p.lifeMs / 1000) * travel);
+            if (p.preMs > 0) left += (p.preMs / 1000) * travel;
+            if (p.volleyMs > 0) left += (p.volleyMs / 1000) * travel;
+            // Untested range estimate (no recent client path calculation) - keep the
+            // projected path inside the planning horizon instead of trusting it.
+            if (!pathEngineActive(now) && !(p.travelDistance > 0))
+                left = LogicMath.min(left, TUNE.HORIZON_S * travel);
+        } else if (p.bouncing) {
+            left = LogicMath.min(left, 0.9);
+        }
         out.push({
             x: p.x,
             y: p.y,
@@ -643,7 +700,11 @@ export function pushDodgeTarget() {
     const myRadius = _hitbox > 0 ? _hitbox : scanData.myRadius;
     if (
         now - _lastDangerTs > TUNE.RELEASE_GRACE_MS &&
-        !_pathsHitMe(_collectLive(scanData.myX, scanData.myY, myRadius), scanData.myX, scanData.myY)
+        !_pathsHitMe(
+            _collectLive(scanData.myX, scanData.myY, myRadius, now),
+            scanData.myX,
+            scanData.myY
+        )
     )
         return;
     _push(now, scanData.myX, scanData.myY);
@@ -738,7 +799,7 @@ export function updateAutododge() {
         return;
     }
 
-    const hazards = _collectLive(myX, myY, myRadius);
+    const hazards = _collectLive(myX, myY, myRadius, now);
     if (hazards.length === 0) {
         if (_heading && now - _lastDangerTs > TUNE.RELEASE_GRACE_MS) _clearHeading();
         return;
@@ -835,6 +896,12 @@ export function updateAutododge() {
     _push(now, myX, myY);
 }
 
+function _invalidateOwnMetrics() {
+    _hitbox = 0;
+    _radiusMemoData = null;
+    _radiusMemoValue = 0;
+}
+
 export function resetAutododge() {
     _clearHeading();
     _hitbox = 0;
@@ -851,6 +918,7 @@ export function resetAutododge() {
 export function setupAutododge() {
     try {
         enableProjectileTracking();
+        onDataReload(_invalidateOwnMetrics);
     } catch (e) {}
     _buildRing();
 }
