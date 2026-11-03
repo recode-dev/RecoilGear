@@ -52,6 +52,9 @@ from "./features/autoaim.js";
 let _base = null;
 let _lastBattle = null;
 const SERVER_TICK_MS = 50;
+let _frameMs = 16.7;
+let _lastFrameAt = 0;
+let _dodgeEveryMs = SERVER_TICK_MS;
 
 let _installed = false;
 let _ticker = null;
@@ -106,6 +109,14 @@ function tick(bm)
     }
 
     const now = Date.now();
+    const frameDt = now - _lastFrameAt;
+    _lastFrameAt = now;
+    if (frameDt >= 4 && frameDt <= 100)
+    {
+        _frameMs = _frameMs * 0.85 + frameDt * 0.15;
+        const stride = Math.max(1, Math.ceil(SERVER_TICK_MS * 0.8 / _frameMs));
+        _dodgeEveryMs = stride * _frameMs - _frameMs * 0.5;
+    }
     try
     {
         updateScanner(bm, now);
@@ -124,7 +135,7 @@ function tick(bm)
     }
     catch (_)
     {}
-    if (now - _lastLogicAt >= SERVER_TICK_MS)
+    if (now - _lastLogicAt >= _dodgeEveryMs)
     {
         _lastLogicAt = now;
         try

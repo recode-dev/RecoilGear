@@ -247,8 +247,6 @@ const MOVE_INPUT_TYPE = 2;
 
 const TUNE = {
     AWARE: 3200,
-    TICK_MS: 4,
-    TICK_MS_IDLE: 48,
     DIR_COUNT: 40,
     SKIN: 50,
     LOCK_MS: 150,
@@ -271,7 +269,6 @@ let _heading = null;
 let _headingIdx = -1;
 let _holdUntil = 0;
 let _lastDangerTs = 0;
-let _lastTick = 0;
 let _lastSentX = 1e9;
 let _lastSentY = 1e9;
 let _lastSentAt = 0;
@@ -301,8 +298,6 @@ function _buildRing()
 function _syncTuning()
 {
     const t = Math.max(0, Math.min(100, _options.reactionSpeed)) / 100;
-    TUNE.TICK_MS = Math.max(4, Math.round(24 - t * 20));
-    TUNE.TICK_MS_IDLE = Math.max(16, Math.round(64 - t * 16));
     TUNE.LOCK_MS = Math.max(70, Math.round(240 - t * 180));
     const n = Math.max(8, Math.min(128, _options.directionPrecision | 0));
     if (n !== TUNE.DIR_COUNT)
@@ -544,9 +539,6 @@ export function updateAutododge()
 {
     if (scanData.lastUpdate === 0) return;
     const now = Date.now();
-    const tickMs = _heading ? TUNE.TICK_MS : TUNE.TICK_MS_IDLE;
-    if (now - _lastTick < tickMs) return;
-    _lastTick = now;
     const myX = scanData.myX;
     const myY = scanData.myY;
     if (!isFinite(myX) || !isFinite(myY)) return;
@@ -646,7 +638,6 @@ export function resetAutododge()
 {
     _clearHeading();
     _lastDangerTs = 0;
-    _lastTick = 0;
     _lastSentX = 1e9;
     _lastSentY = 1e9;
     _lastSentAt = 0;

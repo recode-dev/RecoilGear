@@ -54,7 +54,7 @@ const SPEED_REFRESH_MS = 500;
 const SKIP_NAME_PARTS = ["BALL"];
 
 const SERVER_TICK_MS = 50;
-const MIN_TRACK_MS = 120;
+const MIN_TRACK_MS = SERVER_TICK_MS * 2;
 const MAX_SPEED_EST = 1600;
 const MAX_ACCEL = 6000;
 const LEAD_PASSES = 3;
