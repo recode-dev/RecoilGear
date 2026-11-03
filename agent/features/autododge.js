@@ -249,7 +249,7 @@ const TUNE = {
     AWARE: 3200,
     TICK_MS: 4,
     TICK_MS_IDLE: 48,
-    DIR_COUNT: 96,
+    DIR_COUNT: 40,
     SKIN: 50,
     LOCK_MS: 150,
     REACH: 1200,
@@ -278,7 +278,7 @@ let _lastSentAt = 0;
 const _ring = [];
 const _options = {
     reactionSpeed: 100,
-    directionPrecision: 48,
+    directionPrecision: 40,
     safetyMargin: 25
 };
 
