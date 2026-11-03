@@ -339,7 +339,6 @@ function _collectLive(myX, myY, myRadius, now) {
         if (!p) continue;
         if (!p.gid) continue;
         if (distanceSquared(p.x, p.y, myX, myY) > zoneSq) continue;
-        if (p.ignoreChars) continue;
         const tt = p.travelType | 0;
         const indirect = !!p.isIndirect;
         const boomerang = (p.boomerang | 0) > 0;
@@ -417,12 +416,11 @@ function _collectLive(myX, myY, myRadius, now) {
                 continue;
         }
         const travel = spd >= 1 ? spd : p.speed > 0 ? p.speed : 0;
-        let left = p.seg > 0 ? p.seg : 0;
-        if (!blob && !(left > 0)) continue;
-        if (p.constantFly && p.earlyTicks > 0 && travel > 0)
+        let left = p.seg > 0 ? p.seg : -1;
+        if (p.constantFly && p.earlyTicks > 0 && travel > 0 && left >= 0)
             left = LogicMath.min(left, (p.earlyTicks * travel) / TICKS_PER_SEC);
-        left += _bounceBudget(p);
-        if (!blob && left <= 10) continue;
+        if (left >= 0) left += _bounceBudget(p);
+        if (!blob && left >= 0 && left <= 10) continue;
         if (!_heading && travel > 0) {
             const gap = distance(p.x, p.y, myX, myY) - hitR;
             if (gap / travel > TUNE.ENGAGE_S) continue;

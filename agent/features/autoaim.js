@@ -54,7 +54,6 @@ const STEER_LEAD_FACTOR = 0.75;
 const LINEUP_BONUS = 220;
 
 var _target = null;
-var _aimPtr = null;
 var _track = new Map();
 var _projectileSpeed = 0;
 var _speedAt = 0;
@@ -418,10 +417,7 @@ function _aimPointNow() {
     const live = _target ? _ptrAlive(_target.ptr) : null;
     const enemy = live ? _target : _pickTarget(now);
     if (!enemy) return null;
-    const aim = _aimAt(enemy, now);
-    if (!aim) return null;
-    _aimPtr = enemy.ptr;
-    return aim;
+    return _aimAt(enemy, now);
 }
 
 function _pickTarget(now) {
@@ -526,13 +522,13 @@ export function setupAutoaim() {
         onDataReload(_resetWeaponCache);
     } catch (_) {}
     try {
-        Interceptor.attach(base.add(offsets.BattleScreen_getClosestTargetForAutoshoot), {
-            onLeave(retval) {
-                if (!_aimPointNow()) return;
-                const live = _ptrAlive(_aimPtr);
-                if (!live) return;
+        Interceptor.attach(base.add(offsets.BattleScreen_activateSkill), {
+            onEnter(args) {
+                const aim = _aimPointNow();
+                if (!aim) return;
                 try {
-                    retval.replace(live);
+                    args[1] = ptr(aim.x | 0);
+                    args[2] = ptr(aim.y | 0);
                 } catch (_) {}
             }
         });

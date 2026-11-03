@@ -905,7 +905,13 @@ function _captureProjectile(projectile, data, now) {
         let target = _readProjectileTarget(projectile, data, x, y);
         const landingX = _clientS32(projectile, offsets.ProjectileClient_landingX, -200000, 200000);
         const landingY = _clientS32(projectile, offsets.ProjectileClient_landingY, -200000, 200000);
-        if (!target && (landingX || landingY)) target = { x: landingX, y: landingY };
+        if (
+            !target &&
+            (landingX || landingY) &&
+            Math.abs(landingX - x) < 30000 &&
+            Math.abs(landingY - y) < 30000
+        )
+            target = { x: landingX, y: landingY };
         const flags = _readProjectileFlags(data);
         let isIndirect = _dataU8(data, offsets.ProjectileData_indirect);
         let travelType = _dataS32(data, offsets.ProjectileData_travelType, 0, 20);
@@ -928,7 +934,7 @@ function _captureProjectile(projectile, data, now) {
         if (overrideFlag && overrideType) travelType = overrideType;
         const gravity = _dataS32(data, offsets.ProjectileData_gravity, 1, 20000);
         const visualized = _dataU8(data, offsets.ProjectileData_visualizeEndPoint);
-        if (travelType === 6 || dynamicRange || gravity > 0 || visualized) isIndirect = 1;
+        if (travelType === 6 || dynamicRange) isIndirect = 1;
         let beam = 0;
         try {
             beam = data.add(offsets.ProjectileData_isBeamField).readU8() & 1;
@@ -946,8 +952,8 @@ function _captureProjectile(projectile, data, now) {
             speed: _readProjectileSpeed(data),
             x,
             y,
-            spawnX: startX || x,
-            spawnY: startY || y,
+            spawnX: Math.abs(startX - x) < 500 ? startX : x,
+            spawnY: Math.abs(startY - y) < 500 ? startY : y,
             targetX: target ? target.x : 0,
             targetY: target ? target.y : 0,
             hasTarget: !!target || !!targetObj,
