@@ -28,8 +28,6 @@ import
 }
 from "../utils/walls.js";
 
-// engine math, inlined from the v36 dump (no offsets, no native calls)
-
 const DEG = 90;
 const HALF = 180;
 const FULL = 360;
