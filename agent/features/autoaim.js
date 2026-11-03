@@ -95,8 +95,11 @@ function _sample(gid, x, y, moveSpeed, now)
     const speed = Math.min(magnitude, moveSpeed >= 200 && moveSpeed <= 1500 ? moveSpeed : magnitude);
     if (direction < 0.5 || speed > MAX_SPEED_EST) return null;
 
-    const vx = dx / direction * speed;
-    const vy = dy / direction * speed;
+    _vec2.writeS32(dx | 0);
+    _vec2.add(4).writeS32(dy | 0);
+    getFunctions().LogicVector2_normalize(_vec2, speed | 0);
+    const vx = _vec2.readS32();
+    const vy = _vec2.add(4).readS32();
 
     if (!track.vhist) track.vhist = [];
     track.vhist.push({ x: vx, y: vy, t: now });
@@ -149,6 +152,13 @@ function _solve(mx, my, pred, speed, range)
         py = pred.y + pred.vy * flight + 0.5 * pred.ay * flight * flight;
     }
 
+    if ((pred.vx | 0) !== 0 || (pred.vy | 0) !== 0)
+    {
+        const leadAngle = getFunctions().LogicMath_normalizeAngle180(
+            getFunctions().LogicMath_getAngle(px - pred.x, py - pred.y) -
+            getFunctions().LogicMath_getAngle(pred.vx | 0, pred.vy | 0));
+        if (leadAngle > 90 || leadAngle < -90) return null;
+    }
     return { x: Math.round(px), y: Math.round(py), t: 0 };
 }
 

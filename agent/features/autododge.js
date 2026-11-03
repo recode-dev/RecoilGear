@@ -158,31 +158,30 @@ function _collectLive(myX, myY, myRadius)
         const blob = !lockPath && !indirect && slow;
         const shotR = _ballR(p);
         const rad = shotR + bodyR + 60 + shotR * 0.45;
-        let ux = 0;
-        let uy = 0;
-        if (spd >= 1)
-        {
-            _vec2.writeS32(vx | 0);
-            _vec2.add(4).writeS32(vy | 0);
-            getFunctions().LogicVector2_normalize(_vec2, 1000);
-            ux = _vec2.readS32() / 1000;
-            uy = _vec2.add(4).readS32() / 1000;
-        }
         const skipAlong = blob || indirect;
-        let playerAlong = 0;
-        if (!skipAlong && spd >= 1)
-        {
-            playerAlong = (myX - p.x) * ux + (myY - p.y) * uy;
-            if (playerAlong < -50) continue;
-            const hitX = p.x + ux * Math.max(playerAlong, 0);
-            const hitY = p.y + uy * Math.max(playerAlong, 0);
-            if (!losCheck(p.x, p.y, hitX, hitY, BLOCKS_PROJECTILES)) continue;
-        }
         const left = _lifeLeft(p);
         if (left <= 10) continue;
         const gap = getFunctions().LogicGameplayUtil_getDistanceBetween(p.x | 0, p.y | 0, myX | 0, myY | 0) - bodyR - shotR;
         if (left < 0.85 * Math.max(0, gap)) continue;
-        if (!skipAlong && spd >= 1 && playerAlong > left + shotR) continue;
+        if (!skipAlong && spd >= 1)
+        {
+            const offAngle = getFunctions().LogicMath_normalizeAngle180(
+                getFunctions().LogicMath_getAngle(myX - p.x, myY - p.y) -
+                getFunctions().LogicMath_getAngle(vx | 0, vy | 0));
+            if (offAngle > 90 || offAngle < -90) continue;
+            const path = (left + shotR) | 0;
+            _vec2.writeS32(vx | 0);
+            _vec2.add(4).writeS32(vy | 0);
+            getFunctions().LogicVector2_normalize(_vec2, path);
+            const hitX = p.x + _vec2.readS32();
+            const hitY = p.y + _vec2.add(4).readS32();
+            if (!getFunctions().LogicGameplayUtil_lineSegmentIntersectsCircle(
+                    p.x | 0, p.y | 0, hitX | 0, hitY | 0, myX | 0, myY | 0, rad | 0, ptr(0)))
+            {
+                continue;
+            }
+            if (!losCheck(p.x, p.y, myX, myY, BLOCKS_PROJECTILES)) continue;
+        }
         out.push(
         {
             x: p.x,
@@ -198,48 +197,31 @@ function _collectLive(myX, myY, myRadius)
     return out;
 }
 
-function _clearanceFor(threats, myX, myY, mvx, mvy)
+function _clearanceFor(threats, px, py, bodyR)
 {
+    const fns = getFunctions();
+    let hits = 0;
     let minClear = Infinity;
-    const horizon = TUNE.HORIZON_S;
     for (let i = 0; i < threats.length; i++)
     {
         const t = threats[i];
+        const reach = (t.left + t.rad) | 0;
+        if (reach <= 0) continue;
         _vec2.writeS32(t.vx | 0);
         _vec2.add(4).writeS32(t.vy | 0);
-        const spd = getFunctions().LogicVector2_getLength(_vec2);
-        const relx = t.x - myX;
-        const rely = t.y - myY;
-        const reach = getFunctions().LogicGameplayUtil_getDistanceBetween(t.x | 0, t.y | 0, myX | 0, myY | 0);
-        let maxT = horizon;
-        if (spd > 1)
+        fns.LogicVector2_normalize(_vec2, reach);
+        const endX = t.x + _vec2.readS32();
+        const endY = t.y + _vec2.add(4).readS32();
+        if (fns.LogicGameplayUtil_lineSegmentIntersectsCircle(
+                t.x | 0, t.y | 0, endX | 0, endY | 0, px | 0, py | 0, (t.rad + bodyR) | 0, ptr(0)))
         {
-            const untilGone = (Math.max(0, t.left) + reach) / spd;
-            maxT = Math.min(maxT, untilGone);
+            hits++;
+            continue;
         }
-        const vrx = t.vx - mvx;
-        const vry = t.vy - mvy;
-        const vv = vrx * vrx + vry * vry;
-        let cx;
-        let cy;
-        if (vv < 1e-6)
-        {
-            cx = relx;
-            cy = rely;
-        }
-        else
-        {
-            let ts = -(relx * vrx + rely * vry) / vv;
-            if (ts < 0) ts = 0;
-            else if (ts > maxT) ts = maxT;
-            cx = relx + vrx * ts;
-            cy = rely + vry * ts;
-        }
-        _vec2.writeS32(cx | 0);
-        _vec2.add(4).writeS32(cy | 0);
-        const clear = getFunctions().LogicVector2_getLength(_vec2) - t.rad;
+        const clear = fns.LogicGameplayUtil_getDistanceBetween(t.x | 0, t.y | 0, px | 0, py | 0) - t.rad;
         if (clear < minClear) minClear = clear;
     }
+    if (hits > 0) return -1e6 - hits;
     return minClear;
 }
 
@@ -304,7 +286,7 @@ export function updateAutododge()
         if (_heading && now - _lastDangerTs > TUNE.RELEASE_GRACE_MS) _clearHeading();
         return;
     }
-    const stayClear = _clearanceFor(hazards, myX, myY, 0, 0);
+    const stayClear = _clearanceFor(hazards, myX, myY, myRadius);
     const inDanger = stayClear < TUNE.ENGAGE;
     if (inDanger) _lastDangerTs = now;
     if (!inDanger && (!_heading || now - _lastDangerTs > TUNE.RELEASE_GRACE_MS))
@@ -321,9 +303,17 @@ export function updateAutododge()
     for (let i = 0; i < _ring.length; i++)
     {
         const d = _ring[i];
-        let s = _clearanceFor(hazards, myX, myY, speed * d.x, speed * d.y);
+        const stepX = myX + d.x * TUNE.REACH;
+        const stepY = myY + d.y * TUNE.REACH;
+        let s = _clearanceFor(hazards, stepX, stepY, myRadius);
         s -= _wallAhead(myX, myY, d, speed, bodyR);
-        if (prevDir) s += TUNE.MOMENTUM * (d.x * prevDir.x + d.y * prevDir.y);
+        if (prevDir)
+        {
+            const turn = getFunctions().LogicMath_normalizeAngle180(
+                getFunctions().LogicMath_getAngle(d.x * 1000, d.y * 1000) -
+                getFunctions().LogicMath_getAngle(prevDir.x * 1000, prevDir.y * 1000));
+            s += TUNE.MOMENTUM * (180 - Math.abs(turn)) / 180;
+        }
         if (i === prevIdx) prevScore = s;
         if (s > bestScore)
         {

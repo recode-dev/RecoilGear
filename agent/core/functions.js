@@ -56,6 +56,9 @@ export function initFunctions(baseIn, imageIn)
         LogicVector2_normalize: _nf("LogicVector2_normalize", "void", ["pointer", "int32"]),
         LogicMath_getRotateDx: _nf("LogicMath_getRotateDx", "int32", ["int32", "int32", "int32"]),
         LogicMath_getRotateDy: _nf("LogicMath_getRotateDy", "int32", ["int32", "int32", "int32"]),
+        LogicMath_getAngle: _nf("LogicMath_getAngle", "int32", ["int32", "int32"]),
+        LogicMath_normalizeAngle180: _nf("LogicMath_normalizeAngle180", "int32", ["int32"]),
+        LogicGameplayUtil_lineSegmentIntersectsCircle: _nf("LogicGameplayUtil_lineSegmentIntersectsCircle", "int32", ["int32", "int32", "int32", "int32", "int32", "int32", "int32", "pointer"]),
     };
     Object.freeze(_n);
     return _n;

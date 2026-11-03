@@ -57,6 +57,9 @@ export const offsets = Object.freeze({
     LogicVector2_normalize: 0xbd0794,
     LogicMath_getRotateDx: 0x7b3a40,
     LogicMath_getRotateDy: 0x7b3a94,
+    LogicMath_getAngle: 0xbd021c,
+    LogicMath_normalizeAngle180: 0xbcfe80,
+    LogicGameplayUtil_lineSegmentIntersectsCircle: 0xaf53c4,
     LogicCharacterClient__getWeaponSkill: 0x9fc440,
 
     LogicSkillData__getCastingRange: 0x9de9cc,
