@@ -56,6 +56,7 @@ const SERVER_TICK_MS = 50;
 let _installed = false;
 let _ticker = null;
 let _lastLogicAt = 0;
+let _lastHookAt = 0;
 
 function findModule()
 {
@@ -153,6 +154,7 @@ export function install()
         {
             onEnter(args)
             {
+                _lastHookAt = Date.now();
                 tick(args[0]);
             }
         });
@@ -161,11 +163,13 @@ export function install()
     catch (_)
     {}
 
-    if (!hooked && !_ticker)
+    if (!_ticker)
     {
         _ticker = setInterval(function ()
         {
-            tick(battleModeClient());
+            if (Date.now() - _lastHookAt < 250) return;
+            const bm = battleModeClient();
+            if (bm) tick(bm);
         }, 16);
     }
 

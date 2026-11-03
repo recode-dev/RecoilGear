@@ -370,4 +370,6 @@ export function resetAutoaim()
 {
     _target = null;
     _track.clear();
+    _speed = 0;
+    _speedAt = 0;
 }
