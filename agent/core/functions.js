@@ -4,7 +4,7 @@ var base = null;
 var image = null;
 var _n = null;
 
-var function isValidPtr(value) {
+export function isValidPtr(value) {
     return value && !value.isNull();
 }
 
