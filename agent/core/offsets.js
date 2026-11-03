@@ -1,5 +1,6 @@
 export const offsets = Object.freeze({
-    BattleMode_objectManagerPtr: 0x28,
+    BattleMode_client: 0x28,
+    BattleModeClient_objectManager: 0x28,
     BattleMode_clientInputManager: 0x58,
 
     ObjectManager_objectsArray: 0x0,

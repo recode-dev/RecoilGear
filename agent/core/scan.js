@@ -375,7 +375,7 @@ export function updateScanner(bm, now)
         }
         const enemies = [];
         const vtableProj = moduleBase.add(offsets.VTABLE_PROJECTILE_DATA);
-        const objMgr = bm.add(offsets.BattleMode_objectManagerPtr).readPointer();
+        const objMgr = bm.add(offsets.BattleModeClient_objectManager).readPointer();
         if (isValidPtr(objMgr))
         {
             const objects = objMgr.add(offsets.ObjectManager_objectsArray).readPointer();

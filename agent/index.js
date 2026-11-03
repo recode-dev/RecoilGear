@@ -82,7 +82,7 @@ function battleModeClient()
         if (!fns.BattleMode_getInstance) return null;
         const mode = fns.BattleMode_getInstance();
         if (!mode || mode.isNull()) return null;
-        const client = mode.add(offsets.BattleMode_objectManagerPtr).readPointer();
+        const client = mode.add(offsets.BattleMode_client).readPointer();
         if (!client || client.isNull()) return null;
         return client;
     }
