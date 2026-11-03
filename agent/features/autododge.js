@@ -99,9 +99,9 @@ function _syncTuning()
     TUNE.SKIN = Math.max(0, Math.min(120, _options.safetyMargin)) * 2;
 }
 _syncTuning();
-function _ballR(p)
+function _ballR()
 {
-    return p.radius > 0 ? p.radius : 100;
+    return 100;
 }
 
 function _traveled(p)
@@ -151,7 +151,7 @@ function _collectLive(myX, myY, myRadius)
         const slow = (p.speed || 0) > 0 && p.speed < 1600;
         const lockPath = !!p.isBeam;
         const blob = !lockPath && !indirect && slow;
-        const shotR = _ballR(p);
+        const shotR = _ballR();
         const rad = shotR + bodyR + 60 + shotR * 0.45;
         let ux = 0;
         let uy = 0;

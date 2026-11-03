@@ -147,7 +147,6 @@ function _captureProjectile(projectile, data)
         const x = fns.LogicGameObjectClient_getX(projectile) | 0;
         const y = fns.LogicGameObjectClient_getY(projectile) | 0;
         const speed = 0;
-        const radius = Math.max(0, data.add(offsets.ProjectileData_radius).readU32() | 0);
         let isIndirect = 0;
         try
         {
@@ -181,7 +180,6 @@ function _captureProjectile(projectile, data)
             spawnX: x,
             spawnY: y,
             speed,
-            radius,
             isIndirect: isIndirect,
             isBeam,
             castRange,
@@ -311,7 +309,6 @@ function _updateLiveProjectiles(now)
                 spawnX: projectile.spawnX,
                 spawnY: projectile.spawnY,
                 speed: projectile.speed,
-                radius: projectile.radius,
                 isIndirect: !!projectile.isIndirect,
                 isBeam: !!projectile.isBeam,
                 castRange: projectile.castRange || 0,
