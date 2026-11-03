@@ -29,10 +29,11 @@ const SKIP_NAME_PARTS = ["BALL"];
 const RANGE_FLIGHT_S = 1.1;
 const RANGE_MARGIN = 0.88;
 const SERVER_TICK_MS = 50;
-const VELOCITY_WINDOW_MS = 400;
-const MIN_TRACK_MS = 200;
+const VELOCITY_WINDOW_MS = 350;
+const MIN_TRACK_MS = 120;
 const MAX_SPEED_EST = 1600;
-const LEAD_PASSES = 2;
+const MAX_ACCEL = 6000;
+const LEAD_PASSES = 3;
 const MAX_FLIGHT_S = 1.5;
 const STICKY_MARGIN = 1.12;
 
@@ -69,18 +70,58 @@ function _sample(gid, x, y, moveSpeed, now)
     }
 
     track.hist.push({ x: x, y: y, t: now });
-    while (track.hist.length > 1 && now - track.hist[0].t > VELOCITY_WINDOW_MS) track.hist.shift();
+    while (track.hist.length > 16) track.hist.shift();
 
     const first = track.hist[0];
     const span = (now - first.t) / 1000;
+    if (now - first.t < MIN_TRACK_MS || span <= 0) return null;
 
-    if (now - first.t < MIN_TRACK_MS) return null;
+    const vxWindow = (x - first.x) / span;
+    const vyWindow = (y - first.y) / span;
+    const magnitude = Math.sqrt(vxWindow * vxWindow + vyWindow * vyWindow);
+    if (magnitude < 30) return { x: x, y: y, vx: 0, vy: 0, juke: false };
 
-    let vx = (x - first.x) / span;
-    let vy = (y - first.y) / span;
-    if (Math.sqrt(vx * vx + vy * vy) > MAX_SPEED_EST) return null;
+    let dx = 0;
+    let dy = 0;
+    for (let index = track.hist.length - 2; index >= 0; index--)
+    {
+        const point = track.hist[index];
+        if (point.x === x && point.y === y) continue;
+        dx = x - point.x;
+        dy = y - point.y;
+        break;
+    }
 
-    return { x: x, y: y, vx: vx, vy: vy, juke: false };
+    const direction = Math.sqrt(dx * dx + dy * dy);
+    const speed = Math.min(magnitude, moveSpeed >= 200 && moveSpeed <= 1500 ? moveSpeed : magnitude);
+    if (direction < 0.5 || speed > MAX_SPEED_EST) return null;
+
+    const vx = dx / direction * speed;
+    const vy = dy / direction * speed;
+
+    if (!track.vhist) track.vhist = [];
+    track.vhist.push({ x: vx, y: vy, t: now });
+    while (track.vhist.length > 12) track.vhist.shift();
+
+    let ax = 0;
+    let ay = 0;
+    for (let index = 0; index < track.vhist.length; index++)
+    {
+        const past = track.vhist[index];
+        const dt = (now - past.t) / 1000;
+        if (dt < 0.12) continue;
+        ax = (vx - past.x) / dt;
+        ay = (vy - past.y) / dt;
+        break;
+    }
+
+    if (Math.sqrt(ax * ax + ay * ay) > MAX_ACCEL)
+    {
+        ax = 0;
+        ay = 0;
+    }
+
+    return { x: x, y: y, vx: vx, vy: vy, ax: ax, ay: ay, juke: false };
 }
 
 function _solve(mx, my, pred, speed, range)
@@ -96,8 +137,8 @@ function _solve(mx, my, pred, speed, range)
         if (range > 0 && distance > range) return null;
         const flight = distance / speed;
         if (flight > MAX_FLIGHT_S) return null;
-        px = pred.x + pred.vx * flight;
-        py = pred.y + pred.vy * flight;
+        px = pred.x + pred.vx * flight + 0.5 * pred.ax * flight * flight;
+        py = pred.y + pred.vy * flight + 0.5 * pred.ay * flight * flight;
     }
 
     return { x: Math.round(px), y: Math.round(py), t: 0 };
