@@ -185,13 +185,13 @@ const TUNE = {
     AWARE: 3200,
     DIR_COUNT: 40,
     SKIN: 50,
-    LOCK_MS: 150,
+    LOCK_MS: 60,
     REACH: 1200,
     HORIZON_S: 1.4,
     KEEP_BAND: 250,
     MOMENTUM: 150,
     ENGAGE: 100,
-    RELEASE_GRACE_MS: 200,
+    RELEASE_GRACE_MS: 60,
     WALL_HIT: 9000,
     PROBE_N: 3,
     PROBE_T: 0.35,
@@ -237,7 +237,7 @@ function _buildRing() {
 
 function _syncTuning() {
     const t = Math.max(0, Math.min(100, _options.reactionSpeed)) / 100;
-    TUNE.LOCK_MS = Math.max(70, Math.round(240 - t * 180));
+    TUNE.LOCK_MS = Math.max(60, Math.round(120 - t * 60));
     const n = Math.max(8, Math.min(128, _options.directionPrecision | 0));
     if (n !== TUNE.DIR_COUNT) {
         TUNE.DIR_COUNT = n;
