@@ -146,6 +146,23 @@ function _sample(gid, x, y, moveSpeed, now)
     return { x: x, y: y, vx: vx, vy: vy, ax: ax, ay: ay, juke: false };
 }
 
+function _flightTime(rx, ry, vx, vy, speed)
+{
+    const a = vx * vx + vy * vy - speed * speed;
+    const b = rx * vx + ry * vy;
+    const c = rx * rx + ry * ry;
+    if (a > -1e-9 && a < 1e-9) return b < 0 ? -c / (2 * b) : -1;
+    const disc = b * b - a * c;
+    if (disc < 0) return -1;
+    const root = Math.sqrt(disc);
+    let best = -1;
+    const t1 = (-b - root) / a;
+    const t2 = (-b + root) / a;
+    if (t1 > 0) best = t1;
+    if (t2 > 0 && (best < 0 || t2 < best)) best = t2;
+    return best;
+}
+
 function _solve(mx, my, pred, speed, range)
 {
     if (_ownBeam) return { x: Math.round(pred.x), y: Math.round(pred.y), t: 0 };
@@ -159,18 +176,36 @@ function _solve(mx, my, pred, speed, range)
 
     let px = pred.x;
     let py = pred.y;
+    let t = _flightTime(pred.x - mx, pred.y - my, pred.vx, pred.vy, speed);
 
-    for (let pass = 0; pass < LEAD_PASSES; pass++)
+    if (t > 0)
     {
-        const flightTo = distance(px, py, mx, my);
-        if (range > 0 && flightTo > range) return null;
-        const flight = flightTo / speed;
-        if (flight > MAX_FLIGHT_S) return null;
-        px = pred.x + pred.vx * flight + 0.5 * pred.ax * flight * flight;
-        py = pred.y + pred.vy * flight + 0.5 * pred.ay * flight * flight;
+        for (let pass = 0; pass < LEAD_PASSES; pass++)
+        {
+            px = pred.x + pred.vx * t + 0.5 * pred.ax * t * t;
+            py = pred.y + pred.vy * t + 0.5 * pred.ay * t * t;
+            const flown = distance(px, py, mx, my);
+            if (!(flown > 0)) break;
+            t = flown / speed;
+        }
+    }
+    else
+    {
+        for (let pass = 0; pass < LEAD_PASSES; pass++)
+        {
+            const flightTo = distance(px, py, mx, my);
+            if (range > 0 && flightTo > range) return null;
+            const flight = flightTo / speed;
+            if (flight > MAX_FLIGHT_S) return null;
+            px = pred.x + pred.vx * flight + 0.5 * pred.ax * flight * flight;
+            py = pred.y + pred.vy * flight + 0.5 * pred.ay * flight * flight;
+        }
+        return { x: Math.round(px), y: Math.round(py), t: 0 };
     }
 
-    return { x: Math.round(px), y: Math.round(py), t: 0 };
+    if (range > 0 && distance(px, py, mx, my) > range) return null;
+    if (t > MAX_FLIGHT_S) return null;
+    return { x: Math.round(px), y: Math.round(py), t: t };
 }
 
 function _ownProjectileSpeed()

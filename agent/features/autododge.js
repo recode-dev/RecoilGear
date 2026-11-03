@@ -60,6 +60,12 @@ function sinScaled(angle)
 const LogicMath = {
     abs: (v) => (v < 0 ? -v : v),
 
+    min: (a, b) => (a < b ? a : b),
+
+    max: (a, b) => (a > b ? a : b),
+
+    clamp: (v, lo, hi) => (v < lo ? lo : (v > hi ? hi : v)),
+
     sqrt: (v) =>
     {
         if (v <= 0) return 0;
@@ -151,6 +157,62 @@ function lengthSquared(x, y)
 function distance(x1, y1, x2, y2)
 {
     return length(x2 - x1, y2 - y1);
+}
+
+function distanceSquared(x1, y1, x2, y2)
+{
+    return lengthSquared(x2 - x1, y2 - y1);
+}
+
+function segmentHitsSegment(x1, y1, x2, y2, x3, y3, x4, y4)
+{
+    const ax = x2 - x1;
+    const ay = y2 - y1;
+    const bx = x4 - x3;
+    const by = y4 - y3;
+    const den = ax * by - ay * bx;
+    if (den === 0) return false;
+    const ta = ((x3 - x1) * by - (y3 - y1) * bx) / den;
+    const tb = ((x3 - x1) * ay - (y3 - y1) * ax) / den;
+    return ta >= 0 && ta <= 1 && tb >= 0 && tb <= 1;
+}
+
+function _threatPaths(threats, px, py)
+{
+    const out = [];
+    for (let i = 0; i < threats.length; i++)
+    {
+        const t = threats[i];
+        const vlen = length(t.vx, t.vy);
+        if (vlen < 1) continue;
+        const reach = distance(t.x, t.y, px, py);
+        const span = LogicMath.clamp((LogicMath.max(0, t.left) + reach) / vlen, 0, TUNE.HORIZON_S);
+        const end = normalize(
+        {
+            x: t.vx,
+            y: t.vy
+        }, (vlen * span) | 0);
+        out.push(
+        {
+            x1: t.x,
+            y1: t.y,
+            x2: t.x + end.x,
+            y2: t.y + end.y
+        });
+    }
+    return out;
+}
+
+function _crossesPath(paths, px, py, stepX, stepY)
+{
+    const tx = px + stepX;
+    const ty = py + stepY;
+    for (let i = 0; i < paths.length; i++)
+    {
+        const p = paths[i];
+        if (segmentHitsSegment(px, py, tx, ty, p.x1, p.y1, p.x2, p.y2)) return true;
+    }
+    return false;
 }
 
 function dot(ax, ay, bx, by)
@@ -290,7 +352,7 @@ function _collectLive(myX, myY, myRadius)
         const name = p.name || "";
         const dx = p.x - myX;
         const dy = p.y - myY;
-        if (dx * dx + dy * dy > zoneSq) continue;
+        if (distanceSquared(p.x, p.y, myX, myY) > zoneSq) continue;
         const indirect = !!p.isIndirect;
         let vx = p.vx;
         let vy = p.vy;
@@ -357,7 +419,7 @@ function _clearanceFor(threats, myX, myY, mvx, mvy)
         const reach = distance(t.x, t.y, myX, myY);
         const spd = length(t.vx, t.vy);
         let maxT = TUNE.HORIZON_S;
-        if (spd > 1) maxT = Math.min(maxT, (Math.max(0, t.left) + reach) / spd);
+        if (spd > 1) maxT = LogicMath.clamp((LogicMath.max(0, t.left) + reach) / spd, 0, maxT);
         const vrx = t.vx - mvx;
         const vry = t.vy - mvy;
         const vlen = length(vrx, vry);
@@ -397,8 +459,7 @@ function _clearanceFor(threats, myX, myY, mvx, mvy)
                 dist = LogicMath.getDistanceToLine(t.x, t.y, t.x + vrx, t.y + vry, myX, myY);
             }
         }
-        const clear = dist - t.rad;
-        if (clear < minClear) minClear = clear;
+        minClear = LogicMath.min(minClear, dist - t.rad);
     }
     return minClear;
 }
@@ -415,7 +476,7 @@ function _pathsHitMe(threats, px, py)
         let endY = t.y;
         if (vlen > 1)
         {
-            span = Math.min(span, (Math.max(0, t.left) + reach) / vlen);
+            span = LogicMath.clamp((LogicMath.max(0, t.left) + reach) / vlen, 0, span);
             const end = normalize(
             {
                 x: t.vx,
@@ -509,6 +570,7 @@ export function updateAutododge()
     const prevIdx = _headingIdx >= 0 && _headingIdx < _ring.length ? _headingIdx : -1;
     const prevDir = prevIdx >= 0 ? _ring[prevIdx] : null;
     const bodyR = TUNE.WALL_BODY;
+    const paths = _threatPaths(hazards, myX, myY);
     let bestIdx = 0;
     let bestScore = -Infinity;
     let prevScore = -Infinity;
@@ -522,6 +584,7 @@ export function updateAutododge()
         }, speed | 0);
         let s = _clearanceFor(hazards, myX, myY, dirSpeed.x, dirSpeed.y);
         s -= _wallAhead(myX, myY, d, speed, bodyR);
+        if (_crossesPath(paths, myX, myY, dirSpeed.x, dirSpeed.y)) s -= TUNE.WALL_HIT;
         if (prevDir)
         {
             const turn = LogicMath.getAngleBetween(LogicMath.getAngle(d.x, d.y), LogicMath.getAngle(prevDir.x, prevDir.y));
