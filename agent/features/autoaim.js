@@ -54,6 +54,7 @@ const STEER_LEAD_FACTOR = 0.75;
 const LINEUP_BONUS = 220;
 
 var _target = null;
+var _gameTarget = null;
 var _track = new Map();
 var _projectileSpeed = 0;
 var _speedAt = 0;
@@ -412,10 +413,21 @@ function _ptrAlive(candidate) {
     return null;
 }
 
+function _enemyByPtr(candidate) {
+    if (!candidate || candidate.isNull()) return null;
+    const list = scanData.enemies || [];
+    for (let i = 0; i < list.length; i++) {
+        const e = list[i];
+        if (e && e.ptr && !e.ptr.isNull() && e.ptr.equals(candidate)) return e;
+    }
+    return null;
+}
+
 function _aimPointNow() {
     const now = Date.now();
     const live = _target ? _ptrAlive(_target.ptr) : null;
-    const enemy = live ? _target : _pickTarget(now);
+    let enemy = live ? _target : _pickTarget(now);
+    if (!enemy) enemy = _enemyByPtr(_gameTarget);
     if (!enemy) return null;
     return _aimAt(enemy, now);
 }
@@ -520,6 +532,16 @@ export function setupAutoaim() {
     try {
         enableProjectileTracking();
         onDataReload(_resetWeaponCache);
+    } catch (_) {}
+    try {
+        Interceptor.attach(base.add(offsets.BattleScreen_getClosestTargetForAutoshoot), {
+            onLeave(retval) {
+                try {
+                    if (retval.isNull()) return;
+                    _gameTarget = retval;
+                } catch (_) {}
+            }
+        });
     } catch (_) {}
     try {
         Interceptor.attach(base.add(offsets.BattleScreen_activateSkill), {
