@@ -298,10 +298,7 @@ function _updateLiveProjectiles(now)
             output.push(
             {
                 gid,
-                ptr: projectile.ptr,
-                data: projectile.data,
                 name: projectile.name,
-                ownerIndex: projectile.ownerIndex,
                 x,
                 y,
                 spawnX: projectile.spawnX,
@@ -459,9 +456,7 @@ export function updateScanner(bm, now)
                             brawlerName,
                             body,
                             teamId: team,
-                            playerIndex,
                             moveSpeed,
-                            radius: radius,
                             kind: kind
                         });
                     }

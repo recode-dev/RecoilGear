@@ -24,8 +24,6 @@ from "../utils/walls.js";
 const SPEED_REFRESH_MS = 500;
 const SKIP_NAME_PARTS = ["BALL"];
 
-const RANGE_FLIGHT_S = 1.1;
-const RANGE_MARGIN = 0.88;
 const SERVER_TICK_MS = 50;
 const MIN_TRACK_MS = 120;
 const MAX_SPEED_EST = 1600;
