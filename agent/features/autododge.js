@@ -7,7 +7,8 @@ import {
     BLOCKS_PROJECTILES,
     firstWallHit,
     isBlockedWide,
-    losCheck
+    losCheck,
+    tileSizeUnits
 } from "../utils/walls.js";
 
 const DEG = 90;
@@ -194,7 +195,6 @@ const TUNE = {
     RELEASE_GRACE_MS: 60,
     WALL_HIT: 2400,
     MIN_ROOM: 400,
-    WALL_BODY: 240,
     MERGE_MAX_RAD: 540,
     MERGE_SAME_VOLLEY: 260,
     MIN_POS: 50,
@@ -216,6 +216,10 @@ let _lastSentAt = 0;
 let _targetX = 0;
 let _targetY = 0;
 let _weakSince = 0;
+let _hitbox = 0;
+let _radiusMemoData = null;
+let _radiusMemoValue = 0;
+const BODY_SUBTILE_UNITS = 199;
 const _ring = [];
 const _options = {
     reactionSpeed: 100,
@@ -586,7 +590,7 @@ function _wallRoom(myX, myY, dir, bodyR) {
     );
     const endX = myX + step.x;
     const endY = myY + step.y;
-    const hit = firstWallHit(myX, myY, endX, endY);
+    const hit = firstWallHit(myX, myY, endX, endY, _bodySubtiles(_hitbox));
     if (hit >= 0) {
         if (hit >= maxDist) return maxDist;
         const room = hit - bodyR;
@@ -636,13 +640,10 @@ function _clearHeading() {
 export function pushDodgeTarget() {
     if (!_heading) return;
     const now = Date.now();
+    const myRadius = _hitbox > 0 ? _hitbox : scanData.myRadius;
     if (
         now - _lastDangerTs > TUNE.RELEASE_GRACE_MS &&
-        !_pathsHitMe(
-            _collectLive(scanData.myX, scanData.myY, scanData.myRadius),
-            scanData.myX,
-            scanData.myY
-        )
+        !_pathsHitMe(_collectLive(scanData.myX, scanData.myY, myRadius), scanData.myX, scanData.myY)
     )
         return;
     _push(now, scanData.myX, scanData.myY);
@@ -667,7 +668,7 @@ function _push(now, myX, myY) {
     const dx = _targetX - myX;
     const dy = _targetY - myY;
     if (dx * dx + dy * dy < TUNE.REFREEZE_DIST * TUNE.REFREEZE_DIST) {
-        const t = _anchor(myX, myY, _heading, TUNE.WALL_BODY);
+        const t = _anchor(myX, myY, _heading, _frameMargin());
         if (!t) {
             _clearHeading();
             return;
@@ -682,22 +683,40 @@ function _push(now, myX, myY) {
     _lastSentAt = now;
 }
 
-function _selfBody() {
+function characterCollisionRadius(data) {
+    if (!data || data.isNull()) return 0;
+    if (_radiusMemoData !== null && data.equals(_radiusMemoData)) return _radiusMemoValue;
+    const value = collisionRadius(data) | 0;
+    _radiusMemoData = data;
+    _radiusMemoValue = value;
+    return value;
+}
+
+function _bodySubtiles(radius) {
+    return radius > BODY_SUBTILE_UNITS ? 2 : 1;
+}
+
+function _bodyPad() {
+    return Math.floor(tileSizeUnits() / 5);
+}
+
+function learnOwnHitbox() {
     try {
         const own = scanData.ownCharacter;
-        if (own && !own.isNull()) {
-            const fns = getFunctions();
-            if (fns.LogicGameObjectClient_getData) {
-                const value = collisionRadius(fns.LogicGameObjectClient_getData(own)) | 0;
-                if (value > 0) return value;
-            }
-        }
-    } catch (_) {}
-    try {
-        const value = scanData.myRadius | 0;
-        if (value > 0) return value;
-    } catch (_) {}
-    return 60;
+        if (!own || own.isNull()) return false;
+        const fns = getFunctions();
+        if (!fns.LogicGameObjectClient_getData) return false;
+        const radius = characterCollisionRadius(fns.LogicGameObjectClient_getData(own)) | 0;
+        if (!(radius > 0)) return false;
+        _hitbox = radius;
+        return true;
+    } catch (_) {
+        return false;
+    }
+}
+
+function _frameMargin() {
+    return _hitbox + _bodyPad();
 }
 
 export function updateAutododge() {
@@ -709,7 +728,11 @@ export function updateAutododge() {
     if (Math.abs(myX) < TUNE.MIN_POS && Math.abs(myY) < TUNE.MIN_POS) return;
 
     const speed = scanData.mySpeed;
-    const myRadius = _selfBody();
+    if (!learnOwnHitbox()) {
+        _clearHeading();
+        return;
+    }
+    const myRadius = _hitbox;
     if (!(speed > 0)) {
         _clearHeading();
         return;
@@ -721,7 +744,7 @@ export function updateAutododge() {
         return;
     }
 
-    const bodyR = TUNE.WALL_BODY;
+    const bodyR = _frameMargin();
     const paths = _threatPaths(hazards, myX, myY);
     const inDanger = _pathsHitMe(hazards, myX, myY);
     if (inDanger) _lastDangerTs = now;
@@ -814,6 +837,9 @@ export function updateAutododge() {
 
 export function resetAutododge() {
     _clearHeading();
+    _hitbox = 0;
+    _radiusMemoData = null;
+    _radiusMemoValue = 0;
     _lastDangerTs = 0;
     _lastSentX = 1e9;
     _lastSentY = 1e9;

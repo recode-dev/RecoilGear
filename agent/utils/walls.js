@@ -165,14 +165,20 @@ function isBlockedAt(wx, wy, checkBit) {
     return !!(grid[ty * width + tx] & checkBit);
 }
 
-export function firstWallHit(wx0, wy0, wx1, wy1) {
+export function tileSizeUnits() {
+    return tileSize;
+}
+
+export function firstWallHit(wx0, wy0, wx1, wy1, size) {
     const fn = getFunctions().LogicGamePlayUtil_getClosestPathfinderCollision;
     if (!fn || !isValidPtr(pathFinder)) return -1;
+    const bodySize = typeof size === "number" ? size | 0 : 0;
     try {
         if (!probeOut) probeOut = Memory.alloc(8);
         probeOut.writeS32(0);
         probeOut.add(4).writeS32(0);
-        const hit = fn(0, wx0 | 0, wy0 | 0, wx1 | 0, wy1 | 0, pathFinder, probeOut, 1, 1) | 0;
+        const hit =
+            fn(bodySize, wx0 | 0, wy0 | 0, wx1 | 0, wy1 | 0, pathFinder, probeOut, 1, 1) | 0;
         const hx = probeOut.readS32() | 0;
         const hy = probeOut.add(4).readS32() | 0;
         if (!(hit & 1)) return Math.round(Math.hypot(wx1 - wx0, wy1 - wy0));
