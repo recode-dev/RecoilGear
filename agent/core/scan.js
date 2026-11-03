@@ -19,7 +19,6 @@ var _friendlyIdx = new Set();
 var _projectileHooksInstalled = false;
 var _charRange = new Map();
 var _weaponMeta = new Map();
-var _auditState = { done: false, result: null };
 var _speedByData = new Map();
 var _charsByIndex = new Map();
 
@@ -223,114 +222,6 @@ function _weaponForOwner(ownerIndex) {
     }
     _weaponMeta.set(ownerIndex, out);
     return out;
-}
-
-function _auditCheck(audit, name, fnValue, fieldValue, tol) {
-    audit.done++;
-    if (Math.abs(fnValue - fieldValue) > (tol || 0)) audit.bad.push(name);
-}
-
-function _runOffsetAudit(own, ownData, proj) {
-    const audit = { done: 0, bad: [] };
-    const fns = getFunctions();
-    const client = proj.ptr;
-    const data = proj.data;
-    const checks = [
-        [
-            "getTargetX",
-            () => fns.LogicProjectileClient_getTargetX(client),
-            () => client.add(offsets.ProjectileClient_targetX).readS32()
-        ],
-        [
-            "getTargetY",
-            () => fns.LogicProjectileClient_getTargetY(client),
-            () => client.add(offsets.ProjectileClient_targetY).readS32()
-        ],
-        [
-            "getPreExplosionTimeMs",
-            () => fns.LogicProjectileClient_getPreExplosionTimeMs(data),
-            () => data.add(offsets.ProjectileData_preExplosionMs).readS32()
-        ],
-        [
-            "isBeam",
-            () => fns.LogicProjectileClient_isBeam(data),
-            () => data.add(offsets.ProjectileData_isBeamField).readS8()
-        ],
-        [
-            "isHomingMissile",
-            () => fns.LogicProjectileClient_isHomingMissile(data),
-            () => data.add(offsets.ProjectileData_isHomingMissile).readS8()
-        ],
-        [
-            "isBouncing",
-            () => fns.LogicProjectileClient_isBouncing(data),
-            () => data.add(offsets.ProjectileData_isBouncing).readS8()
-        ],
-        [
-            "piercesEnvironment",
-            () => fns.LogicProjectileClient_piercesEnvironment(data),
-            () => data.add(offsets.ProjectileData_piercesEnvironment).readS8()
-        ],
-        [
-            "getType",
-            () => fns.LogicProjectileClient_getType(client),
-            () => client.add(offsets.ProjectileClient_typeField).readS32()
-        ],
-        [
-            "ProjectileData_getSpeed",
-            () => fns.LogicProjectileData_getSpeed(data),
-            () => data.add(offsets.ProjectileData_speedField).readS32()
-        ],
-        [
-            "ProjectileData_getRadius",
-            () => fns.LogicProjectileData_getRadius(data),
-            () => data.add(offsets.ProjectileData_radiusField).readS32()
-        ],
-        [
-            "CharacterData_getSpeed",
-            () => fns.LogicCharacterData_getSpeed(ownData),
-            () => ownData.add(offsets.CharacterData_speedField).readS32()
-        ],
-        [
-            "CharacterData_getCollisionRadius",
-            () => fns.LogicCharacterData_getCollisionRadius(ownData),
-            () => ownData.add(offsets.CharacterData_collisionRadiusField).readS32()
-        ],
-        [
-            "getMoveAngle",
-            () => fns.LogicCharacterClient_getMoveAngle(own),
-            () => own.add(offsets.CharacterClient_moveAngle).readFloat()
-        ]
-    ];
-    for (let i = 0; i < checks.length; i++) {
-        const check = checks[i];
-        audit.done++;
-        try {
-            const fnValue = check[1]();
-            const fieldValue = check[2]();
-            const tol = check[0] === "getMoveAngle" ? 0.01 : 0;
-            if (Math.abs(fnValue - fieldValue) > tol) audit.bad.push(check[0]);
-        } catch (_) {
-            audit.bad.push(check[0] + ":exception");
-        }
-    }
-    audit.done++;
-    try {
-        const ticks = fns.LogicProjectileClient_getTravelTicks(client) | 0;
-        if (ticks < 0 || ticks > 3000) audit.bad.push("getTravelTicks:range");
-    } catch (_) {
-        audit.bad.push("getTravelTicks:exception");
-    }
-    audit.done++;
-    try {
-        const startR = fns.LogicCharacterData_getProjectileStartRadius(ownData) | 0;
-        if (startR !== 50) audit.bad.push("getProjectileStartRadius:const");
-    } catch (_) {
-        audit.bad.push("getProjectileStartRadius:exception");
-    }
-    audit.ok = audit.done - audit.bad.length;
-    _auditState = { done: true, result: audit };
-    scanData.audit = audit;
 }
 
 function _readProjectileTarget(projectile, x, y) {
@@ -684,14 +575,6 @@ export function updateScanner(bm, now) {
         }
         scanData.enemies = enemies;
         scanData.projectiles = _updateLiveProjectiles(now);
-        if (!_auditState.done && ownData && _liveProjectiles.size > 0) {
-            const first = _liveProjectiles.values().next().value;
-            if (first && first.ptr && first.data) {
-                try {
-                    _runOffsetAudit(own, ownData, first);
-                } catch (_) {}
-            }
-        }
         scanData.lastUpdate = now;
     } catch (_) {}
 }
