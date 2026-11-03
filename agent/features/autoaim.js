@@ -272,7 +272,7 @@ function _aimAt(enemy, now) {
     const mx = scanData.myX;
     const my = scanData.myY;
     const speed = _ownProjectileSpeed();
-    const pred = _sample(enemy.gid, ex, ey, enemy.moveSpeed, moveAngle, now) || {
+    const pred = _sample(enemy.gid, ex, ey, enemy.moveSpeed, enemy.moveAngle, now) || {
         x: ex,
         y: ey,
         vx: 0,
