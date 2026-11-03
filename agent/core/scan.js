@@ -24,20 +24,17 @@ var _friendlyIdx = new Set();
 var _projectileHooksInstalled = false;
 var _charRange = new Map();
 var _speedByData = new Map();
-var _harvestedChars = new Set();
 var _charsByIndex = new Map();
 
 export var scanData = {
     ownCharacter: ptr(0),
     battleModeClient: ptr(0),
-    battleScreen: null,
     myTeamId: 0,
     myIndex: -1,
     myPlayerIndex: -1,
     myX: 0,
     myY: 0,
     mySpeed: 720,
-    myBrawlerName: null,
     enemies: [],
     projectiles: [],
     measuredSpeed: 0,
@@ -98,34 +95,10 @@ function _bodyOf(obj)
     return obj;
 }
 
-function _harvestCharacter(character)
-{
-    if (!isValidPtr(character)) return false;
-    const fns = getFunctions();
-    let found = false;
-    try
-    {
-        if (fns.LogicCharacterClient_getWeaponSkill)
-        {
-            const weapon = fns.LogicCharacterClient_getWeaponSkill(character);
-            if (isValidPtr(weapon))
-            {
-                if (isValidPtr(fns.LogicGameObjectClient_getData ? fns.LogicGameObjectClient_getData(character) : null)) found = true;
-            }
-        }
-    }
-    catch (_)
-    {}
-    return found;
-}
-
 function _rememberCharacter(index, character)
 {
     if (index < 0 || !isValidPtr(character)) return;
     _charsByIndex.set(index, character);
-    const key = character.toString();
-    if (_harvestedChars.has(key)) return;
-    if (_harvestCharacter(character)) _harvestedChars.add(key);
 }
 
 function _rangeForOwner(ownerIndex)
@@ -399,8 +372,6 @@ export function updateScanner(bm, now)
             }
             catch (_)
             {}
-            const nameRead = _readDataName(ownData);
-            if (nameRead) scanData.myBrawlerName = nameRead;
         }
         const enemies = [];
         const vtableProj = moduleBase.add(offsets.VTABLE_PROJECTILE_DATA);
@@ -524,7 +495,6 @@ export function resetScannerCache()
     _liveProjectiles.clear();
     _friendlyIdx.clear();
     _charsByIndex.clear();
-    _harvestedChars.clear();
     scanData.projectiles = [];
 }
 

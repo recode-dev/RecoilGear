@@ -22,8 +22,8 @@ export function setupLicense()
 {
     if (listener) return;
 
-    const off = offsets.Hook_requestBody;
-    if (typeof off !== "number" || off <= 0) throw new Error("license: missing offset Hook_requestBody");
+    const off = offsets.ByteStream__WriteBytes;
+    if (typeof off !== "number" || off <= 0) throw new Error("license: missing offset ByteStream__WriteBytes");
 
     const image = getImage();
     if (!image) throw new Error("license: image path is not initialized");

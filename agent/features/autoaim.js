@@ -333,7 +333,6 @@ export function setupAutoaim()
         {
             onEnter(args)
             {
-                scanData.battleScreen = args[0];
                 if (!_target || !_target.ptr || _target.ptr.isNull()) return;
                 const aim = _aimAt(_target, Date.now());
                 if (!aim) return;
