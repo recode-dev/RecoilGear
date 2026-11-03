@@ -83,7 +83,6 @@ export const offsets = Object.freeze({
     LogicSkillData__getCastingRange: 0x9de9cc,
     LogicSkillData__getProjectileData: 0x9e84a8,
 
-    LogicProjectileData_isBeam: 0x9b6448,
     LogicProjectileClient_getTargetX: 0x9cdaac,
     LogicProjectileClient_getTargetY: 0x9cdab4,
     LogicProjectileClient_isBeam: 0x9cda6c,

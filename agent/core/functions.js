@@ -52,7 +52,6 @@ export function initFunctions(baseIn, imageIn) {
             "pointer"
         ]),
         LogicGameObjectClient_getData: _nf("LogicGameObjectClient_getData", "pointer", ["pointer"]),
-        LogicProjectileData_isBeam: _nf("LogicProjectileData_isBeam", "uint32", ["pointer"]),
         LogicTileMap_tileToLogic: _nf("LogicTileMap_tileToLogic", "int32", ["int32"]),
         LogicGamePlayUtil_getClosestPathfinderCollision: _nf(
             "LogicGamePlayUtil_getClosestPathfinderCollision",
@@ -68,7 +67,7 @@ export function initFunctions(baseIn, imageIn) {
         LogicBattleModeClient_getTileMap: _nf("LogicBattleModeClient__getTileMap", "pointer", [
             "pointer"
         ]),
-        LogicCharacterClient_getWeaponSkill: _nf(
+        LogicCharacterClient__getWeaponSkill: _nf(
             "LogicCharacterClient__getWeaponSkill",
             "pointer",
             ["pointer"]
@@ -81,6 +80,54 @@ export function initFunctions(baseIn, imageIn) {
             "int"
         ]),
         LogicData_getName: _nf("LogicData_getName", "pointer", ["pointer"]),
+        LogicCharacterClient_getMoveAngle: _nf("LogicCharacterClient_getMoveAngle", "float", [
+            "pointer"
+        ]),
+        LogicCharacterData_getProjectileStartRadius: _nf(
+            "LogicCharacterData_getProjectileStartRadius",
+            "int32",
+            ["pointer"]
+        ),
+        LogicProjectileClient_getTargetX: _nf("LogicProjectileClient_getTargetX", "int32", [
+            "pointer"
+        ]),
+        LogicProjectileClient_getTargetY: _nf("LogicProjectileClient_getTargetY", "int32", [
+            "pointer"
+        ]),
+        LogicProjectileClient_getPreExplosionTimeMs: _nf(
+            "LogicProjectileClient_getPreExplosionTimeMs",
+            "int32",
+            ["pointer"]
+        ),
+        LogicProjectileClient_getTravelTicks: _nf("LogicProjectileClient_getTravelTicks", "int32", [
+            "pointer"
+        ]),
+        LogicProjectileClient_getType: _nf("LogicProjectileClient_getType", "int32", ["pointer"]),
+        LogicProjectileClient_isBeam: _nf("LogicProjectileClient_isBeam", "uint32", ["pointer"]),
+        LogicProjectileClient_isHomingMissile: _nf(
+            "LogicProjectileClient_isHomingMissile",
+            "uint32",
+            ["pointer"]
+        ),
+        LogicProjectileClient_isBouncing: _nf("LogicProjectileClient_isBouncing", "uint32", [
+            "pointer"
+        ]),
+        LogicProjectileClient_piercesEnvironment: _nf(
+            "LogicProjectileClient_piercesEnvironment",
+            "uint32",
+            ["pointer"]
+        ),
+        LogicProjectileData_getSpeed: _nf("LogicProjectileData_getSpeed", "int32", ["pointer"]),
+        LogicProjectileData_getRadius: _nf("LogicProjectileData_getRadius", "int32", ["pointer"]),
+        LogicSkillData_getSpread: _nf("LogicSkillData_getSpread", "int32", ["pointer"]),
+        LogicSkillData_getNumBulletsInOneAttack: _nf(
+            "LogicSkillData_getNumBulletsInOneAttack",
+            "int32",
+            ["pointer"]
+        ),
+        LogicSkillData_getMsBetweenAttacks: _nf("LogicSkillData_getMsBetweenAttacks", "int32", [
+            "pointer"
+        ]),
         operator_new: _nf("operator_new", "pointer", ["ulong"])
     };
     Object.freeze(_n);
