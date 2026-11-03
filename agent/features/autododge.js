@@ -196,14 +196,13 @@ const TUNE = {
     PROBE_N: 3,
     PROBE_T: 0.35,
     WALL_BODY: 240,
-    SEND_MIN_MS: 50,
-    SEND_MIN_DIST: 8,
-    SEND_MIN_ANG: 6,
-    SEND_REFRESH_MS: 300,
     MERGE_MAX_RAD: 540,
     MERGE_SAME_VOLLEY: 260,
     MIN_POS: 50,
-    CROSS_W: 300
+    CROSS_W: 300,
+    SWITCH_MARGIN: 80,
+    REFREEZE_DIST: 260,
+    WEAK_RELEASE_MS: 140
 };
 
 let _heading = null;
@@ -213,7 +212,9 @@ let _lastDangerTs = 0;
 let _lastSentX = 1e9;
 let _lastSentY = 1e9;
 let _lastSentAt = 0;
-let _lastSentAng = -1;
+let _targetX = 0;
+let _targetY = 0;
+let _weakSince = 0;
 const _ring = [];
 const _options = {
     reactionSpeed: 100,
@@ -246,7 +247,7 @@ function _syncTuning() {
 }
 _syncTuning();
 function _ballR(p) {
-    return p.radius > 0 ? p.radius : 100;
+    return p.radius;
 }
 
 function _traveled(p) {
@@ -305,6 +306,7 @@ function _collectLive(myX, myY, myRadius) {
             radPad = 60;
         }
         const shotR = _ballR(p);
+        if (!(shotR > 0)) continue;
         let rad = shotR + bodyR + 60 + shotR * 0.45 + radPad;
         if (p.preMs > 0) rad += LogicMath.min(80, shotR);
         if (p.bouncing) rad += 30;
@@ -617,6 +619,49 @@ function _clearHeading() {
     _heading = null;
     _headingIdx = -1;
     _holdUntil = 0;
+    _weakSince = 0;
+}
+
+export function pushDodgeTarget() {
+    if (!_heading) return;
+    const now = Date.now();
+    if (
+        now - _lastDangerTs > TUNE.RELEASE_GRACE_MS &&
+        !_pathsHitMe(
+            _collectLive(scanData.myX, scanData.myY, scanData.myRadius),
+            scanData.myX,
+            scanData.myY
+        )
+    )
+        return;
+    _push(now, scanData.myX, scanData.myY);
+}
+
+function _anchor(myX, myY, dir) {
+    const step = normalize(
+        {
+            x: dir.x,
+            y: dir.y
+        },
+        TUNE.REACH | 0
+    );
+    return { x: myX + step.x, y: myY + step.y };
+}
+
+function _push(now, myX, myY) {
+    if (!_heading) return;
+    const dx = _targetX - myX;
+    const dy = _targetY - myY;
+    if (dx * dx + dy * dy < TUNE.REFREEZE_DIST * TUNE.REFREEZE_DIST) {
+        const t = _anchor(myX, myY, _heading);
+        _targetX = t.x;
+        _targetY = t.y;
+    }
+    if (!isFinite(_targetX) || !isFinite(_targetY)) return;
+    _sendMove(scanData.battleModeClient, _targetX, _targetY);
+    _lastSentX = _targetX;
+    _lastSentY = _targetY;
+    _lastSentAt = now;
 }
 
 export function updateAutododge() {
@@ -626,23 +671,38 @@ export function updateAutododge() {
     const myY = scanData.myY;
     if (!isFinite(myX) || !isFinite(myY)) return;
     if (Math.abs(myX) < TUNE.MIN_POS && Math.abs(myY) < TUNE.MIN_POS) return;
-    const speed = scanData.mySpeed || 720;
-    const myRadius = scanData.myRadius > 0 ? scanData.myRadius : 120;
+
+    const speed = scanData.mySpeed;
+    const myRadius = scanData.myRadius;
+    if (!(speed > 0) || !(myRadius > 0)) {
+        _clearHeading();
+        return;
+    }
+
     const hazards = _collectLive(myX, myY, myRadius);
     if (hazards.length === 0) {
         if (_heading && now - _lastDangerTs > TUNE.RELEASE_GRACE_MS) _clearHeading();
         return;
     }
+
     const bodyR = TUNE.WALL_BODY;
     const paths = _threatPaths(hazards, myX, myY);
-    let stayClear = _clearanceFor(hazards, myX, myY, 0, 0);
-    if (_pathCoversPoint(paths, myX, myY, bodyR)) stayClear -= TUNE.CROSS_W;
     const inDanger = _pathsHitMe(hazards, myX, myY);
     if (inDanger) _lastDangerTs = now;
+
+    if (_heading && now < _holdUntil) {
+        _push(now, myX, myY);
+        return;
+    }
+
     if (!inDanger && (!_heading || now - _lastDangerTs > TUNE.RELEASE_GRACE_MS)) {
         if (_heading) _clearHeading();
         return;
     }
+
+    let stayClear = _clearanceFor(hazards, myX, myY, 0, 0);
+    if (_pathCoversPoint(paths, myX, myY, bodyR)) stayClear -= TUNE.CROSS_W;
+
     const prevIdx = _headingIdx >= 0 && _headingIdx < _ring.length ? _headingIdx : -1;
     const prevDir = prevIdx >= 0 ? _ring[prevIdx] : null;
     let bestIdx = 0;
@@ -673,45 +733,38 @@ export function updateAutododge() {
             bestIdx = i;
         }
     }
+
     let chosenIdx = bestIdx;
     let chosenScore = bestScore;
-    if (prevIdx >= 0 && now < _holdUntil && chosenIdx !== prevIdx) {
-        if (prevScore + TUNE.KEEP_BAND >= bestScore) {
-            chosenIdx = prevIdx;
-            chosenScore = prevScore;
-        } else {
-            _holdUntil = now + TUNE.LOCK_MS;
-        }
-    } else if (now >= _holdUntil) {
-        _holdUntil = now + TUNE.LOCK_MS;
+    if (prevIdx >= 0 && chosenIdx !== prevIdx && prevScore + TUNE.SWITCH_MARGIN >= bestScore) {
+        chosenIdx = prevIdx;
+        chosenScore = prevScore;
     }
     if (chosenScore <= stayClear) {
-        if (_heading) _clearHeading();
+        if (!_heading) return;
+        if (!_weakSince) _weakSince = now;
+        if (now - _weakSince >= TUNE.WEAK_RELEASE_MS) {
+            _clearHeading();
+            return;
+        }
+        _push(now, myX, myY);
         return;
     }
+    _weakSince = 0;
+    if (prevIdx >= 0 && chosenIdx === prevIdx) {
+        _holdUntil = now + TUNE.LOCK_MS;
+        _push(now, myX, myY);
+        return;
+    }
+
     const chosen = _ring[chosenIdx];
     _headingIdx = chosenIdx;
     _heading = chosen;
-    const step = normalize(
-        {
-            x: chosen.x,
-            y: chosen.y
-        },
-        TUNE.REACH | 0
-    );
-    const tx = myX + step.x;
-    const ty = myY + step.y;
-    if (!isFinite(tx) || !isFinite(ty)) return;
-    const heading = LogicMath.getAngle(step.x, step.y);
-    const turn = LogicMath.normalizeAngle180(heading - _lastSentAng);
-    const turned = _lastSentAng < 0 || LogicMath.abs(turn) >= TUNE.SEND_MIN_ANG;
-    const stale = now - _lastSentAt > TUNE.SEND_REFRESH_MS;
-    if (!turned && !stale) return;
-    _lastSentX = tx;
-    _lastSentY = ty;
-    _lastSentAng = heading;
-    _lastSentAt = now;
-    _sendMove(scanData.battleModeClient, tx, ty);
+    const anchor = _anchor(myX, myY, chosen);
+    _targetX = anchor.x;
+    _targetY = anchor.y;
+    _holdUntil = now + TUNE.LOCK_MS;
+    _push(now, myX, myY);
 }
 
 export function resetAutododge() {
@@ -720,7 +773,8 @@ export function resetAutododge() {
     _lastSentX = 1e9;
     _lastSentY = 1e9;
     _lastSentAt = 0;
-    _lastSentAng = -1;
+    _targetX = 0;
+    _targetY = 0;
 }
 
 export function setupAutododge() {

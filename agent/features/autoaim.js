@@ -203,9 +203,7 @@ function _ownProjectileSpeed() {
             const data =
                 skill && !skill.isNull() ? fns.LogicSkillData_getProjectileData(skill, 0) : null;
             if (data && !data.isNull()) {
-                _ownBeam = !!(
-                    fns.LogicProjectileData_isBeam && fns.LogicProjectileData_isBeam(data)
-                );
+                _ownBeam = data.add(offsets.ProjectileData_isBeamField).readU8() > 0;
                 const field = data.add(offsets.ProjectileData_speedField).readS32() | 0;
                 if (field >= 300 && field <= 8500) engineSpeed = field;
                 const passes = data.add(offsets.ProjectileData_passesEnvironment).readU8() & 1;

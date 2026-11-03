@@ -29,7 +29,7 @@ export var scanData = {
     myPlayerIndex: -1,
     myX: 0,
     myY: 0,
-    mySpeed: 720,
+    mySpeed: 0,
     myRadius: 0,
     enemies: [],
     projectiles: [],
@@ -476,7 +476,7 @@ export function updateScanner(bm, now) {
         _rememberCharacter(scanData.myPlayerIndex, own);
         scanData.myX = functions.LogicGameObjectClient_getX(own) | 0;
         scanData.myY = functions.LogicGameObjectClient_getY(own) | 0;
-        scanData.mySpeed = 720;
+        scanData.mySpeed = 0;
         const ownData = functions.LogicGameObjectClient_getData(own);
         if (isValidPtr(ownData)) {
             const getRadius = functions.LogicCharacterData_getCollisionRadius;
