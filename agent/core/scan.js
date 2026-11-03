@@ -18,6 +18,7 @@ var _liveProjectiles = new Map();
 var _friendlyIdx = new Set();
 var _projectileHooksInstalled = false;
 var _charRange = new Map();
+var _weaponMeta = new Map();
 var _speedByData = new Map();
 var _charsByIndex = new Map();
 
@@ -60,6 +61,21 @@ function _readProjectileName(value) {
         if (isValidPtr(data)) return readScString(fns.LogicData_getName(data), 128);
     } catch (_) {}
     return null;
+}
+
+function _readMoveAngle(obj) {
+    const fns = getFunctions();
+    if (fns.LogicCharacterClient_getMoveAngle) {
+        try {
+            const a = fns.LogicCharacterClient_getMoveAngle(obj);
+            if (isFinite(a) && Math.abs(a) <= Math.PI * 2) return a;
+        } catch (_) {}
+    }
+    try {
+        const a = obj.add(offsets.CharacterClient_moveAngle).readFloat();
+        if (isFinite(a) && Math.abs(a) <= Math.PI * 2) return a;
+    } catch (_) {}
+    return 0;
 }
 
 function _readOwnerIndex(obj) {
@@ -131,6 +147,75 @@ function _readProjectileFlags(data) {
     return { passes: !!passes, pierces: !!pierces };
 }
 
+function _volleyMs(weapon) {
+    if (!weapon) return 0;
+    if (weapon.bullets < 2 || weapon.msBetween <= 0) return 0;
+    const total = weapon.bullets * weapon.msBetween;
+    if (total > 0 && total <= 4000) return total;
+    return 0;
+}
+
+function _readProjectileMeta(projectile, data) {
+    const fns = getFunctions();
+    let preMs = _readProjectileField(data, offsets.ProjectileData_preExplosionMs, 1, 60000);
+    let lifeMs = 0;
+    let typeId = -1;
+    const homing = _readProjectileField(data, offsets.ProjectileData_isHomingMissile, 0, 1);
+    const bouncing = _readProjectileField(data, offsets.ProjectileData_isBouncing, 0, 1);
+    let steer = 0;
+    if (fns.LogicProjectileClient_getPreExplosionTimeMs && !(preMs > 0)) {
+        try {
+            const v = fns.LogicProjectileClient_getPreExplosionTimeMs(data) | 0;
+            if (v > 0 && v <= 60000) preMs = v;
+        } catch (_) {}
+    }
+    if (fns.LogicProjectileClient_getTravelTicks) {
+        try {
+            const ticks = fns.LogicProjectileClient_getTravelTicks(projectile) | 0;
+            if (ticks > 0 && ticks <= 3000) lifeMs = ticks * 20;
+        } catch (_) {}
+    }
+    if (fns.LogicProjectileClient_getType) {
+        try {
+            const t = fns.LogicProjectileClient_getType(projectile) | 0;
+            if (t >= 0 && t <= 20) typeId = t;
+        } catch (_) {}
+    }
+    try {
+        const v = data.add(offsets.ProjectileData_steerStrength).readFloat();
+        if (v > 0 && v <= 1000) steer = v;
+    } catch (_) {}
+    return { preMs, lifeMs, typeId, homing: !!homing, bouncing: !!bouncing, steer };
+}
+
+function _weaponForOwner(ownerIndex) {
+    if (ownerIndex < 0) return null;
+    if (_weaponMeta.has(ownerIndex)) return _weaponMeta.get(ownerIndex);
+    const owner = _charsByIndex.get(ownerIndex);
+    if (!isValidPtr(owner)) return null;
+    const fns = getFunctions();
+    const out = { spread: 0, bullets: 0, msBetween: 0 };
+    if (fns.LogicCharacterClient__getWeaponSkill && fns.LogicSkillData_getSpread) {
+        try {
+            const skill = fns.LogicCharacterClient__getWeaponSkill(owner);
+            if (isValidPtr(skill)) {
+                const bullets = fns.LogicSkillData_getNumBulletsInOneAttack
+                    ? fns.LogicSkillData_getNumBulletsInOneAttack(skill) | 0
+                    : 0;
+                const between = fns.LogicSkillData_getMsBetweenAttacks
+                    ? fns.LogicSkillData_getMsBetweenAttacks(skill) | 0
+                    : 0;
+                const spread = fns.LogicSkillData_getSpread(skill) | 0;
+                if (bullets >= 1 && bullets <= 40) out.bullets = bullets;
+                if (between >= 0 && between <= 3000) out.msBetween = between;
+                if (spread > 0 && spread <= 120) out.spread = spread;
+            }
+        } catch (_) {}
+    }
+    _weaponMeta.set(ownerIndex, out);
+    return out;
+}
+
 function _readProjectileTarget(projectile, x, y) {
     try {
         const tx = projectile.add(offsets.ProjectileClient_targetX).readS32() | 0;
@@ -176,6 +261,18 @@ function _captureProjectile(projectile, data) {
         const ownerIndex = _readOwnerIndex(projectile);
         const name = _readProjectileName(data);
         const castRange = _rangeForOwner(ownerIndex);
+        const meta = _readProjectileMeta(projectile, data);
+        let seekX = 0;
+        let seekY = 0;
+        if (meta.homing && (scanData.myX || scanData.myY)) {
+            const dx = scanData.myX - x;
+            const dy = scanData.myY - y;
+            const len = Math.sqrt(dx * dx + dy * dy);
+            if (len > 1) {
+                seekX = dx / len;
+                seekY = dy / len;
+            }
+        }
         const now = Date.now();
         _liveProjectiles.set(gid, {
             gid,
@@ -183,6 +280,8 @@ function _captureProjectile(projectile, data) {
             data,
             ownerIndex,
             name,
+            seekX,
+            seekY,
             x,
             y,
             spawnX: x,
@@ -197,6 +296,13 @@ function _captureProjectile(projectile, data) {
             isIndirect: isIndirect,
             isBeam,
             castRange,
+            preMs: meta.preMs,
+            lifeMs: meta.lifeMs,
+            typeId: meta.typeId,
+            homing: meta.homing,
+            bouncing: meta.bouncing,
+            steer: meta.steer,
+            weapon: _weaponForOwner(ownerIndex),
             lastX: x,
             lastY: y,
             lastTs: now,
@@ -315,6 +421,15 @@ function _updateLiveProjectiles(now) {
                 isIndirect: !!projectile.isIndirect,
                 isBeam: !!projectile.isBeam,
                 castRange: projectile.castRange || 0,
+                preMs: projectile.preMs || 0,
+                lifeMs: projectile.lifeMs || 0,
+                typeId: projectile.typeId,
+                homing: projectile.homing,
+                seekX: projectile.seekX,
+                seekY: projectile.seekY,
+                bouncing: projectile.bouncing,
+                steer: projectile.steer || 0,
+                volleyMs: _volleyMs(projectile.weapon),
                 ownerIndex: projectile.ownerIndex,
                 vx: projectile.vx,
                 vy: projectile.vy
@@ -430,6 +545,7 @@ export function updateScanner(bm, now) {
                             body: obj,
                             teamId: team,
                             moveSpeed,
+                            moveAngle: _readMoveAngle(obj),
                             kind: kind
                         });
                     } catch (_) {}
@@ -453,6 +569,7 @@ export function updateScanner(bm, now) {
 export function resetScannerCache() {
     _brawlerNameCache.clear();
     _charRange.clear();
+    _weaponMeta.clear();
     _liveProjectiles.clear();
     _friendlyIdx.clear();
     _charsByIndex.clear();

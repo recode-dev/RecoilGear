@@ -278,6 +278,7 @@ function _collectLive(myX, myY, myRadius) {
         if (!gid) continue;
         if (distanceSquared(p.x, p.y, myX, myY) > zoneSq) continue;
         const indirect = !!p.isIndirect;
+        let radPad = 0;
         let vx = p.vx;
         let vy = p.vy;
         if (!isFinite(vx) || !isFinite(vy)) {
@@ -298,8 +299,15 @@ function _collectLive(myX, myY, myRadius) {
             vy = (dir.y / 1000) * shotSpeed;
             spd = length(vx, vy);
         }
+        if (p.homing && spd > 1 && (p.seekX || p.seekY)) {
+            vx = p.seekX * spd;
+            vy = p.seekY * spd;
+            radPad = 60;
+        }
         const shotR = _ballR(p);
-        const rad = shotR + bodyR + 60 + shotR * 0.45;
+        let rad = shotR + bodyR + 60 + shotR * 0.45 + radPad;
+        if (p.preMs > 0) rad += LogicMath.min(80, shotR);
+        if (p.bouncing) rad += 30;
         const lockPath = !!p.isBeam;
         const blob = !lockPath && !indirect && spd < 120;
         if (blob && distance(p.x, p.y, myX, myY) > rad + 150) continue;
@@ -332,11 +340,15 @@ function _collectLive(myX, myY, myRadius) {
             )
                 continue;
         }
-        const left = _lifeLeft(p);
+        let left = _lifeLeft(p);
         if (left <= 10) continue;
         const gap = distance(p.x, p.y, myX, myY) - bodyR - shotR;
         if (left < 0.85 * Math.max(0, gap)) continue;
         if (!skipAlong && spd >= 1 && playerAlong > left + shotR) continue;
+        if (p.lifeMs > 0) left = LogicMath.min(left, p.lifeMs / 1000);
+        if (p.bouncing) left = LogicMath.min(left, 0.9);
+        if (p.preMs > 0) left += p.preMs / 1000;
+        if (p.volleyMs > 0) left += p.volleyMs / 1000;
         out.push({
             x: p.x,
             y: p.y,

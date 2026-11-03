@@ -59,7 +59,7 @@ function _isSkipped(name) {
     return false;
 }
 
-function _sample(gid, x, y, moveSpeed, now) {
+function _sample(gid, x, y, moveSpeed, moveAngle, now) {
     let track = _track.get(gid);
     if (!track) {
         track = { hist: [] };
@@ -73,10 +73,19 @@ function _sample(gid, x, y, moveSpeed, now) {
     const span = (now - first.t) / 1000;
     if (now - first.t < MIN_TRACK_MS || span <= 0) return null;
 
-    const vxWindow = (x - first.x) / span;
-    const vyWindow = (y - first.y) / span;
+    let vxWindow = (x - first.x) / span;
+    let vyWindow = (y - first.y) / span;
     const magnitude = length(vxWindow, vyWindow);
     if (magnitude < 30) return { x: x, y: y, vx: 0, vy: 0, ax: 0, ay: 0 };
+
+    if (magnitude <= 150 && typeof moveAngle === "number") {
+        const delta = ((moveAngle - Math.atan2(vyWindow, vxWindow)) * 180) / Math.PI;
+        const drift = Math.abs(((((delta + 180) % 360) + 360) % 360) - 180);
+        if (drift < 45) {
+            vxWindow = Math.cos(moveAngle) * magnitude;
+            vyWindow = Math.sin(moveAngle) * magnitude;
+        }
+    }
 
     let dx = 0;
     let dy = 0;
@@ -256,7 +265,7 @@ function _aimAt(enemy, now) {
     const mx = scanData.myX;
     const my = scanData.myY;
     const speed = _ownProjectileSpeed();
-    const pred = _sample(enemy.gid, ex, ey, enemy.moveSpeed, now) || {
+    const pred = _sample(enemy.gid, ex, ey, enemy.moveSpeed, enemy.moveAngle, now) || {
         x: ex,
         y: ey,
         vx: 0,
@@ -292,7 +301,7 @@ function _pickTarget(now) {
         if (_isSkipped(e.brawlerName)) continue;
         if ((e.teamId | 0) === myTeam) continue;
         if (!_ownPierces && losCheck(mx, my, e.x, e.y, BLOCKS_PROJECTILES) === false) continue;
-        const pred = _sample(e.gid, e.x, e.y, e.moveSpeed, now) || {
+        const pred = _sample(e.gid, e.x, e.y, e.moveSpeed, e.moveAngle, now) || {
             x: e.x,
             y: e.y,
             vx: 0,
@@ -328,7 +337,10 @@ function _pickTarget(now) {
     let pred;
     if (cur && best && curD <= bestD * STICKY_MARGIN) {
         pick = cur;
-        pred = cur.gid === best.gid ? bestPred : _sample(cur.gid, cur.x, cur.y, cur.moveSpeed, now);
+        pred =
+            cur.gid === best.gid
+                ? bestPred
+                : _sample(cur.gid, cur.x, cur.y, cur.moveSpeed, cur.moveAngle, now);
     } else {
         pick = best;
         pred = bestPred;
