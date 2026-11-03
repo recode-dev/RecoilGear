@@ -54,6 +54,7 @@ const STEER_LEAD_FACTOR = 0.75;
 const LINEUP_BONUS = 220;
 
 var _target = null;
+var _aimPtr = null;
 var _aimX = 0;
 var _aimY = 0;
 var _track = new Map();
@@ -396,6 +397,27 @@ function _lineupHits(list, mx, my, target, pocket) {
     return hits;
 }
 
+function _ptrAlive(candidate) {
+    if (!candidate || candidate.isNull()) return null;
+    const list = scanData.enemies || [];
+    for (let i = 0; i < list.length; i++) {
+        const e = list[i];
+        if (e && e.ptr && !e.ptr.isNull() && e.ptr.equals(candidate)) return e.ptr;
+    }
+    return null;
+}
+
+function _aimPointNow() {
+    const now = Date.now();
+    const live = _target ? _ptrAlive(_target.ptr) : null;
+    const enemy = live ? _target : _pickTarget(now);
+    if (!enemy) return null;
+    const aim = _aimAt(enemy, now);
+    if (!aim) return null;
+    _aimPtr = enemy.ptr;
+    return aim;
+}
+
 function _pickTarget(now) {
     const list = scanData.enemies || [];
     const myTeam = scanData.myTeamId | 0;
@@ -503,9 +525,10 @@ export function setupAutoaim() {
     try {
         Interceptor.attach(base.add(offsets.BattleScreen_getClosestTargetForAutoshoot), {
             onLeave(retval) {
-                if (!_target || !_target.ptr || _target.ptr.isNull()) return;
+                const live = _ptrAlive(_aimPtr) || _ptrAlive(_target ? _target.ptr : null);
+                if (!live) return;
                 try {
-                    retval.replace(_target.ptr);
+                    retval.replace(live);
                 } catch (_) {}
             }
         });
@@ -513,12 +536,11 @@ export function setupAutoaim() {
     try {
         Interceptor.attach(base.add(offsets.BattleScreen_activateSkill), {
             onEnter(args) {
-                if (!_target || !_target.ptr || _target.ptr.isNull()) return;
-                const aim = _aimAt(_target, Date.now());
+                const aim = _aimPointNow();
                 if (!aim) return;
                 try {
-                    this.context.x1 = aim.x | 0;
-                    this.context.x2 = aim.y | 0;
+                    args[1] = ptr(aim.x | 0);
+                    args[2] = ptr(aim.y | 0);
                 } catch (_) {}
             }
         });
