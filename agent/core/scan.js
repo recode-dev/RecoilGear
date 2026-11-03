@@ -10,6 +10,7 @@ const TICK_MS = 1000 / TICKS_PER_SEC;
 export const BEAM_TICKS = 18000;
 const DATA_ROW_OFF = 0x8;
 const COLUMN_SPAN = 48;
+const STALE_MS = 10000;
 
 function length(x, y) {
     if (x > GUARD || x < -GUARD || y > GUARD || y < -GUARD) return 46340;
@@ -729,7 +730,6 @@ function _captureProjectile(projectile, data, now) {
         if (existing) {
             existing.ptr = projectile;
             existing.data = data;
-            existing.seen = true;
             return;
         }
         const radius = _readProjectileRadius(data);
@@ -777,7 +777,6 @@ function _captureProjectile(projectile, data, now) {
             vx: 0,
             vy: 0,
             hasVelocitySample: false,
-            seen: true,
             meta: null
         };
         _liveProjectiles.set(gid, entry);
@@ -785,11 +784,17 @@ function _captureProjectile(projectile, data, now) {
 }
 
 function _removeProjectile(projectile) {
-    try {
-        const gid = String(getFunctions().LogicGameObjectClient_getGlobalID(projectile));
-        const entry = _liveProjectiles.get(gid);
-        if (entry) entry.seen = false;
-    } catch (_) {}
+    if (!isValidPtr(projectile)) return;
+    for (const [gid, entry] of _liveProjectiles) {
+        if (!entry.ptr.equals(projectile)) continue;
+        const flown = _traveled(entry, entry.lastX, entry.lastY);
+        if (flown > 0) {
+            _learnFlightRange(entry.data, flown);
+            _learnRangeBonus(entry.ownerIndex, flown + entry.radius);
+        }
+        _liveProjectiles.delete(gid);
+        return;
+    }
 }
 
 function _installTravelTicksHook(base) {
@@ -904,13 +909,7 @@ function _installProjectileHooks(base) {
                 this.projectile = args[0];
             },
             onLeave() {
-                try {
-                    const gid = String(
-                        getFunctions().LogicGameObjectClient_getGlobalID(this.projectile)
-                    );
-                    const entry = _liveProjectiles.get(gid);
-                    if (entry) entry.seen = true;
-                } catch (_) {}
+                _captureProjectile(this.projectile, null, Date.now());
             }
         });
     } catch (_) {}
@@ -970,12 +969,7 @@ function _updateLiveProjectiles(now) {
     let metaBudget = _probeBudget > 0 ? 1 : 0;
     for (const [gid, entry] of _liveProjectiles) {
         try {
-            if (!entry.seen || entry.ptr.isNull()) {
-                const flown = _traveled(entry, entry.lastX, entry.lastY);
-                if (flown > 0) {
-                    _learnFlightRange(entry.data, flown);
-                    _learnRangeBonus(entry.ownerIndex, flown + entry.radius);
-                }
+            if (now - (entry.spawnTs || now) > STALE_MS) {
                 _liveProjectiles.delete(gid);
                 continue;
             }
@@ -1120,7 +1114,6 @@ export function updateScanner(bm, now) {
             if (ownSpeed >= 300 && ownSpeed <= 3000) scanData.mySpeed = ownSpeed;
         }
         _probeBudget = 8;
-        for (const entry of _liveProjectiles.values()) entry.seen = false;
         const enemies = [];
         const vtableProj = moduleBase.add(offsets.VTABLE_PROJECTILE_DATA);
         const objMgr = bm.add(offsets.BattleModeClient_objectManager).readPointer();
