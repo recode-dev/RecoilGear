@@ -315,6 +315,7 @@ function _updateLiveProjectiles(now) {
                 isIndirect: !!projectile.isIndirect,
                 isBeam: !!projectile.isBeam,
                 castRange: projectile.castRange || 0,
+                ownerIndex: projectile.ownerIndex,
                 vx: projectile.vx,
                 vy: projectile.vy
             });

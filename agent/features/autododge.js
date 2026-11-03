@@ -198,6 +198,10 @@ const TUNE = {
     WALL_BODY: 240,
     SEND_MIN_MS: 50,
     SEND_MIN_DIST: 8,
+    SEND_MIN_ANG: 6,
+    SEND_REFRESH_MS: 300,
+    MERGE_MAX_RAD: 540,
+    MERGE_SAME_VOLLEY: 260,
     MIN_POS: 50,
     CROSS_W: 300
 };
@@ -209,6 +213,7 @@ let _lastDangerTs = 0;
 let _lastSentX = 1e9;
 let _lastSentY = 1e9;
 let _lastSentAt = 0;
+let _lastSentAng = -1;
 const _ring = [];
 const _options = {
     reactionSpeed: 100,
@@ -338,8 +343,100 @@ function _collectLive(myX, myY, myRadius) {
             vx: blob ? 0 : vx,
             vy: blob ? 0 : vy,
             rad,
-            left
+            left,
+            owner: p.ownerIndex,
+            sx: p.spawnX,
+            sy: p.spawnY
         });
+    }
+    return _mergeThreats(out, myX, myY);
+}
+
+function _mergeGroup(arr, px, py) {
+    const ref = arr[0];
+    const spd = length(ref.vx, ref.vy);
+    if (!(spd > 1)) return null;
+    const ux = ref.vx / spd;
+    const uy = ref.vy / spd;
+    const alongPlayer = (px - ref.x) * ux + (py - ref.y) * uy;
+    let lo = 0;
+    let hi = 0;
+    let left = Infinity;
+    for (let i = 0; i < arr.length; i++) {
+        const t = arr[i];
+        const alongT = (t.x - ref.x) * ux + (t.y - ref.y) * uy;
+        const forward = t.vx * ux + t.vy * uy;
+        let fx = t.x;
+        let fy = t.y;
+        if (forward > 1) {
+            const dt = (alongPlayer - alongT) / forward;
+            if (dt > 0 && dt < TUNE.HORIZON_S) {
+                fx = t.x + t.vx * dt;
+                fy = t.y + t.vy * dt;
+            }
+        }
+        const off = (fx - ref.x) * -uy + (fy - ref.y) * ux;
+        lo = LogicMath.min(lo, off - t.rad);
+        hi = LogicMath.max(hi, off + t.rad);
+        left = LogicMath.min(left, t.left);
+    }
+    const mid = (lo + hi) / 2;
+    const half = (hi - lo) / 2;
+    if (half > TUNE.MERGE_MAX_RAD) return null;
+    return {
+        x: ref.x - uy * mid,
+        y: ref.y + ux * mid,
+        vx: ref.vx,
+        vy: ref.vy,
+        rad: half,
+        left,
+        owner: ref.owner
+    };
+}
+
+function _mergeThreats(list, px, py) {
+    if (list.length < 2) return list;
+    const parent = [];
+    for (let i = 0; i < list.length; i++) parent.push(i);
+    const find = (i) => {
+        let r = i;
+        while (parent[r] !== r) r = parent[r];
+        while (parent[i] !== r) {
+            const n = parent[i];
+            parent[i] = r;
+            i = n;
+        }
+        return r;
+    };
+    const reach = TUNE.MERGE_SAME_VOLLEY * TUNE.MERGE_SAME_VOLLEY;
+    for (let i = 0; i < list.length; i++) {
+        for (let j = i + 1; j < list.length; j++) {
+            const a = list[i];
+            const b = list[j];
+            if (!(a.owner >= 0) || a.owner !== b.owner) continue;
+            if (!(length(a.vx, a.vy) > 1) || !(length(b.vx, b.vy) > 1)) continue;
+            const dx = a.sx - b.sx;
+            const dy = a.sy - b.sy;
+            if (dx * dx + dy * dy > reach) continue;
+            parent[find(i)] = find(j);
+        }
+    }
+    const groups = new Map();
+    for (let i = 0; i < list.length; i++) {
+        const root = find(i);
+        const bucket = groups.get(root);
+        if (bucket) bucket.push(list[i]);
+        else groups.set(root, [list[i]]);
+    }
+    const out = [];
+    for (const bucket of groups.values()) {
+        if (bucket.length === 1) {
+            out.push(bucket[0]);
+            continue;
+        }
+        const merged = _mergeGroup(bucket, px, py);
+        if (merged) out.push(merged);
+        else for (let i = 0; i < bucket.length; i++) out.push(bucket[i]);
     }
     return out;
 }
@@ -593,13 +690,14 @@ export function updateAutododge() {
     const tx = myX + step.x;
     const ty = myY + step.y;
     if (!isFinite(tx) || !isFinite(ty)) return;
-    const ddx = tx - _lastSentX;
-    const ddy = ty - _lastSentY;
-    const moved = ddx * ddx + ddy * ddy > TUNE.SEND_MIN_DIST * TUNE.SEND_MIN_DIST;
-    const stale = now - _lastSentAt > TUNE.SEND_MIN_MS;
-    if (!moved && !stale) return;
+    const heading = LogicMath.getAngle(step.x, step.y);
+    const turn = LogicMath.normalizeAngle180(heading - _lastSentAng);
+    const turned = _lastSentAng < 0 || LogicMath.abs(turn) >= TUNE.SEND_MIN_ANG;
+    const stale = now - _lastSentAt > TUNE.SEND_REFRESH_MS;
+    if (!turned && !stale) return;
     _lastSentX = tx;
     _lastSentY = ty;
+    _lastSentAng = heading;
     _lastSentAt = now;
     _sendMove(scanData.battleModeClient, tx, ty);
 }
@@ -610,6 +708,7 @@ export function resetAutododge() {
     _lastSentX = 1e9;
     _lastSentY = 1e9;
     _lastSentAt = 0;
+    _lastSentAng = -1;
 }
 
 export function setupAutododge() {
