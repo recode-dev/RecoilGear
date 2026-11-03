@@ -369,10 +369,11 @@ function _updateLiveProjectiles(now)
             const dt = (now - projectile.lastTs) / 1000;
             const dx = x - projectile.lastX;
             const dy = y - projectile.lastY;
-            if (dt > 0.002 && dt < 0.3 && dx * dx + dy * dy >= 16)
+            if (dt > 0.008 && dt < 0.3 && dx * dx + dy * dy >= 16)
             {
                 const observedVx = dx / dt;
                 const observedVy = dy / dt;
+                if (Math.sqrt(observedVx * observedVx + observedVy * observedVy) > 8500) continue;
                 const alpha = projectile.hasVelocitySample ? 0.4 : 1;
                 projectile.vx = projectile.vx * (1 - alpha) + observedVx * alpha;
                 projectile.vy = projectile.vy * (1 - alpha) + observedVy * alpha;

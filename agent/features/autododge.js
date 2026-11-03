@@ -114,6 +114,7 @@ function _traveled(p)
 
 function _lifeLeft(p)
 {
+    if (!(p.castRange > 0)) return Infinity;
     const flown = _traveled(p);
     return Math.max(0, p.castRange - flown);
 }
