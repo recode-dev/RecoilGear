@@ -30,7 +30,6 @@ export var scanData = {
     ownCharacter: ptr(0),
     battleModeClient: ptr(0),
     myTeamId: 0,
-    myIndex: -1,
     myPlayerIndex: -1,
     myX: 0,
     myY: 0,
@@ -301,7 +300,7 @@ function _updateLiveProjectiles(now)
                 projectile.castRange = _rangeForOwner(projectile.ownerIndex);
             }
             if (projectile.ownerIndex >= 0 && _friendlyIdx.has(projectile.ownerIndex)) continue;
-            if (projectile.ownerIndex >= 0 && projectile.ownerIndex === scanData.myIndex) continue;
+            if (projectile.ownerIndex >= 0 && projectile.ownerIndex === scanData.myPlayerIndex) continue;
             output.push(
             {
                 gid,
@@ -344,10 +343,8 @@ export function updateScanner(bm, now)
         }
         scanData.ownCharacter = own;
         scanData.battleModeClient = bm;
-        scanData.myTeamId = functions.LogicBattleModeClient_getOwnPlayerTeam(bm);
-        scanData.myIndex = functions.LogicBattleModeClient_getOwnPlayerIndex ?
-            (functions.LogicBattleModeClient_getOwnPlayerIndex(bm) | 0) : -1;
-        scanData.myPlayerIndex = functions.LogicBattleModeClient_getOwnPlayerIndex ? functions.LogicBattleModeClient_getOwnPlayerIndex(bm) | 0 : _readOwnerIndex(own);
+        scanData.myTeamId = bm.add(offsets.BattleModeClient_ownTeam).readS32();
+        scanData.myPlayerIndex = _readOwnerIndex(own);
         _friendlyIdx.clear();
         _friendlyIdx.add(scanData.myPlayerIndex);
         _charsByIndex.clear();

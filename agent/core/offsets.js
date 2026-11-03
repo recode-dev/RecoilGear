@@ -2,6 +2,7 @@ export const offsets = Object.freeze({
     BattleMode_client: 0x28,
     BattleModeClient_objectManager: 0x28,
     BattleMode_clientInputManager: 0x58,
+    BattleModeClient_ownTeam: 0xe4,
 
     ObjectManager_objectsArray: 0x0,
     ObjectManager_count: 0xc,
@@ -37,8 +38,6 @@ export const offsets = Object.freeze({
 
     BattleMode_getInstance: 0x8c5130,
     LogicBattleModeClient_getOwnCharacter: 0xac3934,
-    LogicBattleModeClient_getOwnPlayerTeam: 0xa7f47c,
-    LogicBattleModeClient__getOwnPlayerIndex: 0x9cda04,
     LogicBattleModeClient__getTileMap: 0x991440,
     LogicBattleModeClient_setClientPredictionMoveTo: 0xac3a58,
 
