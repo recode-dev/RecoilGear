@@ -98,7 +98,6 @@ export function install() {
     setupAutododge();
     setupAutoaim();
 
-    let hooked = false;
     try {
         Interceptor.attach(_base.add(offsets.LogicBattleModeClient_update), {
             onEnter(args) {
@@ -106,8 +105,6 @@ export function install() {
                 tick(args[0]);
             }
         });
-        hooked = true;
-        void hooked;
     } catch (_) {}
 
     if (!_ticker) {

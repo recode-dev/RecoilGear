@@ -1,4 +1,4 @@
-import { getBase, getFunctions } from "../core/functions.js";
+import { getBase, getFunctions, isValidPtr } from "../core/functions.js";
 import { offsets } from "../core/offsets.js";
 import { scanData } from "../core/scan.js";
 import { BLOCKS_PROJECTILES, losCheck } from "../utils/walls.js";
@@ -76,7 +76,7 @@ function _sample(gid, x, y, moveSpeed, now) {
     const vxWindow = (x - first.x) / span;
     const vyWindow = (y - first.y) / span;
     const magnitude = length(vxWindow, vyWindow);
-    if (magnitude < 30) return { x: x, y: y, vx: 0, vy: 0, ax: 0, ay: 0, juke: false };
+    if (magnitude < 30) return { x: x, y: y, vx: 0, vy: 0, ax: 0, ay: 0 };
 
     let dx = 0;
     let dy = 0;
@@ -118,7 +118,7 @@ function _sample(gid, x, y, moveSpeed, now) {
         ay = 0;
     }
 
-    return { x: x, y: y, vx: vx, vy: vy, ax: ax, ay: ay, juke: false };
+    return { x: x, y: y, vx: vx, vy: vy, ax: ax, ay: ay };
 }
 
 function _flightTime(rx, ry, vx, vy, speed) {
@@ -246,7 +246,7 @@ function _ownRange() {
 function _aimAt(enemy, now) {
     if (!enemy || !enemy.ptr || enemy.ptr.isNull()) return null;
     const fns = getFunctions();
-    const target = _validEnemyPtr(enemy.body) ? enemy.body : enemy.ptr;
+    const target = isValidPtr(enemy.body) ? enemy.body : enemy.ptr;
     let ex = enemy.x;
     let ey = enemy.y;
     try {
@@ -262,16 +262,11 @@ function _aimAt(enemy, now) {
         vx: 0,
         vy: 0,
         ax: 0,
-        ay: 0,
-        juke: false
+        ay: 0
     };
     const aim = _solve(mx, my, pred, speed, _ownRange());
     if (!aim) return null;
     return aim;
-}
-
-function _validEnemyPtr(p) {
-    return p && !p.isNull();
 }
 
 function _pickTarget(now) {
@@ -303,12 +298,11 @@ function _pickTarget(now) {
             vx: 0,
             vy: 0,
             ax: 0,
-            ay: 0,
-            juke: false
+            ay: 0
         };
         const d = distance(e.x, e.y, mx, my);
         if (range > 0 && d > range) continue;
-        if (!pred.juke && d < calmD) {
+        if (d < calmD) {
             calmD = d;
             calm = e;
             calmPred = pred;

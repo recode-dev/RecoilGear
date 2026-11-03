@@ -271,7 +271,6 @@ function _collectLive(myX, myY, myRadius) {
         if (!p) continue;
         const gid = p.gid;
         if (!gid) continue;
-        const name = p.name || "";
         if (distanceSquared(p.x, p.y, myX, myY) > zoneSq) continue;
         const indirect = !!p.isIndirect;
         let vx = p.vx;
@@ -339,9 +338,7 @@ function _collectLive(myX, myY, myRadius) {
             vx: blob ? 0 : vx,
             vy: blob ? 0 : vy,
             rad,
-            pathLen: left + shotR,
-            left,
-            name
+            left
         });
     }
     return out;
@@ -395,29 +392,28 @@ function _clearanceFor(threats, myX, myY, mvx, mvy) {
     return minClear;
 }
 
+function _pathEnd(t, px, py) {
+    const vlen = length(t.vx, t.vy);
+    if (!(vlen > 1)) return null;
+    const reach = distance(t.x, t.y, px, py);
+    const span = LogicMath.clamp((LogicMath.max(0, t.left) + reach) / vlen, 0, TUNE.HORIZON_S);
+    const end = normalize(
+        {
+            x: t.vx,
+            y: t.vy
+        },
+        (vlen * span) | 0
+    );
+    return { x: t.x + end.x, y: t.y + end.y };
+}
+
 function _pathsHitMe(threats, px, py) {
     for (let i = 0; i < threats.length; i++) {
         const t = threats[i];
-        const vlen = length(t.vx, t.vy);
-        const reach = distance(t.x, t.y, px, py);
-        let span = TUNE.HORIZON_S;
-        let endX = t.x;
-        let endY = t.y;
-        if (vlen > 1) {
-            span = LogicMath.clamp((LogicMath.max(0, t.left) + reach) / vlen, 0, span);
-            const end = normalize(
-                {
-                    x: t.vx,
-                    y: t.vy
-                },
-                (vlen * span) | 0
-            );
-            endX = t.x + end.x;
-            endY = t.y + end.y;
-        }
-        if (segmentHitsCircle(t.x, t.y, endX, endY, px, py, t.rad + TUNE.ENGAGE)) {
-            return true;
-        }
+        const end = _pathEnd(t, px, py);
+        const endX = end ? end.x : t.x;
+        const endY = end ? end.y : t.y;
+        if (segmentHitsCircle(t.x, t.y, endX, endY, px, py, t.rad + TUNE.ENGAGE)) return true;
     }
     return false;
 }
@@ -426,22 +422,13 @@ function _threatPaths(threats, px, py) {
     const out = [];
     for (let i = 0; i < threats.length; i++) {
         const t = threats[i];
-        const vlen = length(t.vx, t.vy);
-        if (vlen < 1) continue;
-        const reach = distance(t.x, t.y, px, py);
-        const span = LogicMath.clamp((LogicMath.max(0, t.left) + reach) / vlen, 0, TUNE.HORIZON_S);
-        const end = normalize(
-            {
-                x: t.vx,
-                y: t.vy
-            },
-            (vlen * span) | 0
-        );
+        const end = _pathEnd(t, px, py);
+        if (!end) continue;
         out.push({
             x1: t.x,
             y1: t.y,
-            x2: t.x + end.x,
-            y2: t.y + end.y
+            x2: end.x,
+            y2: end.y
         });
     }
     return out;

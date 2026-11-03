@@ -70,10 +70,6 @@ function _readOwnerIndex(obj) {
     }
 }
 
-function _bodyOf(obj) {
-    return obj;
-}
-
 function _rememberCharacter(index, character) {
     if (index < 0 || !isValidPtr(character)) return;
     _charsByIndex.set(index, character);
@@ -192,7 +188,6 @@ function _captureProjectile(projectile, data) {
             spawnX: x,
             spawnY: y,
             speed: dataSpeed,
-            dataSpeed,
             radius,
             targetX: target ? target.x : 0,
             targetY: target ? target.y : 0,
@@ -275,7 +270,7 @@ function _updateLiveProjectiles(now) {
                     projectile.speed = measured;
                     if (projectile.ownerIndex === scanData.myPlayerIndex) {
                         const dataPtr = projectile.data;
-                        if (dataPtr && dataPtr.isNull && !dataPtr.isNull()) {
+                        if (isValidPtr(dataPtr)) {
                             const key = dataPtr.toString();
                             const entry = _speedByData.get(key) || { sum: 0, count: 0 };
                             entry.sum += measured;
@@ -310,7 +305,7 @@ function _updateLiveProjectiles(now) {
                 y,
                 spawnX: projectile.spawnX,
                 spawnY: projectile.spawnY,
-                speed: projectile.speed || projectile.dataSpeed,
+                speed: projectile.speed,
                 radius: projectile.radius,
                 targetX: projectile.targetX,
                 targetY: projectile.targetY,
@@ -350,14 +345,8 @@ export function updateScanner(bm, now) {
         _friendlyIdx.add(scanData.myPlayerIndex);
         _charsByIndex.clear();
         _rememberCharacter(scanData.myPlayerIndex, own);
-        try {
-            const self = _bodyOf(own);
-            scanData.myX = functions.LogicGameObjectClient_getX(self) | 0;
-            scanData.myY = functions.LogicGameObjectClient_getY(self) | 0;
-        } catch (_) {
-            scanData.myX = functions.LogicGameObjectClient_getX(own) | 0;
-            scanData.myY = functions.LogicGameObjectClient_getY(own) | 0;
-        }
+        scanData.myX = functions.LogicGameObjectClient_getX(own) | 0;
+        scanData.myY = functions.LogicGameObjectClient_getY(own) | 0;
         scanData.mySpeed = 720;
         const ownData = functions.LogicGameObjectClient_getData(own);
         if (isValidPtr(ownData)) {
@@ -431,14 +420,13 @@ export function updateScanner(bm, now) {
                         } catch (_) {}
                         const playerIndex = _readOwnerIndex(obj);
                         if (brawlerName) _rememberCharacter(playerIndex, obj);
-                        const body = _bodyOf(obj);
                         enemies.push({
                             gid,
                             ptr: obj,
-                            x: functions.LogicGameObjectClient_getX(body) | 0,
-                            y: functions.LogicGameObjectClient_getY(body) | 0,
+                            x: functions.LogicGameObjectClient_getX(obj) | 0,
+                            y: functions.LogicGameObjectClient_getY(obj) | 0,
                             brawlerName,
-                            body,
+                            body: obj,
                             teamId: team,
                             moveSpeed,
                             kind: kind
