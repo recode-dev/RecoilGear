@@ -359,11 +359,23 @@ function _steerActive(p) {
     return true;
 }
 
+function _pushLane(lanes, x, y, vx, vy, left) {
+    const end = _sweptEnd(x, y, vx, vy, left);
+    if (!end) return;
+    lanes.push({
+        x1: x,
+        y1: y,
+        x2: end.x,
+        y2: end.y
+    });
+}
+
 function _collectLive(myX, myY, myRadius, now) {
     const out = [];
+    const lanes = [];
     const shots = scanData.projectiles;
     if (!shots || shots.length === 0) {
-        return out;
+        return { threats: out, lanes: lanes };
     }
     const zoneSq = TUNE.AWARE * TUNE.AWARE;
     const bodyR = myRadius + TUNE.SKIN;
@@ -460,8 +472,12 @@ function _collectLive(myX, myY, myRadius, now) {
                 left = LogicMath.min(left, TUNE.HORIZON_S * travel);
         }
         // Ignore what cannot touch me: a shot that passes to my left/right without grazing
-        // the hitbox, or one whose range ends before it reaches me.
-        if (!_reachesMe(p, myX, myY, bodyR, shotR, vx, vy, left)) continue;
+        // the hitbox, or one whose range ends before it reaches me. Its lane is still kept
+        // so that an active dodge never steps into it.
+        if (!_reachesMe(p, myX, myY, bodyR, shotR, vx, vy, left)) {
+            _pushLane(lanes, p.x, p.y, blob ? 0 : vx, blob ? 0 : vy, left);
+            continue;
+        }
         out.push({
             x: p.x,
             y: p.y,
@@ -475,7 +491,7 @@ function _collectLive(myX, myY, myRadius, now) {
             sy: p.spawnY
         });
     }
-    return _mergeThreats(out, myX, myY);
+    return { threats: _mergeThreats(out, myX, myY), lanes: lanes };
 }
 
 function _mergeGroup(arr, px, py) {
@@ -744,7 +760,7 @@ export function pushDodgeTarget() {
     if (
         now - _lastDangerTs > TUNE.RELEASE_GRACE_MS &&
         !_pathsHitMe(
-            _collectLive(scanData.myX, scanData.myY, myRadius, now),
+            _collectLive(scanData.myX, scanData.myY, myRadius, now).threats,
             scanData.myX,
             scanData.myY
         )
@@ -842,7 +858,8 @@ export function updateAutododge() {
         return;
     }
 
-    const hazards = _collectLive(myX, myY, myRadius, now);
+    const live = _collectLive(myX, myY, myRadius, now);
+    const hazards = live.threats;
     if (hazards.length === 0) {
         if (_heading && now - _lastDangerTs > TUNE.RELEASE_GRACE_MS) _clearHeading();
         return;
@@ -850,6 +867,7 @@ export function updateAutododge() {
 
     const bodyR = _frameMargin();
     const paths = _threatPaths(hazards);
+    const lanes = live.lanes;
     const inDanger = _pathsHitMe(hazards, myX, myY);
     if (inDanger) _lastDangerTs = now;
 
@@ -888,6 +906,7 @@ export function updateAutododge() {
         let s = _clearanceFor(hazards, myX, myY, dirSpeed.x, dirSpeed.y);
         s -= (TUNE.WALL_HIT * (TUNE.REACH - room)) / TUNE.REACH;
         if (_crossesPath(paths, myX, myY, dirSpeed.x, dirSpeed.y)) s -= TUNE.CROSS_W;
+        else if (_crossesPath(lanes, myX, myY, dirSpeed.x, dirSpeed.y)) s -= TUNE.CROSS_W >> 1;
         if (prevDir) {
             const turn = LogicMath.getAngleBetween(
                 LogicMath.getAngle(d.x, d.y),
