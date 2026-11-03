@@ -44,8 +44,6 @@ export function initFunctions(baseIn, imageIn)
         LogicBattleModeClient_getOwnPlayerTeam: _nf("LogicBattleModeClient_getOwnPlayerTeam", "uint32", ["pointer"]),
         LogicBattleModeClient_getOwnPlayerIndex: _nf("LogicBattleModeClient__getOwnPlayerIndex", "int32", ["pointer"]),
         LogicGameObjectClient_getData: _nf("LogicGameObjectClient_getData", "pointer", ["pointer"]),
-        LogicProjectileData_getRadius: _nf("LogicProjectileData_getRadius", "uint32", ["pointer"]),
-        LogicProjectileData_getNumEarlyTicks: _nf("LogicProjectileData_getNumEarlyTicks", "uint32", ["pointer"]),
         LogicProjectileData_isBeam: _nf("LogicProjectileData_isBeam", "uint32", ["pointer"]),
         LogicCharacterData_getSpeed: _nf("LogicCharacterData_getSpeed", "int32", ["pointer"]),
         LogicCharacterData_getCollisionRadius: _nf("LogicCharacterData_getCollisionRadius", "uint32", ["pointer"]),
@@ -53,9 +51,7 @@ export function initFunctions(baseIn, imageIn)
         LogicCharacterClient_getWeaponSkill: _nf("LogicCharacterClient__getWeaponSkill", "pointer", ["pointer"]),
         LogicSkillData_getCastingRange: _nf("LogicSkillData__getCastingRange", "int32", ["pointer"]),
         LogicSkillData_getProjectileData: _nf("LogicSkillData__getProjectileData", "pointer", ["pointer", "int"]),
-        LogicSkillClient_getData: _nf("LogicSkillClient__getData", "pointer", ["pointer", "int"]),
         LogicData_getName: _nf("LogicData_getName", "pointer", ["pointer"]),
-        LogicCharacterClient_getSkillAt: _nf("LogicCharacterClient__getSkillAt", "pointer", ["pointer", "int"]),
         operator_new: _nf("operator_new", "pointer", ["ulong"]),
     };
     Object.freeze(_n);

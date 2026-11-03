@@ -15,9 +15,6 @@ export const offsets = Object.freeze({
     GameObj_hp: 0xc4,
     LogicGameObjectClient_ownerIndex: 0x3c,
 
-    LogicData_globalId: 0x20,
-
-    LogicProjectileClient_ownerTeam: 0x40,
     ProjectileClient_data: 0x10,
     Projectile_isIndirect: 0x118,
     ProjectileData_radius: 0x74,
@@ -56,14 +53,10 @@ export const offsets = Object.freeze({
     LogicCharacterData_getSpeed: 0x9911ec,
     LogicCharacterData_getCollisionRadius: 0x9913e8,
     LogicCharacterClient__getWeaponSkill: 0x9fc440,
-    LogicCharacterClient__getSkillAt: 0xa007fc,
 
-    LogicSkillClient__getData: 0x1e5650,
     LogicSkillData__getCastingRange: 0x9de9cc,
     LogicSkillData__getProjectileData: 0x9e84a8,
 
-    LogicProjectileData_getRadius: 0x860d88,
-    LogicProjectileData_getNumEarlyTicks: 0x979d50,
     LogicProjectileData_isBeam: 0x9b6448,
 
     LogicData_getName: 0x9a4f1c,

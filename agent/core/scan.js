@@ -22,7 +22,6 @@ var _activeGidSet = new Set();
 var _liveProjectiles = new Map();
 var _friendlyIdx = new Set();
 var _projectileHooksInstalled = false;
-var SKILL_SLOT_MAX = 8;
 var _charRange = new Map();
 var _speedByData = new Map();
 var _harvestedChars = new Set();
@@ -44,20 +43,6 @@ export var scanData = {
     measuredSpeed: 0,
     lastUpdate: 0
 };
-
-function _earlyTicks(fns, data)
-{
-    try
-    {
-        if (fns.LogicProjectileData_getNumEarlyTicks && data && !data.isNull())
-        {
-            return fns.LogicProjectileData_getNumEarlyTicks(data) | 0;
-        }
-    }
-    catch (_)
-    {}
-    return 0;
-}
 
 function _readDataName(data)
 {
@@ -113,23 +98,6 @@ function _bodyOf(obj)
     return obj;
 }
 
-function _ownerNameByIndex(ownerIndex)
-{
-    if (ownerIndex < 0) return null;
-    if (ownerIndex === scanData.myPlayerIndex && scanData.myBrawlerName)
-    {
-        return scanData.myBrawlerName;
-    }
-    for (const enemy of scanData.enemies)
-    {
-        if (enemy.playerIndex === ownerIndex && enemy.brawlerName)
-        {
-            return enemy.brawlerName;
-        }
-    }
-    return null;
-}
-
 function _harvestCharacter(character)
 {
     if (!isValidPtr(character)) return false;
@@ -148,23 +116,6 @@ function _harvestCharacter(character)
     }
     catch (_)
     {}
-    if (!fns.LogicCharacterClient_getSkillAt || !fns.LogicSkillClient_getData) return found;
-    for (let slot = 0; slot < SKILL_SLOT_MAX; slot++)
-    {
-        try
-        {
-            const skill = fns.LogicCharacterClient_getSkillAt(character, slot);
-            if (!isValidPtr(skill)) continue;
-            for (let hyper = 0; hyper < 2; hyper++)
-            {
-                const data = fns.LogicSkillClient_getData(skill, hyper);
-                if (!isValidPtr(data)) continue;
-                found = true;
-            }
-        }
-        catch (_)
-        {}
-    }
     return found;
 }
 
@@ -203,7 +154,7 @@ function _rangeForOwner(ownerIndex)
     return units;
 }
 
-function _captureProjectile(projectile, data, ownerTeamOverride)
+function _captureProjectile(projectile, data)
 {
     if (!isValidPtr(projectile)) return;
     const fns = getFunctions();
@@ -217,15 +168,12 @@ function _captureProjectile(projectile, data, ownerTeamOverride)
         {
             existing.ptr = projectile;
             existing.data = data;
-            if (ownerTeamOverride !== void 0) existing.ownerTeam = ownerTeamOverride | 0;
             return;
         }
         const x = fns.LogicGameObjectClient_getX(projectile) | 0;
         const y = fns.LogicGameObjectClient_getY(projectile) | 0;
         const speed = 0;
-        const radius = Math.max(0, offsets.ProjectileData_radius
-            ? data.add(offsets.ProjectileData_radius).readU32() | 0
-            : (fns.LogicProjectileData_getRadius ? fns.LogicProjectileData_getRadius(data) | 0 : 0));
+        const radius = Math.max(0, data.add(offsets.ProjectileData_radius).readU32() | 0);
         let isIndirect = 0;
         try
         {
@@ -243,29 +191,16 @@ function _captureProjectile(projectile, data, ownerTeamOverride)
         }
         catch (_)
         {}
-        let ownerTeam = ownerTeamOverride === void 0 ? 0 : ownerTeamOverride | 0;
-        if (ownerTeamOverride === void 0)
-        {
-            try
-            {
-                ownerTeam = projectile.add(offsets.LogicProjectileClient_ownerTeam).readU32() | 0;
-            }
-            catch (_)
-            {}
-        }
         const ownerIndex = _readOwnerIndex(projectile);
         const name = _readProjectileName(data);
         const castRange = _rangeForOwner(ownerIndex);
-        const earlyTicks = _earlyTicks(fns, data);
         const now = Date.now();
         _liveProjectiles.set(gid,
         {
             gid,
             ptr: projectile,
             data,
-            ownerTeam,
             ownerIndex,
-            ownerName: _ownerNameByIndex(ownerIndex),
             name,
             x,
             y,
@@ -276,8 +211,6 @@ function _captureProjectile(projectile, data, ownerTeamOverride)
             isIndirect: isIndirect,
             isBeam,
             castRange,
-            spawnedAt: now - earlyTicks * 16,
-            earlyTicks,
             lastX: x,
             lastY: y,
             lastTs: now,
@@ -383,7 +316,6 @@ function _updateLiveProjectiles(now)
             projectile.lastX = x;
             projectile.lastY = y;
             projectile.lastTs = now;
-            projectile.ownerName = _ownerNameByIndex(projectile.ownerIndex);
             if (projectile.castRange <= 0)
             {
                 projectile.castRange = _rangeForOwner(projectile.ownerIndex);
@@ -396,9 +328,7 @@ function _updateLiveProjectiles(now)
                 ptr: projectile.ptr,
                 data: projectile.data,
                 name: projectile.name,
-                ownerTeam: projectile.ownerTeam,
                 ownerIndex: projectile.ownerIndex,
-                ownerName: projectile.ownerName,
                 x,
                 y,
                 spawnX: projectile.spawnX,
@@ -408,7 +338,6 @@ function _updateLiveProjectiles(now)
                 isIndirect: !!projectile.isIndirect,
                 isBeam: !!projectile.isBeam,
                 castRange: projectile.castRange || 0,
-                spawnedAt: projectile.spawnedAt,
                 vx: projectile.vx,
                 vy: projectile.vy
             });
@@ -514,7 +443,7 @@ export function updateScanner(bm, now)
                         const team = obj.add(offsets.GameObj_team).readU32();
                         if (data.readPointer().equals(vtableProj))
                         {
-                        _captureProjectile(obj, data, team);
+                        _captureProjectile(obj, data);
                             continue;
                         }
                         if (team === scanData.myTeamId)
@@ -549,16 +478,6 @@ export function updateScanner(bm, now)
                         {}
                         const playerIndex = _readOwnerIndex(obj);
                         if (brawlerName) _rememberCharacter(playerIndex, obj);
-                        let brawlerId = 0;
-                        if (brawlerName)
-                        {
-                            try
-                            {
-                                brawlerId = data.add(offsets.LogicData_globalId).readU32() | 0;
-                            }
-                            catch (_)
-                            {}
-                        }
                         const body = _bodyOf(obj);
                         enemies.push(
                         {
@@ -566,7 +485,6 @@ export function updateScanner(bm, now)
                             ptr: obj,
                             x: functions.LogicGameObjectClient_getX(body) | 0,
                             y: functions.LogicGameObjectClient_getY(body) | 0,
-                            brawlerId,
                             brawlerName,
                             body,
                             teamId: team,
