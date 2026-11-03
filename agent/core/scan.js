@@ -104,8 +104,8 @@ function _rangeForOwner(ownerIndex) {
     if (!fns.LogicSkillData_getCastingRange) return 0;
 
     let units = 0;
-    if (fns.LogicCharacterClient__getWeaponSkill) {
-        const skill = fns.LogicCharacterClient__getWeaponSkill(owner);
+    if (fns.LogicCharacterClient_getWeaponSkill) {
+        const skill = fns.LogicCharacterClient_getWeaponSkill(owner);
         if (isValidPtr(skill)) {
             try {
                 const v = fns.LogicSkillData_getCastingRange(skill) | 0;
@@ -203,9 +203,9 @@ function _weaponForOwner(ownerIndex) {
     if (!isValidPtr(owner)) return null;
     const fns = getFunctions();
     const out = { spread: 0, bullets: 0, msBetween: 0 };
-    if (fns.LogicCharacterClient__getWeaponSkill && fns.LogicSkillData_getSpread) {
+    if (fns.LogicCharacterClient_getWeaponSkill && fns.LogicSkillData_getSpread) {
         try {
-            const skill = fns.LogicCharacterClient__getWeaponSkill(owner);
+            const skill = fns.LogicCharacterClient_getWeaponSkill(owner);
             if (isValidPtr(skill)) {
                 const bullets = fns.LogicSkillData_getNumBulletsInOneAttack
                     ? fns.LogicSkillData_getNumBulletsInOneAttack(skill) | 0

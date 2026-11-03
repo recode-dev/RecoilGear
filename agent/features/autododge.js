@@ -185,16 +185,15 @@ const TUNE = {
     AWARE: 3200,
     DIR_COUNT: 40,
     SKIN: 50,
-    LOCK_MS: 60,
+    LOCK_MS: 40,
     REACH: 1200,
     HORIZON_S: 1.4,
     KEEP_BAND: 250,
     MOMENTUM: 150,
     ENGAGE: 100,
     RELEASE_GRACE_MS: 60,
-    WALL_HIT: 9000,
-    PROBE_N: 3,
-    PROBE_T: 0.35,
+    WALL_HIT: 2400,
+    MIN_ROOM: 400,
     WALL_BODY: 240,
     MERGE_MAX_RAD: 540,
     MERGE_SAME_VOLLEY: 260,
@@ -202,6 +201,8 @@ const TUNE = {
     CROSS_W: 300,
     SWITCH_MARGIN: 80,
     REFREEZE_DIST: 260,
+    ENGAGE_S: 1.15,
+    ENGAGE_NEAR: 700,
     WEAK_RELEASE_MS: 140
 };
 
@@ -237,7 +238,7 @@ function _buildRing() {
 
 function _syncTuning() {
     const t = Math.max(0, Math.min(100, _options.reactionSpeed)) / 100;
-    TUNE.LOCK_MS = Math.max(60, Math.round(120 - t * 60));
+    TUNE.LOCK_MS = Math.max(40, Math.round(80 - t * 40));
     const n = Math.max(8, Math.min(128, _options.directionPrecision | 0));
     if (n !== TUNE.DIR_COUNT) {
         TUNE.DIR_COUNT = n;
@@ -346,6 +347,12 @@ function _collectLive(myX, myY, myRadius) {
         if (left <= 10) continue;
         const gap = distance(p.x, p.y, myX, myY) - bodyR - shotR;
         if (left < 0.85 * Math.max(0, gap)) continue;
+        if (!_heading) {
+            const travel = spd >= 1 ? spd : p.speed > 0 ? p.speed : 0;
+            if (travel > 0) {
+                if (gap / travel > TUNE.ENGAGE_S) continue;
+            } else if (gap > TUNE.ENGAGE_NEAR) continue;
+        }
         if (!skipAlong && spd >= 1 && playerAlong > left + shotR) continue;
         if (p.lifeMs > 0) left = LogicMath.min(left, p.lifeMs / 1000);
         if (p.bouncing) left = LogicMath.min(left, 0.9);
@@ -568,38 +575,42 @@ function _crossesPath(paths, px, py, stepX, stepY) {
     return false;
 }
 
-function _wallAhead(myX, myY, dir, speed, bodyR) {
-    const reach = speed * TUNE.PROBE_T * TUNE.PROBE_N;
+function _wallRoom(myX, myY, dir, bodyR) {
+    const maxDist = TUNE.REACH;
     const step = normalize(
         {
             x: dir.x,
             y: dir.y
         },
-        reach | 0
+        maxDist | 0
     );
-    const hit = firstWallHit(myX, myY, myX + step.x, myY + step.y);
+    const endX = myX + step.x;
+    const endY = myY + step.y;
+    const hit = firstWallHit(myX, myY, endX, endY);
     if (hit >= 0) {
-        if (hit >= reach) return 0;
-        const room = LogicMath.clamp(hit / reach, 0, 1);
-        return TUNE.WALL_HIT * (1 - room) * TUNE.PROBE_N;
+        if (hit >= maxDist) return maxDist;
+        const room = hit - bodyR;
+        return room > TUNE.MIN_ROOM ? room : 0;
     }
-    let raw = 0;
-    for (let s = 1; s <= TUNE.PROBE_N; s++) {
-        const probe = normalize(
+    if (!isBlockedWide(endX, endY, bodyR, BLOCKS_MOVEMENT)) return maxDist;
+    let lo = 0;
+    let hi = maxDist;
+    for (let i = 0; i < 6; i++) {
+        const mid = (lo + hi) / 2;
+        const p = normalize(
             {
                 x: dir.x,
                 y: dir.y
             },
-            (speed * TUNE.PROBE_T * s) | 0
+            mid | 0
         );
-        const px = myX + probe.x;
-        const py = myY + probe.y;
-        if (isBlockedWide(px, py, bodyR, BLOCKS_MOVEMENT)) {
-            raw += TUNE.WALL_HIT * (TUNE.PROBE_N - s + 1);
-        }
+        if (isBlockedWide(myX + p.x, myY + p.y, bodyR, BLOCKS_MOVEMENT)) hi = mid;
+        else lo = mid;
     }
-    return raw;
+    const room = lo - bodyR;
+    return room > TUNE.MIN_ROOM ? room : 0;
 }
+
 function _sendMove(logic, tx, ty) {
     if (!logic || logic.isNull()) return false;
     if (!isFinite(tx) || !isFinite(ty)) return false;
@@ -637,13 +648,16 @@ export function pushDodgeTarget() {
     _push(now, scanData.myX, scanData.myY);
 }
 
-function _anchor(myX, myY, dir) {
+function _anchor(myX, myY, dir, bodyR) {
+    const room = _wallRoom(myX, myY, dir, bodyR);
+    if (room <= 0) return null;
+    const dist = room < TUNE.REACH ? room : TUNE.REACH;
     const step = normalize(
         {
             x: dir.x,
             y: dir.y
         },
-        TUNE.REACH | 0
+        dist | 0
     );
     return { x: myX + step.x, y: myY + step.y };
 }
@@ -653,7 +667,11 @@ function _push(now, myX, myY) {
     const dx = _targetX - myX;
     const dy = _targetY - myY;
     if (dx * dx + dy * dy < TUNE.REFREEZE_DIST * TUNE.REFREEZE_DIST) {
-        const t = _anchor(myX, myY, _heading);
+        const t = _anchor(myX, myY, _heading, TUNE.WALL_BODY);
+        if (!t) {
+            _clearHeading();
+            return;
+        }
         _targetX = t.x;
         _targetY = t.y;
     }
@@ -717,8 +735,13 @@ export function updateAutododge() {
             },
             speed | 0
         );
+        const room = _wallRoom(myX, myY, d, bodyR);
+        if (room <= 0) {
+            if (i === prevIdx) prevScore = -Infinity;
+            continue;
+        }
         let s = _clearanceFor(hazards, myX, myY, dirSpeed.x, dirSpeed.y);
-        s -= _wallAhead(myX, myY, d, speed, bodyR);
+        s -= (TUNE.WALL_HIT * (TUNE.REACH - room)) / TUNE.REACH;
         if (_crossesPath(paths, myX, myY, dirSpeed.x, dirSpeed.y)) s -= TUNE.CROSS_W;
         if (prevDir) {
             const turn = LogicMath.getAngleBetween(
@@ -760,7 +783,11 @@ export function updateAutododge() {
     const chosen = _ring[chosenIdx];
     _headingIdx = chosenIdx;
     _heading = chosen;
-    const anchor = _anchor(myX, myY, chosen);
+    const anchor = _anchor(myX, myY, chosen, bodyR);
+    if (!anchor) {
+        _clearHeading();
+        return;
+    }
     _targetX = anchor.x;
     _targetY = anchor.y;
     _holdUntil = now + TUNE.LOCK_MS;

@@ -67,7 +67,7 @@ export function initFunctions(baseIn, imageIn) {
         LogicBattleModeClient_getTileMap: _nf("LogicBattleModeClient__getTileMap", "pointer", [
             "pointer"
         ]),
-        LogicCharacterClient__getWeaponSkill: _nf(
+        LogicCharacterClient_getWeaponSkill: _nf(
             "LogicCharacterClient__getWeaponSkill",
             "pointer",
             ["pointer"]
@@ -83,17 +83,6 @@ export function initFunctions(baseIn, imageIn) {
         LogicCharacterClient_getMoveAngle: _nf("LogicCharacterClient_getMoveAngle", "float", [
             "pointer"
         ]),
-        LogicCharacterData_getProjectileStartRadius: _nf(
-            "LogicCharacterData_getProjectileStartRadius",
-            "int32",
-            ["pointer"]
-        ),
-        LogicProjectileClient_getTargetX: _nf("LogicProjectileClient_getTargetX", "int32", [
-            "pointer"
-        ]),
-        LogicProjectileClient_getTargetY: _nf("LogicProjectileClient_getTargetY", "int32", [
-            "pointer"
-        ]),
         LogicProjectileClient_getPreExplosionTimeMs: _nf(
             "LogicProjectileClient_getPreExplosionTimeMs",
             "int32",
@@ -104,21 +93,6 @@ export function initFunctions(baseIn, imageIn) {
         ]),
         LogicProjectileClient_getType: _nf("LogicProjectileClient_getType", "int32", ["pointer"]),
         LogicProjectileClient_isBeam: _nf("LogicProjectileClient_isBeam", "uint32", ["pointer"]),
-        LogicProjectileClient_isHomingMissile: _nf(
-            "LogicProjectileClient_isHomingMissile",
-            "uint32",
-            ["pointer"]
-        ),
-        LogicProjectileClient_isBouncing: _nf("LogicProjectileClient_isBouncing", "uint32", [
-            "pointer"
-        ]),
-        LogicProjectileClient_piercesEnvironment: _nf(
-            "LogicProjectileClient_piercesEnvironment",
-            "uint32",
-            ["pointer"]
-        ),
-        LogicProjectileData_getSpeed: _nf("LogicProjectileData_getSpeed", "int32", ["pointer"]),
-        LogicProjectileData_getRadius: _nf("LogicProjectileData_getRadius", "int32", ["pointer"]),
         LogicSkillData_getSpread: _nf("LogicSkillData_getSpread", "int32", ["pointer"]),
         LogicSkillData_getNumBulletsInOneAttack: _nf(
             "LogicSkillData_getNumBulletsInOneAttack",
