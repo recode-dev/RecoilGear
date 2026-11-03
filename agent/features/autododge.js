@@ -2,6 +2,7 @@ import { sendCommand } from "../core/commands.js";
 import { getFunctions } from "../core/functions.js";
 import { offsets } from "../core/offsets.js";
 import {
+    TICKS_PER_SEC,
     collisionRadius,
     dataOf,
     enableProjectileTracking,
@@ -338,7 +339,13 @@ function _collectLive(myX, myY, myRadius, now) {
         if (!p) continue;
         if (!p.gid) continue;
         if (distanceSquared(p.x, p.y, myX, myY) > zoneSq) continue;
-        const indirect = !!p.isIndirect || (p.travelType | 0) > 0;
+        if (p.ignoreChars) continue;
+        const tt = p.travelType | 0;
+        const indirect = !!p.isIndirect;
+        const boomerang = (p.boomerang | 0) > 0;
+        const grapples = !!p.grapples || tt === 10;
+        const attaches = tt === 9;
+        const trigger = (p.triggerMs | 0) > 0;
         let radPad = 0;
         let vx = p.vx;
         let vy = p.vy;
@@ -359,7 +366,12 @@ function _collectLive(myX, myY, myRadius, now) {
             vy = (dir.y / 1000) * p.speed;
             spd = length(vx, vy);
         }
-        if (p.homing && spd > 1 && (p.seekX || p.seekY) && _steerActive(p)) {
+        if (
+            (p.homing || grapples || attaches) &&
+            spd > 1 &&
+            (p.seekX || p.seekY) &&
+            _steerActive(p)
+        ) {
             vx = p.seekX * spd;
             vy = p.seekY * spd;
             radPad = 60;
@@ -367,11 +379,15 @@ function _collectLive(myX, myY, myRadius, now) {
         const shotR = _ballR(p);
         if (!(shotR > 0)) continue;
         const hitR = shotR + myRadius;
-        const rad = hitR + TUNE.SKIN + 60 + shotR * 0.45 + radPad;
+        let rad = hitR + TUNE.SKIN + 60 + shotR * 0.45 + radPad;
+        if (p.stunMs > 0 || p.silenceMs > 0) rad += 40;
+        if (p.attachArea) rad += 30;
+        if (p.trail) rad += LogicMath.min(200, p.trailMin || 0) / 2;
         const lockPath = !!p.isBeam || !!p.beamCopy;
-        const blob = !lockPath && !indirect && spd < 120;
+        const landed = trigger && !(p.seg > 0);
+        const blob = landed || (!lockPath && !indirect && spd < 120);
         if (blob && distance(p.x, p.y, myX, myY) > rad + 150) continue;
-        const skipAlong = blob || indirect;
+        const skipAlong = blob || indirect || boomerang || grapples || attaches;
         let playerAlong = 0;
         if (!skipAlong && spd >= 1) {
             const heading = LogicMath.normalizeAngle180(LogicMath.getAngle(vx, vy));
@@ -400,11 +416,13 @@ function _collectLive(myX, myY, myRadius, now) {
             )
                 continue;
         }
+        const travel = spd >= 1 ? spd : p.speed > 0 ? p.speed : 0;
         let left = p.seg > 0 ? p.seg : 0;
         if (!blob && !(left > 0)) continue;
+        if (p.constantFly && p.earlyTicks > 0 && travel > 0)
+            left = LogicMath.min(left, (p.earlyTicks * travel) / TICKS_PER_SEC);
         left += _bounceBudget(p);
         if (!blob && left <= 10) continue;
-        const travel = spd >= 1 ? spd : p.speed > 0 ? p.speed : 0;
         if (!_heading && travel > 0) {
             const gap = distance(p.x, p.y, myX, myY) - hitR;
             if (gap / travel > TUNE.ENGAGE_S) continue;

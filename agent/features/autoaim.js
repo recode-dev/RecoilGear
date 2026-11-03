@@ -247,8 +247,16 @@ function _ownProjectileSpeed() {
             fns.LogicSkillData_getProjectileData
         ) {
             const skill = fns.LogicCharacterClient_getWeaponSkill(own);
-            const data =
+            let data =
                 skill && !skill.isNull() ? fns.LogicSkillData_getProjectileData(skill, 0) : null;
+            if ((!data || data.isNull()) && skill && !skill.isNull()) {
+                try {
+                    const direct = skill
+                        .add(offsets.LogicSkillData_projectilePointer)
+                        .readPointer();
+                    if (direct && !direct.isNull()) data = direct;
+                } catch (_) {}
+            }
             if (data && !data.isNull()) {
                 engineSpeed = _readInt(
                     data,

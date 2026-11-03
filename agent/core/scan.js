@@ -356,6 +356,12 @@ function _castingRangeTiles(character) {
     const skill = _weaponSkillFor(character);
     if (!skill) return 0;
     const fns = getFunctions();
+    if (fns.LogicSkillData_getRange) {
+        try {
+            const tiles = fns.LogicSkillData_getRange(skill) | 0;
+            if (tiles >= 1 && tiles <= 64) return tiles;
+        } catch (_) {}
+    }
     if (!fns.LogicSkillData_getCastingRange) return 0;
     try {
         const tiles = fns.LogicSkillData_getCastingRange(skill) | 0;
@@ -842,6 +848,41 @@ function _readProjectileTarget(projectile, data, x, y) {
     return null;
 }
 
+function _readPtrField(obj, off) {
+    try {
+        const v = obj.add(off).readPointer();
+        return isValidPtr(v) ? v : null;
+    } catch (_) {
+        return null;
+    }
+}
+
+function _dataU8(data, off) {
+    try {
+        return data.add(off).readU8() & 1;
+    } catch (_) {
+        return 0;
+    }
+}
+
+function _dataS32(data, off, min, max) {
+    try {
+        const v = data.add(off).readS32() | 0;
+        return v >= min && v <= max ? v : 0;
+    } catch (_) {
+        return 0;
+    }
+}
+
+function _clientS32(obj, off, min, max) {
+    try {
+        const v = obj.add(off).readS32() | 0;
+        return v >= min && v <= max ? v : 0;
+    } catch (_) {
+        return 0;
+    }
+}
+
 function _captureProjectile(projectile, data, now) {
     if (!isValidPtr(projectile)) return;
     const fns = getFunctions();
@@ -857,21 +898,45 @@ function _captureProjectile(projectile, data, now) {
             existing.data = data;
             return;
         }
-        const radius = _readProjectileRadius(data);
+        let radius = _readProjectileRadius(data);
+        if (!(radius > 0))
+            radius = _clientS32(projectile, offsets.ProjectileClient_collisionRadius, 1, 500);
         if (!(radius > 0)) return;
-        const target = _readProjectileTarget(projectile, data, x, y);
+        let target = _readProjectileTarget(projectile, data, x, y);
+        const landingX = _clientS32(projectile, offsets.ProjectileClient_landingX, -200000, 200000);
+        const landingY = _clientS32(projectile, offsets.ProjectileClient_landingY, -200000, 200000);
+        if (!target && (landingX || landingY)) target = { x: landingX, y: landingY };
         const flags = _readProjectileFlags(data);
-        let isIndirect = 0;
-        try {
-            isIndirect = data.add(offsets.Projectile_isIndirect).readU8() | 0;
-        } catch (_) {}
-        let travelType = _readClientU32(projectile, offsets.ProjectileClient_travelType, 16);
-        if (travelType < 0) travelType = 0;
+        let isIndirect = _dataU8(data, offsets.ProjectileData_indirect);
+        let travelType = _dataS32(data, offsets.ProjectileData_travelType, 0, 20);
+        if (!travelType) {
+            const raw = _readClientU32(projectile, offsets.ProjectileClient_travelType, 20);
+            travelType = raw > 0 ? raw : 0;
+        }
+        if (!travelType) {
+            const fn = getFunctions().LogicProjectileData_getTravelType;
+            if (fn) {
+                try {
+                    const v = fn(data) | 0;
+                    if (v > 0 && v <= 20) travelType = v;
+                } catch (_) {}
+            }
+        }
+        const dynamicRange = _dataU8(data, offsets.ProjectileData_allowDynamicRange);
+        const overrideFlag = _dataU8(data, offsets.ProjectileClient_travelOverrideFlag);
+        const overrideType = _dataS32(data, offsets.ProjectileClient_travelOverride, 0, 20);
+        if (overrideFlag && overrideType) travelType = overrideType;
+        const gravity = _dataS32(data, offsets.ProjectileData_gravity, 1, 20000);
+        const visualized = _dataU8(data, offsets.ProjectileData_visualizeEndPoint);
+        if (travelType === 6 || dynamicRange || gravity > 0 || visualized) isIndirect = 1;
         let beam = 0;
         try {
             beam = data.add(offsets.ProjectileData_isBeamField).readU8() & 1;
         } catch (_) {}
         const ownerIndex = _readOwnerIndex(projectile);
+        const startX = _clientS32(projectile, offsets.ProjectileClient_startX, -200000, 200000);
+        const startY = _clientS32(projectile, offsets.ProjectileClient_startY, -200000, 200000);
+        const targetObj = _readPtrField(projectile, offsets.ProjectileClient_targetObject);
         const entry = {
             gid,
             ptr: projectile,
@@ -881,17 +946,16 @@ function _captureProjectile(projectile, data, now) {
             speed: _readProjectileSpeed(data),
             x,
             y,
-            spawnX: x,
-            spawnY: y,
+            spawnX: startX || x,
+            spawnY: startY || y,
             targetX: target ? target.x : 0,
             targetY: target ? target.y : 0,
-            hasTarget: !!target,
+            hasTarget: !!target || !!targetObj,
             seg0: target ? length(target.x - x, target.y - y) : 0,
             passesEnv: flags.passes,
             piercesEnv: flags.pierces,
             piercesChars: flags.piercesChars,
-            isIndirect: !!isIndirect || travelType > 0,
-            travelType,
+            isIndirect: !!isIndirect,
             isBeam: !!beam,
             beamCopy: false,
             ageMs: 0,
@@ -902,7 +966,35 @@ function _captureProjectile(projectile, data, now) {
             vx: 0,
             vy: 0,
             hasVelocitySample: false,
-            meta: null
+            meta: null,
+            travelType: travelType,
+            dynamicRange: dynamicRange,
+            ignoreChars: _dataU8(data, offsets.ProjectileData_ignoreCharacterCollisions),
+            ignoreEnv: _dataU8(data, offsets.ProjectileData_ignoreEnvironmentCollisions),
+            grapples: _dataU8(data, offsets.ProjectileData_grapplesEnemy),
+            boomerang: _dataS32(data, offsets.ProjectileData_boomerangType, 1, 8),
+            chains: _dataU8(data, offsets.ProjectileData_chainsToEnemies),
+            stunMs: _dataS32(data, offsets.ProjectileData_stunLengthMs, 1, 60000),
+            silenceMs: _dataS32(data, offsets.ProjectileData_silenceDurationMs, 1, 60000),
+            triggerMs: _dataS32(data, offsets.ProjectileData_triggerWithDelayMs, 1, 60000),
+            constantFly: _dataU8(data, offsets.ProjectileData_constantFlyTime),
+            earlyTicks: _dataS32(data, offsets.ProjectileData_earlyTicks, 1, 400),
+            homeDistance: _dataS32(data, offsets.ProjectileData_homeDistance, 1, 30000),
+            gravity: gravity,
+            shotByHero: _dataU8(data, offsets.ProjectileData_shotByHero),
+            visualized: visualized,
+            attachArea: _dataU8(data, offsets.ProjectileData_attachAreaEffectToTarget),
+            trail: _dataU8(data, offsets.ProjectileData_spawnAreaEffectTrail),
+            trailMin: _dataS32(data, offsets.ProjectileData_areaEffectTrailMinDistance, 1, 20000),
+            lifeTicks: _clientS32(projectile, offsets.ProjectileClient_lifeTicks, 1, 100000),
+            startX: startX,
+            startY: startY,
+            dirX: _clientS32(projectile, offsets.ProjectileClient_dirX, -200000, 200000),
+            dirY: _clientS32(projectile, offsets.ProjectileClient_dirY, -200000, 200000),
+            clientRadius: _clientS32(projectile, offsets.ProjectileClient_collisionRadius, 1, 500),
+            targetObj: targetObj,
+            travelOverrideFlag: overrideFlag,
+            travelOverride: overrideType
         };
         _liveProjectiles.set(gid, entry);
     } catch (_) {}
@@ -1058,7 +1150,9 @@ function _learnFlightRange(data, flown) {
 
 function _flightSeg(entry, flown) {
     const learned = learnedFlightRange(entry.data);
-    const cap = learned > 0 ? learned + entry.radius : 0;
+    let cap = learned > 0 ? learned + entry.radius : 0;
+    if (!(cap > 0) && entry.lifeTicks > 0 && entry.speed > 0)
+        cap = (entry.lifeTicks * entry.speed) / TICKS_PER_SEC;
     let seg = entry.seg0;
     if (cap > 0 && (!(seg > 0) || seg > cap)) seg = cap;
     if (!(seg > 0)) return 0;
@@ -1178,6 +1272,28 @@ function _updateLiveProjectiles(now) {
                 isBeam: !!entry.isBeam,
                 beamCopy: !!entry.beamCopy,
                 travelType: entry.travelType || 0,
+                dynamicRange: entry.dynamicRange || 0,
+                ignoreChars: entry.ignoreChars || 0,
+                ignoreEnv: entry.ignoreEnv || 0,
+                grapples: entry.grapples || 0,
+                boomerang: entry.boomerang || 0,
+                chains: entry.chains || 0,
+                stunMs: entry.stunMs || 0,
+                silenceMs: entry.silenceMs || 0,
+                triggerMs: entry.triggerMs || 0,
+                constantFly: entry.constantFly || 0,
+                earlyTicks: entry.earlyTicks || 0,
+                homeDistance: entry.homeDistance || 0,
+                gravity: entry.gravity || 0,
+                shotByHero: entry.shotByHero || 0,
+                levelBorder: entry.levelBorder || 0,
+                visualized: entry.visualized || 0,
+                attachArea: entry.attachArea || 0,
+                trail: entry.trail || 0,
+                trailMin: entry.trailMin || 0,
+                lifeTicks: entry.lifeTicks || 0,
+                clientRadius: entry.clientRadius || 0,
+                travelOverride: entry.travelOverride || 0,
                 preMs: entry.preMs || 0,
                 lifeMs: entry.lifeMs || 0,
                 ticks: entry.ticks || 0,

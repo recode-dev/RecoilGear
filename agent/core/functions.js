@@ -125,6 +125,10 @@ export function initFunctions(baseIn, imageIn) {
         ]),
         LogicProjectileData_getSpeed: _nf("LogicProjectileData_getSpeed", "int32", ["pointer"]),
         LogicProjectileData_getRadius: _nf("LogicProjectileData_getRadius", "int32", ["pointer"]),
+        LogicProjectileData_getTravelType: _nf("LogicProjectileData_getTravelType", "int32", [
+            "pointer"
+        ]),
+        LogicSkillData_getRange: _nf("LogicSkillData_getRange", "int32", ["pointer"]),
         LogicProjectileData_getIntValueFromColumn: _nf(
             "LogicProjectileData_getIntValueFromColumn",
             "int32",
