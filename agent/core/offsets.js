@@ -68,7 +68,6 @@ export const offsets = Object.freeze({
     LogicProjectileData_getRadius: 0x860d88,
     LogicProjectileData_getNumEarlyTicks: 0x979d50,
     LogicProjectileData_isBeam: 0x9b6448,
-    BattleScreen__calculateProjectilePath: 0x7b3ae8,
 
     LogicData_getName: 0x9a4f1c,
 

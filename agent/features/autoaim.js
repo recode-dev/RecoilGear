@@ -29,7 +29,6 @@ const SKIP_NAME_PARTS = ["BALL"];
 const RANGE_FLIGHT_S = 1.1;
 const RANGE_MARGIN = 0.88;
 const SERVER_TICK_MS = 50;
-const VELOCITY_WINDOW_MS = 350;
 const MIN_TRACK_MS = 120;
 const MAX_SPEED_EST = 1600;
 const MAX_ACCEL = 6000;
@@ -44,8 +43,6 @@ var _track = new Map();
 var _projectileSpeed = SPEED_FALLBACK;
 var _speedAt = 0;
 var _ownBeam = false;
-var _pathFn = null;
-var _pathBuf = null;
 var _rangeCache = 0;
 var _rangeAt = 0;
 var _hooks = false;
@@ -229,28 +226,6 @@ function _aimAt(enemy, now)
     return aim;
 }
 
-function _pathCall(screen, own, skill, mx, my, ax, ay)
-{
-    if (!_pathFn)
-    {
-        _pathFn = new NativeFunction(getBase().add(offsets.BattleScreen__calculateProjectilePath), "void",
-            ["pointer", "pointer", "pointer", "pointer", "int",
-             "float", "float", "float", "float", "float", "float"]);
-        _pathBuf = Memory.alloc(0x40);
-    }
-    _pathFn(_pathBuf, screen, own, skill, 0, mx, my, 0, ax, ay, 0);
-    const begin = _pathBuf.readPointer();
-    const end = _pathBuf.add(Process.pointerSize).readPointer();
-    if (!begin || begin.isNull() || !end || end.isNull()) return null;
-    const count = end.sub(begin).toInt32() / 12;
-    if (count < 2 || count > 64) return null;
-    const last = begin.add((count - 1) * 12);
-    const px = last.add(4).readFloat();
-    const py = last.add(8).readFloat();
-    if (!isFinite(px) || !isFinite(py)) return null;
-    if (Math.abs(px) > 40000 || Math.abs(py) > 40000) return null;
-    return { x: Math.round(px), y: Math.round(py) };
-}
 
 function _validEnemyPtr(p)
 {
