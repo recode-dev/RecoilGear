@@ -12,6 +12,11 @@ import
 from "./offsets.js";
 import
 {
+    length,
+}
+from "../core/admath.js";
+import
+{
     readScString
 }
 from "./scstring.js";
@@ -23,7 +28,6 @@ var _liveProjectiles = new Map();
 var _friendlyIdx = new Set();
 var _projectileHooksInstalled = false;
 var _charRange = new Map();
-const _vec2 = Memory.alloc(8);
 var _speedByData = new Map();
 var _charsByIndex = new Map();
 
@@ -265,9 +269,7 @@ function _updateLiveProjectiles(now)
             {
                 const observedVx = dx / dt;
                 const observedVy = dy / dt;
-                _vec2.writeS32(observedVx | 0);
-                _vec2.add(4).writeS32(observedVy | 0);
-                if (getFunctions().LogicVector2_getLength(_vec2) > 8500)
+                if (length(observedVx, observedVy) > 8500)
                 {
                     projectile.lastX = x;
                     projectile.lastY = y;
@@ -279,9 +281,7 @@ function _updateLiveProjectiles(now)
                 projectile.vy = projectile.vy * (1 - alpha) + observedVy * alpha;
                 projectile.hasVelocitySample = true;
 
-            _vec2.writeS32(projectile.vx | 0);
-            _vec2.add(4).writeS32(projectile.vy | 0);
-            const measured = getFunctions().LogicVector2_getLength(_vec2);
+            const measured = length(projectile.vx, projectile.vy);
             if (measured >= 300 && measured <= 8500)
             {
                 projectile.speed = measured;

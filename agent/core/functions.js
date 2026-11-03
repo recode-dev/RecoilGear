@@ -51,14 +51,6 @@ export function initFunctions(baseIn, imageIn)
         LogicSkillData_getProjectileData: _nf("LogicSkillData__getProjectileData", "pointer", ["pointer", "int"]),
         LogicData_getName: _nf("LogicData_getName", "pointer", ["pointer"]),
         operator_new: _nf("operator_new", "pointer", ["ulong"]),
-        LogicGameplayUtil_getDistanceBetween: _nf("LogicGameplayUtil_getDistanceBetween", "int32", ["int32", "int32", "int32", "int32"]),
-        LogicVector2_getLength: _nf("LogicVector2_getLength", "int32", ["pointer"]),
-        LogicVector2_normalize: _nf("LogicVector2_normalize", "void", ["pointer", "int32"]),
-        LogicMath_getRotateDx: _nf("LogicMath_getRotateDx", "int32", ["int32", "int32", "int32"]),
-        LogicMath_getRotateDy: _nf("LogicMath_getRotateDy", "int32", ["int32", "int32", "int32"]),
-        LogicMath_getAngle: _nf("LogicMath_getAngle", "int32", ["int32", "int32"]),
-        LogicMath_normalizeAngle180: _nf("LogicMath_normalizeAngle180", "int32", ["int32"]),
-        LogicGameplayUtil_lineSegmentIntersectsCircle: _nf("LogicGameplayUtil_lineSegmentIntersectsCircle", "int32", ["int32", "int32", "int32", "int32", "int32", "int32", "int32", "pointer"]),
     };
     Object.freeze(_n);
     return _n;

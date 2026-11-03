@@ -15,6 +15,18 @@ import
 from "../core/offsets.js";
 import
 {
+    LogicMath,
+    distance,
+    dot,
+    length,
+    lengthSquared,
+    normalize,
+    rotate,
+    segmentHitsCircle,
+}
+from "../core/admath.js";
+import
+{
     enableProjectileTracking,
     scanData
 }
@@ -67,19 +79,17 @@ const _options = {
     safetyMargin: 25
 };
 
-const _vec2 = Memory.alloc(8);
-
 function _buildRing()
 {
     _ring.length = 0;
     const n = TUNE.DIR_COUNT;
     for (let i = 0; i < n; i++)
     {
-        const a = Math.round(360 * i / n);
+        const a = LogicMath.normalizeAngle360(Math.round(360 * i / n));
         _ring.push(
         {
-            x: getFunctions().LogicMath_getRotateDx(10000, 0, a),
-            y: getFunctions().LogicMath_getRotateDy(10000, 0, a)
+            x: LogicMath.cos(a),
+            y: LogicMath.sin(a)
         });
     }
     _headingIdx = -1;
@@ -110,9 +120,7 @@ function _traveled(p)
     const sx = p.spawnX;
     const sy = p.spawnY;
     if (!isFinite(sx) || !isFinite(sy)) return 0;
-    _vec2.writeS32((p.x - sx) | 0);
-    _vec2.add(4).writeS32((p.y - sy) | 0);
-    return getFunctions().LogicVector2_getLength(_vec2);
+    return length(p.x - sx, p.y - sy);
 }
 
 function _lifeLeft(p)
@@ -150,9 +158,7 @@ function _collectLive(myX, myY, myRadius)
             vx = 0;
             vy = 0;
         }
-        _vec2.writeS32(vx | 0);
-        _vec2.add(4).writeS32(vy | 0);
-        const spd = getFunctions().LogicVector2_getLength(_vec2);
+        const spd = length(vx, vy);
         const slow = (p.speed || 0) > 0 && p.speed < 1600;
         const lockPath = !!p.isBeam;
         const blob = !lockPath && !indirect && slow;
@@ -162,20 +168,26 @@ function _collectLive(myX, myY, myRadius)
         let playerAlong = 0;
         if (!skipAlong && spd >= 1)
         {
-            const heading = getFunctions().LogicMath_normalizeAngle180(
-                getFunctions().LogicMath_getAngle(vx | 0, vy | 0));
-            playerAlong = getFunctions().LogicMath_getRotateDx(myX - p.x, myY - p.y, -heading);
+            const heading = LogicMath.normalizeAngle180(LogicMath.getAngle(vx, vy));
+            const frame = rotate(
+            {
+                x: myX - p.x,
+                y: myY - p.y
+            }, -heading);
+            playerAlong = frame.x;
             if (playerAlong < -50) continue;
-            _vec2.writeS32(vx | 0);
-            _vec2.add(4).writeS32(vy | 0);
-            getFunctions().LogicVector2_normalize(_vec2, Math.max(playerAlong, 0) | 0);
-            const hitX = p.x + _vec2.readS32();
-            const hitY = p.y + _vec2.add(4).readS32();
+            const reachDir = normalize(
+            {
+                x: vx,
+                y: vy
+            }, Math.max(playerAlong, 0) | 0);
+            const hitX = p.x + reachDir.x;
+            const hitY = p.y + reachDir.y;
             if (!losCheck(p.x, p.y, hitX, hitY, BLOCKS_PROJECTILES)) continue;
         }
         const left = _lifeLeft(p);
         if (left <= 10) continue;
-        const gap = getFunctions().LogicGameplayUtil_getDistanceBetween(p.x | 0, p.y | 0, myX | 0, myY | 0) - bodyR - shotR;
+        const gap = distance(p.x, p.y, myX, myY) - bodyR - shotR;
         if (left < 0.85 * Math.max(0, gap)) continue;
         if (!skipAlong && spd >= 1 && playerAlong > left + shotR) continue;
         out.push(
@@ -195,44 +207,56 @@ function _collectLive(myX, myY, myRadius)
 
 function _clearanceFor(threats, myX, myY, mvx, mvy)
 {
-    const fns = getFunctions();
     let minClear = Infinity;
     for (let i = 0; i < threats.length; i++)
     {
         const t = threats[i];
         const relx = t.x - myX;
         const rely = t.y - myY;
-        const reach = fns.LogicGameplayUtil_getDistanceBetween(t.x | 0, t.y | 0, myX | 0, myY | 0);
-        _vec2.writeS32(t.vx | 0);
-        _vec2.add(4).writeS32(t.vy | 0);
-        const spd = fns.LogicVector2_getLength(_vec2);
+        const reach = distance(t.x, t.y, myX, myY);
+        const spd = length(t.vx, t.vy);
         let maxT = TUNE.HORIZON_S;
         if (spd > 1) maxT = Math.min(maxT, (Math.max(0, t.left) + reach) / spd);
         const vrx = t.vx - mvx;
         const vry = t.vy - mvy;
-        _vec2.writeS32(vrx | 0);
-        _vec2.add(4).writeS32(vry | 0);
-        const vlen = fns.LogicVector2_getLength(_vec2);
-        let cx;
-        let cy;
-        if (vlen < 1)
+        const vlen = length(vrx, vry);
+        let dist;
+        if (lengthSquared(vrx, vry) < 1)
         {
-            cx = relx;
-            cy = rely;
+            dist = reach;
         }
         else
         {
-            const heading = fns.LogicMath_normalizeAngle180(fns.LogicMath_getAngle(vrx | 0, vry | 0));
-            const along = fns.LogicMath_getRotateDx(relx, rely, -heading);
-            let ts = -along / vlen;
-            if (ts < 0) ts = 0;
-            else if (ts > maxT) ts = maxT;
-            cx = relx + vrx * ts;
-            cy = rely + vry * ts;
+            const heading = LogicMath.normalizeAngle180(LogicMath.getAngle(vrx, vry));
+            const frame = rotate(
+            {
+                x: relx,
+                y: rely
+            }, -heading);
+            const towards = -dot(relx, rely, vrx, vry);
+            if (towards <= 0)
+            {
+                dist = reach;
+            }
+            else if (frame.x >= 0)
+            {
+                dist = reach;
+            }
+            else if (LogicMath.abs(frame.x) >= (maxT * vlen) | 0)
+            {
+                const end = normalize(
+                {
+                    x: vrx,
+                    y: vry
+                }, (maxT * vlen) | 0);
+                dist = distance(t.x + end.x, t.y + end.y, myX, myY);
+            }
+            else
+            {
+                dist = LogicMath.getDistanceToLine(t.x, t.y, t.x + vrx, t.y + vry, myX, myY);
+            }
         }
-        _vec2.writeS32(cx | 0);
-        _vec2.add(4).writeS32(cy | 0);
-        const clear = fns.LogicVector2_getLength(_vec2) - t.rad;
+        const clear = dist - t.rad;
         if (clear < minClear) minClear = clear;
     }
     return minClear;
@@ -240,24 +264,26 @@ function _clearanceFor(threats, myX, myY, mvx, mvy)
 
 function _pathsHitMe(threats, px, py)
 {
-    const fns = getFunctions();
     for (let i = 0; i < threats.length; i++)
     {
         const t = threats[i];
-        _vec2.writeS32(t.vx | 0);
-        _vec2.add(4).writeS32(t.vy | 0);
-        const vlen = fns.LogicVector2_getLength(_vec2);
-        const reach = fns.LogicGameplayUtil_getDistanceBetween(t.x | 0, t.y | 0, px | 0, py | 0);
+        const vlen = length(t.vx, t.vy);
+        const reach = distance(t.x, t.y, px, py);
         let span = TUNE.HORIZON_S;
+        let endX = t.x;
+        let endY = t.y;
         if (vlen > 1)
         {
             span = Math.min(span, (Math.max(0, t.left) + reach) / vlen);
-            fns.LogicVector2_normalize(_vec2, (vlen * span) | 0);
+            const end = normalize(
+            {
+                x: t.vx,
+                y: t.vy
+            }, (vlen * span) | 0);
+            endX = t.x + end.x;
+            endY = t.y + end.y;
         }
-        const endX = t.x + _vec2.readS32();
-        const endY = t.y + _vec2.add(4).readS32();
-        if (fns.LogicGameplayUtil_lineSegmentIntersectsCircle(
-                t.x | 0, t.y | 0, endX | 0, endY | 0, px | 0, py | 0, (t.rad + TUNE.ENGAGE) | 0, ptr(0)))
+        if (segmentHitsCircle(t.x, t.y, endX, endY, px, py, t.rad + TUNE.ENGAGE))
         {
             return true;
         }
@@ -267,16 +293,17 @@ function _pathsHitMe(threats, px, py)
 
 function _wallAhead(myX, myY, dir, speed, bodyR)
 {
-    const fns = getFunctions();
     const step = speed * TUNE.PROBE_T;
     let raw = 0;
     for (let s = 1; s <= TUNE.PROBE_N; s++)
     {
-        _vec2.writeS32(dir.x | 0);
-        _vec2.add(4).writeS32(dir.y | 0);
-        fns.LogicVector2_normalize(_vec2, (step * s) | 0);
-        const px = myX + _vec2.readS32();
-        const py = myY + _vec2.add(4).readS32();
+        const probe = normalize(
+        {
+            x: dir.x,
+            y: dir.y
+        }, (step * s) | 0);
+        const px = myX + probe.x;
+        const py = myY + probe.y;
         if (isBlockedWide(px, py, bodyR, BLOCKS_MOVEMENT))
         {
             raw += TUNE.WALL_HIT * (TUNE.PROBE_N - s + 1);
@@ -347,17 +374,17 @@ export function updateAutododge()
     for (let i = 0; i < _ring.length; i++)
     {
         const d = _ring[i];
-        _vec2.writeS32(d.x | 0);
-        _vec2.add(4).writeS32(d.y | 0);
-        getFunctions().LogicVector2_normalize(_vec2, speed | 0);
-        let s = _clearanceFor(hazards, myX, myY, _vec2.readS32(), _vec2.add(4).readS32());
+        const dirSpeed = normalize(
+        {
+            x: d.x,
+            y: d.y
+        }, speed | 0);
+        let s = _clearanceFor(hazards, myX, myY, dirSpeed.x, dirSpeed.y);
         s -= _wallAhead(myX, myY, d, speed, bodyR);
         if (prevDir)
         {
-            const turn = getFunctions().LogicMath_normalizeAngle180(
-                getFunctions().LogicMath_getAngle(d.x | 0, d.y | 0) -
-                getFunctions().LogicMath_getAngle(prevDir.x | 0, prevDir.y | 0));
-            s += TUNE.MOMENTUM * (180 - Math.abs(turn)) / 180;
+            const turn = LogicMath.getAngleBetween(LogicMath.getAngle(d.x, d.y), LogicMath.getAngle(prevDir.x, prevDir.y));
+            s += TUNE.MOMENTUM * (180 - turn) / 180;
         }
         if (i === prevIdx) prevScore = s;
         if (s > bestScore)
@@ -392,11 +419,13 @@ export function updateAutododge()
     const chosen = _ring[chosenIdx];
     _headingIdx = chosenIdx;
     _heading = chosen;
-    _vec2.writeS32(chosen.x | 0);
-    _vec2.add(4).writeS32(chosen.y | 0);
-    getFunctions().LogicVector2_normalize(_vec2, TUNE.REACH | 0);
-    const tx = myX + _vec2.readS32();
-    const ty = myY + _vec2.add(4).readS32();
+    const step = normalize(
+    {
+        x: chosen.x,
+        y: chosen.y
+    }, TUNE.REACH | 0);
+    const tx = myX + step.x;
+    const ty = myY + step.y;
     if (!isFinite(tx) || !isFinite(ty)) return;
     const ddx = tx - _lastSentX;
     const ddy = ty - _lastSentY;

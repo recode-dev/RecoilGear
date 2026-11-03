@@ -11,6 +11,14 @@ import
 from "../core/offsets.js";
 import
 {
+    LogicMath,
+    distance,
+    length,
+    lengthSquared,
+}
+from "../core/admath.js";
+import
+{
     scanData
 }
 from "../core/scan.js";
@@ -27,8 +35,6 @@ const SKIP_NAME_PARTS = ["BALL"];
 const SERVER_TICK_MS = 50;
 const MIN_TRACK_MS = 120;
 const MAX_SPEED_EST = 1600;
-const _vec2 = Memory.alloc(8);
-
 const MAX_ACCEL = 6000;
 const LEAD_PASSES = 3;
 const MAX_FLIGHT_S = 1.5;
@@ -73,9 +79,7 @@ function _sample(gid, x, y, moveSpeed, now)
 
     const vxWindow = (x - first.x) / span;
     const vyWindow = (y - first.y) / span;
-    _vec2.writeS32(vxWindow | 0);
-    _vec2.add(4).writeS32(vyWindow | 0);
-    const magnitude = getFunctions().LogicVector2_getLength(_vec2);
+    const magnitude = length(vxWindow, vyWindow);
     if (magnitude < 30) return { x: x, y: y, vx: 0, vy: 0, ax: 0, ay: 0, juke: false };
 
     let dx = 0;
@@ -89,9 +93,7 @@ function _sample(gid, x, y, moveSpeed, now)
         break;
     }
 
-    _vec2.writeS32(dx | 0);
-    _vec2.add(4).writeS32(dy | 0);
-    const direction = getFunctions().LogicVector2_getLength(_vec2);
+    const direction = length(dx, dy);
     const speed = Math.min(magnitude, moveSpeed >= 200 && moveSpeed <= 1500 ? moveSpeed : magnitude);
     if (direction < 0.5 || speed > MAX_SPEED_EST) return null;
 
@@ -114,9 +116,7 @@ function _sample(gid, x, y, moveSpeed, now)
         break;
     }
 
-    _vec2.writeS32(ax | 0);
-    _vec2.add(4).writeS32(ay | 0);
-    if (getFunctions().LogicVector2_getLength(_vec2) > MAX_ACCEL)
+    if (lengthSquared(ax, ay) > MAX_ACCEL * MAX_ACCEL)
     {
         ax = 0;
         ay = 0;
@@ -131,7 +131,7 @@ function _solve(mx, my, pred, speed, range)
 
     if (range > 0)
     {
-        const d0 = getFunctions().LogicGameplayUtil_getDistanceBetween(pred.x | 0, pred.y | 0, mx | 0, my | 0);
+        const d0 = distance(pred.x, pred.y, mx, my);
         if (d0 > range) return null;
     }
     if (!(speed > 0)) return { x: Math.round(pred.x), y: Math.round(pred.y), t: 0 };
@@ -141,7 +141,7 @@ function _solve(mx, my, pred, speed, range)
 
     for (let pass = 0; pass < LEAD_PASSES; pass++)
     {
-        const distance = getFunctions().LogicGameplayUtil_getDistanceBetween(px | 0, py | 0, mx | 0, my | 0);
+        const flightTo = distance(px, py, mx, my);
         if (range > 0 && distance > range) return null;
         const flight = distance / speed;
         if (flight > MAX_FLIGHT_S) return null;
@@ -269,7 +269,7 @@ function _pickTarget(now)
             { x: e.x, y: e.y, vx: 0, vy: 0, ax: 0, ay: 0, juke: false };
         const dx = e.x - mx;
         const dy = e.y - my;
-        const d = getFunctions().LogicGameplayUtil_getDistanceBetween(e.x | 0, e.y | 0, mx | 0, my | 0);
+        const d = distance(e.x, e.y, mx, my);
         if (range > 0 && d > range) continue;
         if (!pred.juke && d < calmD)
         {
