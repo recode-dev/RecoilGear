@@ -137,6 +137,53 @@ function _rangeForOwner(ownerIndex)
     return units;
 }
 
+function _readProjectileField(data, off, min, max)
+{
+    try
+    {
+        const v = data.add(off).readS32() | 0;
+        if (v < min || v > max) return 0;
+        return v;
+    }
+    catch (_)
+    {
+        return 0;
+    }
+}
+
+function _readProjectileRadius(data)
+{
+    let r = _readProjectileField(data, offsets.ProjectileData_radiusField, 1, 2000);
+    if (!r) r = _readProjectileField(data, offsets.ProjectileData_radius, 1, 2000);
+    return r;
+}
+
+function _readProjectileFlags(data)
+{
+    let passes = 0;
+    let pierces = 0;
+    try { passes = data.add(offsets.ProjectileData_passesEnvironment).readU8() & 1; } catch (_) {}
+    try { pierces = data.add(offsets.ProjectileData_piercesEnvironment).readU8() & 1; } catch (_) {}
+    return { passes: !!passes, pierces: !!pierces };
+}
+
+function _readProjectileTarget(projectile, x, y)
+{
+    try
+    {
+        const tx = projectile.add(offsets.ProjectileClient_targetX).readS32() | 0;
+        const ty = projectile.add(offsets.ProjectileClient_targetY).readS32() | 0;
+        if (tx === 0 && ty === 0) return null;
+        if (tx > 100000 || tx < -100000 || ty > 100000 || ty < -100000) return null;
+        if (tx === x && ty === y) return null;
+        return { x: tx, y: ty };
+    }
+    catch (_)
+    {
+        return null;
+    }
+}
+
 function _captureProjectile(projectile, data)
 {
     if (!isValidPtr(projectile)) return;
@@ -155,8 +202,10 @@ function _captureProjectile(projectile, data)
         }
         const x = fns.LogicGameObjectClient_getX(projectile) | 0;
         const y = fns.LogicGameObjectClient_getY(projectile) | 0;
-        const speed = 0;
-        const radius = Math.max(0, data.add(offsets.ProjectileData_radius).readU32() | 0);
+        const dataSpeed = _readProjectileField(data, offsets.ProjectileData_speedField, 1, 20000);
+        const radius = _readProjectileRadius(data);
+        const flags = _readProjectileFlags(data);
+        const target = _readProjectileTarget(projectile, x, y);
         let isIndirect = 0;
         try
         {
@@ -189,8 +238,14 @@ function _captureProjectile(projectile, data)
             y,
             spawnX: x,
             spawnY: y,
-            speed,
+            speed: dataSpeed,
+            dataSpeed,
             radius,
+            targetX: target ? target.x : 0,
+            targetY: target ? target.y : 0,
+            hasTarget: !!target,
+            passesEnv: flags.passes,
+            piercesEnv: flags.pierces,
             isIndirect: isIndirect,
             isBeam,
             castRange,
@@ -302,6 +357,17 @@ function _updateLiveProjectiles(now)
                 }
             }
             }
+            const liveTarget = _readProjectileTarget(projectile.ptr, x, y);
+            if (liveTarget)
+            {
+                projectile.targetX = liveTarget.x;
+                projectile.targetY = liveTarget.y;
+                projectile.hasTarget = true;
+            }
+            else
+            {
+                projectile.hasTarget = false;
+            }
             projectile.lastX = x;
             projectile.lastY = y;
             projectile.lastTs = now;
@@ -319,8 +385,13 @@ function _updateLiveProjectiles(now)
                 y,
                 spawnX: projectile.spawnX,
                 spawnY: projectile.spawnY,
-                speed: projectile.speed,
+                speed: projectile.speed || projectile.dataSpeed,
                 radius: projectile.radius,
+                targetX: projectile.targetX,
+                targetY: projectile.targetY,
+                hasTarget: !!projectile.hasTarget,
+                passesEnv: !!projectile.passesEnv,
+                piercesEnv: !!projectile.piercesEnv,
                 isIndirect: !!projectile.isIndirect,
                 isBeam: !!projectile.isBeam,
                 castRange: projectile.castRange || 0,

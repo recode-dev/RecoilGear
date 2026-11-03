@@ -68,6 +68,7 @@ var _track = new Map();
 var _projectileSpeed = 0;
 var _speedAt = 0;
 var _ownBeam = false;
+var _ownPierces = false;
 var _rangeCache = 0;
 var _rangeAt = 0;
 var _hooks = false;
@@ -214,6 +215,7 @@ function _ownProjectileSpeed()
     if (_projectileSpeed >= 300 && now - _speedAt < SPEED_REFRESH_MS) return _projectileSpeed;
 
     let speed = 0;
+    let engineSpeed = 0;
     try
     {
         const fns = getFunctions();
@@ -225,17 +227,20 @@ function _ownProjectileSpeed()
             if (data && !data.isNull())
             {
                 _ownBeam = !!(fns.LogicProjectileData_isBeam && fns.LogicProjectileData_isBeam(data));
+                const field = data.add(offsets.ProjectileData_speedField).readS32() | 0;
+                if (field >= 300 && field <= 8500) engineSpeed = field;
+                const passes = data.add(offsets.ProjectileData_passesEnvironment).readU8() & 1;
+                const pierces = data.add(offsets.ProjectileData_piercesEnvironment).readU8() & 1;
+                _ownPierces = (passes | pierces) === 1;
             }
         }
     }
     catch (_)
     {}
 
-    if (!(speed >= 300 && speed <= 8500))
-    {
-        const observed = scanData.measuredSpeed | 0;
-        if (observed >= 300 && observed <= 8500) speed = observed;
-    }
+    const observed = scanData.measuredSpeed | 0;
+    if (observed >= 300 && observed <= 8500) speed = observed;
+    else if (engineSpeed > 0) speed = engineSpeed;
 
     if (speed >= 300 && speed <= 8500)
     {
@@ -320,7 +325,7 @@ function _pickTarget(now)
         if (e.kind !== "player") continue;
         if (_isSkipped(e.brawlerName)) continue;
         if ((e.teamId | 0) === myTeam) continue;
-        if (losCheck(mx, my, e.x, e.y, BLOCKS_PROJECTILES) === false) continue;
+        if (!_ownPierces && losCheck(mx, my, e.x, e.y, BLOCKS_PROJECTILES) === false) continue;
         const pred = _sample(e.gid, e.x, e.y, e.moveSpeed, now) ||
             { x: e.x, y: e.y, vx: 0, vy: 0, ax: 0, ay: 0, juke: false };
         const dx = e.x - mx;
@@ -437,6 +442,7 @@ export function resetAutoaim()
     _projectileSpeed = 0;
     _speedAt = 0;
     _ownBeam = false;
+    _ownPierces = false;
     _rangeCache = 0;
     _rangeAt = 0;
 }

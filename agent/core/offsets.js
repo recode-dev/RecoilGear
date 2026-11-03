@@ -18,8 +18,14 @@ export const offsets = Object.freeze({
     LogicGameObjectClient_ownerIndex: 0x3c,
 
     ProjectileClient_data: 0x10,
+    ProjectileClient_targetX: 0x200,
+    ProjectileClient_targetY: 0x204,
     Projectile_isIndirect: 0x118,
     ProjectileData_radius: 0x74,
+    ProjectileData_speedField: 0x124,
+    ProjectileData_radiusField: 0x130,
+    ProjectileData_passesEnvironment: 0x23c,
+    ProjectileData_piercesEnvironment: 0x1e5,
 
     ClientInput_x: 0xc,
     ClientInput_y: 0x10,
