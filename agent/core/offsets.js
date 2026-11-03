@@ -53,7 +53,6 @@ export const offsets = Object.freeze({
     VTABLE_PROJECTILE_DATA: 0xff3b18,
 
     LogicBattleModeClient_update: 0xac1ee8,
-    BattleScreen_activateSkill: 0x7a0084,
     BattleScreen_getClosestTargetForAutoshoot: 0x7b67ec,
     LogicTile__setData: 0x9401fc,
     LogicTileMap_tileToLogic: 0x943040,

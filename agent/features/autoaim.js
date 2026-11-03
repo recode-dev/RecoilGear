@@ -55,8 +55,6 @@ const LINEUP_BONUS = 220;
 
 var _target = null;
 var _aimPtr = null;
-var _aimX = 0;
-var _aimY = 0;
 var _track = new Map();
 var _projectileSpeed = 0;
 var _speedAt = 0;
@@ -501,10 +499,7 @@ function _pickTarget(now) {
     }
     if (!pick || !pred) return null;
 
-    const aim = _solve(mx, my, pred, speed, range);
-    if (!aim) return null;
-    _aimX = aim.x;
-    _aimY = aim.y;
+    if (!_solve(mx, my, pred, speed, range)) return null;
     return pick;
 }
 
@@ -533,22 +528,11 @@ export function setupAutoaim() {
     try {
         Interceptor.attach(base.add(offsets.BattleScreen_getClosestTargetForAutoshoot), {
             onLeave(retval) {
-                const live = _ptrAlive(_aimPtr) || _ptrAlive(_target ? _target.ptr : null);
+                if (!_aimPointNow()) return;
+                const live = _ptrAlive(_aimPtr);
                 if (!live) return;
                 try {
                     retval.replace(live);
-                } catch (_) {}
-            }
-        });
-    } catch (_) {}
-    try {
-        Interceptor.attach(base.add(offsets.BattleScreen_activateSkill), {
-            onEnter(args) {
-                const aim = _aimPointNow();
-                if (!aim) return;
-                try {
-                    args[1] = ptr(aim.x | 0);
-                    args[2] = ptr(aim.y | 0);
                 } catch (_) {}
             }
         });
