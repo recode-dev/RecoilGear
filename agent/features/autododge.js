@@ -34,20 +34,20 @@ const TUNE = {
     AWARE: 3200,
     TICK_MS: 4,
     TICK_MS_IDLE: 48,
-    DIR_COUNT: 48,
+    DIR_COUNT: 96,
     SKIN: 50,
-    LOCK_MS: 70,
-    REACH: 600,
+    LOCK_MS: 150,
+    REACH: 1200,
     HORIZON_S: 1.4,
-    KEEP_BAND: 100,
-    MOMENTUM: 55,
+    KEEP_BAND: 250,
+    MOMENTUM: 150,
     ENGAGE: 100,
     RELEASE_GRACE_MS: 200,
     WALL_HIT: 9000,
     PROBE_N: 3,
     PROBE_T: 0.35,
     WALL_BODY: 240,
-    SEND_MIN_MS: 80,
+    SEND_MIN_MS: 50,
     SEND_MIN_DIST: 8,
     MIN_POS: 50
 };
@@ -197,14 +197,15 @@ function _clearanceFor(threats, myX, myY, mvx, mvy)
     {
         const t = threats[i];
         const spd = Math.hypot(t.vx, t.vy);
+        const relx = t.x - myX;
+        const rely = t.y - myY;
+        const reach = Math.sqrt(relx * relx + rely * rely);
         let maxT = horizon;
         if (spd > 1)
         {
-            if (t.left > 0) maxT = Math.min(maxT, t.left / spd);
-            if (t.pathLen > 0) maxT = Math.min(maxT, t.pathLen / spd);
+            const untilGone = (Math.max(0, t.left) + reach) / spd;
+            maxT = Math.min(maxT, untilGone);
         }
-        const relx = t.x - myX;
-        const rely = t.y - myY;
         const vrx = t.vx - mvx;
         const vry = t.vy - mvy;
         const vv = vrx * vrx + vry * vry;
