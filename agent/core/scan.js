@@ -24,6 +24,7 @@ var _friendlyIdx = new Set();
 var _projectileHooksInstalled = false;
 var SKILL_SLOT_MAX = 8;
 var _charRange = new Map();
+var _speedByData = new Map();
 var _harvestedChars = new Set();
 var _charsByIndex = new Map();
 
@@ -40,7 +41,7 @@ export var scanData = {
     myBrawlerName: null,
     enemies: [],
     projectiles: [],
-    friendlySpeed: 0,
+    measuredSpeed: 0,
     lastUpdate: 0
 };
 
@@ -237,10 +238,6 @@ function _captureProjectile(projectile, data, ownerTeamOverride)
         const speed = Math.max(1, offsets.ProjectileData_speed
             ? data.add(offsets.ProjectileData_speed).readU32() | 0
             : (fns.LogicProjectileData_getSpeed ? fns.LogicProjectileData_getSpeed(data) | 0 : 0));
-        if (ownerTeamOverride !== void 0 && ownerTeamOverride === scanData.myTeamId && speed >= 300 && speed <= 8500)
-        {
-            scanData.friendlySpeed = speed;
-        }
         const radius = Math.max(0, offsets.ProjectileData_radius
             ? data.add(offsets.ProjectileData_radius).readU32() | 0
             : (fns.LogicProjectileData_getRadius ? fns.LogicProjectileData_getRadius(data) | 0 : 0));
@@ -380,6 +377,22 @@ function _updateLiveProjectiles(now)
                 projectile.vx = projectile.vx * (1 - alpha) + observedVx * alpha;
                 projectile.vy = projectile.vy * (1 - alpha) + observedVy * alpha;
                 projectile.hasVelocitySample = true;
+
+            const measured = Math.round(Math.sqrt(projectile.vx * projectile.vx + projectile.vy * projectile.vy));
+            if (measured >= 300 && measured <= 8500)
+            {
+                projectile.speed = measured;
+                const dataPtr = projectile.data;
+                if (dataPtr && dataPtr.isNull && !dataPtr.isNull())
+                {
+                    const key = dataPtr.toString();
+                    const entry = _speedByData.get(key) || { sum: 0, count: 0 };
+                    entry.sum += measured;
+                    entry.count++;
+                    _speedByData.set(key, entry);
+                    scanData.measuredSpeed = Math.round(entry.sum / entry.count);
+                }
+            }
             }
             projectile.lastX = x;
             projectile.lastY = y;

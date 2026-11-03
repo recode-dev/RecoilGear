@@ -165,7 +165,7 @@ function _ownProjectileSpeed()
 
     if (!(speed >= 300 && speed <= 8500))
     {
-        const observed = scanData.friendlySpeed | 0;
+        const observed = scanData.measuredSpeed | 0;
         if (observed >= 300 && observed <= 8500) speed = observed;
     }
 
