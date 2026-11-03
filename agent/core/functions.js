@@ -88,7 +88,6 @@ export function initFunctions(baseIn, imageIn) {
             "int32",
             ["pointer"]
         ),
-        // getTravelTicks(data, rangeSubunits, speed) -> ticks, 18000 for beams
         LogicProjectileClient_getTravelTicks: _nf("LogicProjectileClient_getTravelTicks", "int32", [
             "pointer",
             "int32",

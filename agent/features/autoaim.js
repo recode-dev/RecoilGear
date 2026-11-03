@@ -48,11 +48,7 @@ const MAX_ACCEL = 6000;
 const LEAD_PASSES = 3;
 const MAX_FLIGHT_S = 3;
 const STICKY_MARGIN = 1.12;
-// The engine steps projectile flight per server tick (getTravelTicks), so lead is
-// solved on the same grid instead of continuously.
 const TICK_S = 1 / TICKS_PER_SEC;
-// Steering/homing shots curve toward the aim direction: the engine corrects part of
-// the miss, so the raw lead is damped.
 const STEER_LEAD_FACTOR = 0.75;
 const LINEUP_BONUS = 220;
 
@@ -168,8 +164,6 @@ function _flightTime(rx, ry, vx, vy, speed) {
     return best;
 }
 
-/* Quantises a flight time onto the server tick grid and never exceeds the shot's own
- * travel ticks (the projectile detonates/disappears after that many ticks). */
 function _snapTicks(t) {
     if (!(_ownTicks > 0) || !isFinite(t) || t <= 0) return t;
     const maxT = _ownTicks >= BEAM_TICKS ? MAX_FLIGHT_S : _ownTicks * TICK_S;
@@ -302,8 +296,6 @@ function _ownProjectileSpeed() {
                 } catch (_) {
                     _ownSteerLife = 0;
                 }
-                // Flight length comes from the same tick math the server uses
-                // (getTravelTicks: ticks = round(range*20/speed), beam -> 18000).
                 const learned = travelFor(data);
                 const tiles = weaponRangeUnits(own);
                 const speedForTicks = engineSpeed > 0 ? engineSpeed : scanData.measuredSpeed | 0;
@@ -334,10 +326,6 @@ function _ownProjectileSpeed() {
     return _projectileSpeed;
 }
 
-/*
- * Effective range in logic subunits: (skills.csv castingRange + rangeAdd) * 100, or the
- * real flight distance when the engine's own getTravelTicks call has been observed.
- */
 function _ownRange() {
     const now = Date.now();
     if (now - _rangeAt < SPEED_REFRESH_MS) return _rangeCache;
@@ -384,8 +372,6 @@ function _aimAt(enemy, now) {
     return aim;
 }
 
-/* How many other bodies sit behind `target` on the same ray - piercing shots clear a
- * whole lane, so a lined-up pack is worth more than a lone close target. */
 function _lineupHits(list, mx, my, target, pocket) {
     const ax = target.x - mx;
     const ay = target.y - my;

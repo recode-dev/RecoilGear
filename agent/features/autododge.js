@@ -268,28 +268,19 @@ function _traveled(p) {
     return length(p.x - sx, p.y - sy);
 }
 
-/*
- * Remaining flight budget in logic units. travelDistance is the tick-quantised length of
- * the shot (ticks * speed / 20, getTravelTicks); castRange is the (tiles + rangeAdd) * 100
- * fallback. Piercing/bouncing shots keep going, so their budget is extended.
- */
 function _lifeLeft(p) {
     const toTarget = p.hasTarget ? distance(p.x, p.y, p.targetX, p.targetY) : Infinity;
     const reach = p.travelDistance > 0 ? p.travelDistance : p.castRange;
     if (!(reach > 0)) return toTarget;
     const flown = _traveled(p);
     let left = LogicMath.min(reach - flown, toTarget);
-    // A shot that pierces characters survives the first body on its line.
     if (p.piercesChars && toTarget !== Infinity) left = reach - flown;
     return LogicMath.max(0, left) + _bounceBudget(p);
 }
 
-/* Extra reach a bouncing shot gains after each bounce (projectiles.csv bounce columns). */
 function _bounceBudget(p) {
     if (!p.bouncing || !(p.bounceAdd > 0)) return 0;
     const keep = p.bounceKeep > 0 && p.bounceKeep <= 1 ? p.bounceKeep : 0.5;
-    // MaxDistanceBounces reads either as a hop count (small values) or as an absolute
-    // distance budget in subunits; both are clamped to a sane number of bounces.
     let hops = 2;
     if (p.bounceMax > 0 && p.bounceMax <= 12) hops = p.bounceMax;
     else if (p.bounceMax > 12) hops = LogicMath.clamp(Math.floor(p.bounceMax / 200), 1, 6);
@@ -303,10 +294,6 @@ function _bounceBudget(p) {
     return budget;
 }
 
-/*
- * Where a shot physically gets to: it can never fly further than its remaining distance
- * budget (`left`, logic units) nor further than the planning horizon allows.
- */
 function _sweptEnd(x, y, vx, vy, left) {
     const vlen = length(vx, vy);
     if (!(vlen > 1)) return null;
@@ -322,32 +309,20 @@ function _sweptEnd(x, y, vx, vy, left) {
     return { x: x + end.x, y: y + end.y };
 }
 
-/*
- * Does this shot actually reach me at all? Two independent outs:
- *  - range: it expires before it arrives (remaining budget shorter than the gap);
- *  - line: it flies past to my left or right and never crosses my hitbox.
- * Shots failing either test are noise - dodging them only gives away position.
- * A shot that is still steering gets slack for the curve it can still add.
- */
 function _reachesMe(p, myX, myY, bodyR, shotR, vx, vy, left) {
     const gap = distance(p.x, p.y, myX, myY) - bodyR - shotR;
     if (left >= 0 && left < 0.85 * LogicMath.max(0, gap)) return false;
     const contact = bodyR + shotR + TUNE.ENGAGE;
     if (p.isIndirect && p.hasTarget) {
-        // A thrown shot flies over everything and only collides where it lands, so the
-        // landing point is the only thing that can touch my hitbox.
         return distance(p.targetX, p.targetY, myX, myY) <= contact;
     }
     const end = _sweptEnd(p.x, p.y, vx, vy, left);
     if (!end) return distance(p.x, p.y, myX, myY) <= contact;
     let miss = LogicMath.getDistanceToLine(p.x, p.y, end.x, end.y, myX, myY);
-    // A shot that is still steering can curve onto me; give it slack for the curve.
     if (_steerActive(p) || p.homing) miss -= LogicMath.min(400, 0.35 * LogicMath.max(0, left));
     return miss <= contact;
 }
 
-/* Steering only bends a shot inside [steerIgnoreTicks, +steerLifeTime]; outside that
- * window even a homing projectile flies straight and is much easier to read. */
 function _steerActive(p) {
     if (!(p.steer > 0) && !p.homing) return false;
     const ignore = p.steerIgnoreMs > 0 ? p.steerIgnoreMs : 0;
@@ -458,22 +433,15 @@ function _collectLive(myX, myY, myRadius, now) {
                 if (gap / travel > TUNE.ENGAGE_S) continue;
             } else if (gap > TUNE.ENGAGE_NEAR) continue;
         }
-        // Piercing shots stay lethal after they cross us, so keep them as threats.
         if (!skipAlong && spd >= 1 && !p.piercesChars && playerAlong > left + shotR) continue;
-        // `left` is a distance budget: turn millisecond values into units via travel speed.
         if (travel > 0) {
             if (p.lifeMs > 0 && isFinite(p.lifeMs))
                 left = LogicMath.min(left, (p.lifeMs / 1000) * travel);
             if (p.preMs > 0) left += (p.preMs / 1000) * travel;
             if (p.volleyMs > 0) left += (p.volleyMs / 1000) * travel;
-            // Untested range estimate (no recent client path calculation) - keep the
-            // projected path inside the planning horizon instead of trusting it.
             if (!pathEngineActive(now) && !(p.travelDistance > 0))
                 left = LogicMath.min(left, TUNE.HORIZON_S * travel);
         }
-        // Ignore what cannot touch me: a shot that passes to my left/right without grazing
-        // the hitbox, or one whose range ends before it reaches me. Its lane is still kept
-        // so that an active dodge never steps into it.
         if (!_reachesMe(p, myX, myY, bodyR, shotR, vx, vy, left)) {
             _pushLane(lanes, p.x, p.y, blob ? 0 : vx, blob ? 0 : vy, left);
             continue;
@@ -520,8 +488,6 @@ function _mergeGroup(arr, px, py) {
             }
         }
         const off = (fx - ref.x) * -uy + (fy - ref.y) * ux;
-        // Two bands: the padded keep-out band, and the distance at which the volley
-        // actually touches the hitbox.
         const contact = t.hitRad > 0 ? t.hitRad : t.rad;
         lo = LogicMath.min(lo, off - t.rad);
         hi = LogicMath.max(hi, off + t.rad);
@@ -640,8 +606,6 @@ function _clearanceFor(threats, myX, myY, mvx, mvy) {
 }
 
 function _pathEnd(t) {
-    // Same physical budget as the filter: a threat's projected path can never be longer
-    // than the distance the shot can still fly.
     return _sweptEnd(t.x, t.y, t.vx, t.vy, t.left);
 }
 

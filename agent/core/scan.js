@@ -4,22 +4,12 @@ import { readScString } from "./scstring.js";
 import { tileSizeUnits } from "../utils/walls.js";
 const GUARD = 0xb504;
 
-/*
- * v69 projectile range chain (see v69_dalnost_snarjada):
- *   skills.csv castingRange (TILES) -> LogicSkillData::getCastingRangeTiles (0x9DE9CC)
- *   + LogicGamePlayUtil::getRangeAddSubtiles -> (tiles + rangeAdd) * 100 subunits
- *   -> getTravelTicks(data, range, speed) (0xA3192C):
- *        ticks = max(1, round(range * 20 / speed)), beams return 18000
- *   -> flight distance = ticks * speed / 20
- * getRangeAddSubtiles has no standalone function in v69, so the bonus is learned
- * from the ranges the engine itself feeds into getTravelTicks.
- */
 export const TILE_UNITS = 100;
 export const TICKS_PER_SEC = 20;
 const TICK_MS = 1000 / TICKS_PER_SEC;
 export const BEAM_TICKS = 18000;
-const DATA_ROW_OFF = 0x8; // LogicData::getRow(), from the getCastingRangeTiles getter body
-const COLUMN_SPAN = 48; // CSV columns probed when a getter/field read is dead
+const DATA_ROW_OFF = 0x8;
+const COLUMN_SPAN = 48;
 
 function length(x, y) {
     if (x > GUARD || x < -GUARD || y > GUARD || y < -GUARD) return 46340;
@@ -123,10 +113,6 @@ function _roundDiv(a, b) {
     return Math.round(a / b);
 }
 
-/*
- * Mirror of LogicProjectile::getTravelTicks (v69 RVA 0xA3192C). Used when the native
- * call is unavailable so aim/dodge still get tick-quantised flight numbers.
- */
 export function travelTicks(rangeUnits, speed, beam) {
     if (beam) return BEAM_TICKS;
     if (!(rangeUnits > 0) || !(speed > 0)) return 0;
@@ -190,8 +176,6 @@ function _callTravelTicks(data, rangeUnits, speed) {
         const ticks = fn(data, rangeUnits, speed) | 0;
         if (ticks <= 0 || ticks > BEAM_TICKS) return 0;
         if (ticks >= BEAM_TICKS) return ticks;
-        // Cross-check against the documented formula; anything else means the call did
-        // not land on the travel-ticks body we expect and the result must be ignored.
         if (Math.abs(travelTicks(rangeUnits, speed, false) - ticks) > 1) return 0;
         return ticks;
     } catch (_) {
@@ -212,12 +196,6 @@ function _weaponSkillFor(character) {
     return null;
 }
 
-/*
- * Logic units per castingRange column unit. The v69 note derives the range as
- * (castingRange + rangeAdd) * 100 while the older C++ assist multiplies the same column by
- * a full tile (300). Rather than trusting one of them, the multiplier is calibrated from
- * the ranges the engine feeds to getTravelTicks and defaults to the documented 100.
- */
 function _calibrateRangeScale(tiles, rangeUnits) {
     if (!(tiles >= 1 && tiles <= 64) || !(rangeUnits >= 100 && rangeUnits <= 30000)) return false;
     const per = rangeUnits / tiles;
@@ -242,15 +220,10 @@ function _rangeScaleUnits() {
     return _rangeScale > 0 ? _rangeScale : TILE_UNITS;
 }
 
-/*
- * True once the engine has shown us the range it actually flies a projectile with. Until
- * then every derived range is an unverified guess and callers must not gate on it.
- */
 export function rangeScaleCalibrated() {
     return _rangeScale > 0;
 }
 
-/* skills.csv castingRange, in tiles (LogicSkillData__getCastingRange = 0x9DE9CC). */
 function _castingRangeTiles(character) {
     const skill = _weaponSkillFor(character);
     if (!skill) return 0;
@@ -263,10 +236,6 @@ function _castingRangeTiles(character) {
     return 0;
 }
 
-/*
- * Effective weapon range in logic subunits: (castingRange + rangeAdd) * 100.
- * rangeAdd is learned from the ranges the engine feeds to getTravelTicks.
- */
 function _rangeForOwner(ownerIndex) {
     if (ownerIndex < 0) return 0;
 
@@ -369,12 +338,6 @@ function _columnBool(data, col) {
     return 0;
 }
 
-/*
- * projectiles.csv column indices are shared by every row, so a column can be
- * recovered by fingerprinting: keep only the columns whose value matches the
- * (trusted) field value on every sampled row. Runs a bounded number of times per
- * field and is only used to recover reads that the getter/field cannot serve.
- */
 function _probeColumn(kind, read, data, value) {
     let st = _colCands.get(kind);
     if (!st) {
@@ -539,11 +502,6 @@ function _readBounceKeep(data) {
     return percent > 0 ? percent / 100 : 0;
 }
 
-/*
- * 0x9CD5E0-0x9CDD70 is one contiguous block of projectile *data* accessors (getSpeed,
- * getRadius, the column readers and these flags), so the data pointer is tried first and
- * the client object only as a fallback.
- */
 function _flagFrom(fn, data, projectile) {
     if (!fn) return 0;
     try {
@@ -619,10 +577,8 @@ function _readProjectileMeta(projectile, data, speed, rangeUnits, beam) {
             if (v > 0 && v <= 60000) preMs = v;
         } catch (_) {}
     }
-    // The data-side accessors are authoritative when the CSV byte is stale/zero.
     if (!homing) homing = _flagFrom(fns.LogicProjectileClient_isHomingMissile, data, projectile);
     if (!bouncing) bouncing = _flagFrom(fns.LogicProjectileClient_isBouncing, data, projectile);
-    // getTravelTicks(data, range, speed): ticks = max(1, round(range*20/speed)), beam -> 18000
     const learned = _learnedFor(projectile, data);
     let ticks = 0;
     if (learned && learned.ticks > 0) {
@@ -728,7 +684,6 @@ function _validTarget(tx, ty, x, y) {
 
 function _readProjectileTarget(projectile, data, x, y) {
     const fns = getFunctions();
-    // Field read first: +0x1ec/+0x1f0 on the client object is the layout proven on v69.
     try {
         const hit = _validTarget(
             projectile.add(offsets.ProjectileClient_targetX).readS32() | 0,
@@ -865,12 +820,6 @@ function _removeProjectile(projectile) {
     } catch (_) {}
 }
 
-/*
- * Observes LogicProjectileClient_getTravelTicks (v69 0xA3192C). The engine calls it as
- * getTravelTicks(data, range, speed) from calculateProjectilePath / projectile setup, so
- * the observed pair is the exact range (in subunits, castingRange + rangeAdd already
- * applied) and speed the game itself flies the projectile with.
- */
 function _installTravelTicksHook(base) {
     try {
         Interceptor.attach(base.add(offsets.LogicProjectileClient_getTravelTicks), {
@@ -887,7 +836,6 @@ function _installTravelTicksHook(base) {
     } catch (_) {}
 }
 
-/* BattleScreen::calculateProjectilePath (v69 0x7B3AE8) - client trajectory engine. */
 function _installProjectilePathHook(base) {
     try {
         Interceptor.attach(base.add(offsets.CalculateProjectilePath), {
@@ -925,10 +873,6 @@ function _notifyDataReload() {
     }
 }
 
-/*
- * LogicData createReferences runs when a data table is (re)built; every cached column
- * index, casting range and speed we derived from it is stale afterwards.
- */
 function _installDataReloadHooks(base) {
     if (_dataHooksInstalled) return;
     _dataHooksInstalled = true;
@@ -944,7 +888,6 @@ function _installDataReloadHooks(base) {
             Interceptor.attach(base.add(off), { onLeave: _notifyDataReload });
         } catch (_) {}
     }
-    // Character decode = the client (re)read a character: index/range may have changed.
     try {
         Interceptor.attach(base.add(offsets.LogicCharacterClient_decode), {
             onEnter(args) {
@@ -982,7 +925,6 @@ function _installProjectileHooks(base) {
             }
         });
     } catch (_) {}
-    // Networked projectiles are populated in decode, sometimes before the ctor hook lands.
     try {
         Interceptor.attach(base.add(offsets.LogicProjectileClient_decode), {
             onEnter(args) {
