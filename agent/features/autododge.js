@@ -15,15 +15,6 @@ import
 from "../core/offsets.js";
 import
 {
-    gameDistance,
-    gameLengthFine,
-    gameNormalize,
-    gameRotateX,
-    gameRotateY
-}
-from "../core/math.js";
-import
-{
     enableProjectileTracking,
     scanData
 }
@@ -76,6 +67,8 @@ const _options = {
     safetyMargin: 25
 };
 
+const _vec2 = Memory.alloc(8);
+
 function _buildRing()
 {
     _ring.length = 0;
@@ -85,8 +78,8 @@ function _buildRing()
         const a = Math.round(360 * i / n);
         _ring.push(
         {
-            x: gameRotateX(1000, 0, a) / 1000,
-            y: gameRotateY(1000, 0, a) / 1000
+            x: getFunctions().LogicMath_getRotateDx(1000, 0, a) / 1000,
+            y: getFunctions().LogicMath_getRotateDy(1000, 0, a) / 1000
         });
     }
     _headingIdx = -1;
@@ -117,7 +110,9 @@ function _traveled(p)
     const sx = p.spawnX;
     const sy = p.spawnY;
     if (!isFinite(sx) || !isFinite(sy)) return 0;
-    return gameLengthFine(p.x - sx, p.y - sy);
+    _vec2.writeS32((p.x - sx) | 0);
+    _vec2.add(4).writeS32((p.y - sy) | 0);
+    return getFunctions().LogicVector2_getLength(_vec2);
 }
 
 function _lifeLeft(p)
@@ -155,7 +150,9 @@ function _collectLive(myX, myY, myRadius)
             vx = 0;
             vy = 0;
         }
-        const spd = gameLengthFine(vx, vy);
+        _vec2.writeS32(vx | 0);
+        _vec2.add(4).writeS32(vy | 0);
+        const spd = getFunctions().LogicVector2_getLength(_vec2);
         const slow = (p.speed || 0) > 0 && p.speed < 1600;
         const lockPath = !!p.isBeam;
         const blob = !lockPath && !indirect && slow;
@@ -165,14 +162,11 @@ function _collectLive(myX, myY, myRadius)
         let uy = 0;
         if (spd >= 1)
         {
-            const dir =
-            {
-                x: vx,
-                y: vy
-            };
-            gameNormalize(dir, 1000);
-            ux = dir.x / 1000;
-            uy = dir.y / 1000;
+            _vec2.writeS32(vx | 0);
+            _vec2.add(4).writeS32(vy | 0);
+            getFunctions().LogicVector2_normalize(_vec2, 1000);
+            ux = _vec2.readS32() / 1000;
+            uy = _vec2.add(4).readS32() / 1000;
         }
         const skipAlong = blob || indirect;
         let playerAlong = 0;
@@ -186,7 +180,7 @@ function _collectLive(myX, myY, myRadius)
         }
         const left = _lifeLeft(p);
         if (left <= 10) continue;
-        const gap = gameDistance(p.x, p.y, myX, myY) - bodyR - shotR;
+        const gap = getFunctions().LogicGameplayUtil_getDistanceBetween(p.x | 0, p.y | 0, myX | 0, myY | 0) - bodyR - shotR;
         if (left < 0.85 * Math.max(0, gap)) continue;
         if (!skipAlong && spd >= 1 && playerAlong > left + shotR) continue;
         out.push(
@@ -211,10 +205,12 @@ function _clearanceFor(threats, myX, myY, mvx, mvy)
     for (let i = 0; i < threats.length; i++)
     {
         const t = threats[i];
-        const spd = gameLengthFine(t.vx, t.vy);
+        _vec2.writeS32(t.vx | 0);
+        _vec2.add(4).writeS32(t.vy | 0);
+        const spd = getFunctions().LogicVector2_getLength(_vec2);
         const relx = t.x - myX;
         const rely = t.y - myY;
-        const reach = gameDistance(t.x, t.y, myX, myY);
+        const reach = getFunctions().LogicGameplayUtil_getDistanceBetween(t.x | 0, t.y | 0, myX | 0, myY | 0);
         let maxT = horizon;
         if (spd > 1)
         {
@@ -239,7 +235,9 @@ function _clearanceFor(threats, myX, myY, mvx, mvy)
             cx = relx + vrx * ts;
             cy = rely + vry * ts;
         }
-        const clear = gameLengthFine(cx, cy) - t.rad;
+        _vec2.writeS32(cx | 0);
+        _vec2.add(4).writeS32(cy | 0);
+        const clear = getFunctions().LogicVector2_getLength(_vec2) - t.rad;
         if (clear < minClear) minClear = clear;
     }
     return minClear;

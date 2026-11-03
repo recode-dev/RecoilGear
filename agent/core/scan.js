@@ -12,11 +12,6 @@ import
 from "./offsets.js";
 import
 {
-    gameLengthFine
-}
-from "./math.js";
-import
-{
     readScString
 }
 from "./scstring.js";
@@ -28,6 +23,7 @@ var _liveProjectiles = new Map();
 var _friendlyIdx = new Set();
 var _projectileHooksInstalled = false;
 var _charRange = new Map();
+const _vec2 = Memory.alloc(8);
 var _speedByData = new Map();
 var _charsByIndex = new Map();
 
@@ -269,7 +265,9 @@ function _updateLiveProjectiles(now)
             {
                 const observedVx = dx / dt;
                 const observedVy = dy / dt;
-                if (gameLengthFine(observedVx, observedVy) > 8500)
+                _vec2.writeS32(observedVx | 0);
+                _vec2.add(4).writeS32(observedVy | 0);
+                if (getFunctions().LogicVector2_getLength(_vec2) > 8500)
                 {
                     projectile.lastX = x;
                     projectile.lastY = y;
@@ -281,7 +279,9 @@ function _updateLiveProjectiles(now)
                 projectile.vy = projectile.vy * (1 - alpha) + observedVy * alpha;
                 projectile.hasVelocitySample = true;
 
-            const measured = Math.round(gameLengthFine(projectile.vx, projectile.vy));
+            _vec2.writeS32(projectile.vx | 0);
+            _vec2.add(4).writeS32(projectile.vy | 0);
+            const measured = getFunctions().LogicVector2_getLength(_vec2);
             if (measured >= 300 && measured <= 8500)
             {
                 projectile.speed = measured;
