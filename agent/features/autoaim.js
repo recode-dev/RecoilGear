@@ -155,7 +155,6 @@ function _ownProjectileSpeed()
             const data = skill && !skill.isNull() ? fns.LogicSkillData_getProjectileData(skill, 0) : null;
             if (data && !data.isNull())
             {
-                speed = data.add(offsets.ProjectileData_speed).readU32() | 0;
                 _ownBeam = !!(fns.LogicProjectileData_isBeam && fns.LogicProjectileData_isBeam(data));
             }
         }

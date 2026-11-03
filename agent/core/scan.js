@@ -110,19 +110,6 @@ function _readOwnerIndex(obj)
 
 function _bodyOf(obj)
 {
-    if (!isValidPtr(obj)) return obj;
-    if (!offsets.LogicCharacterClient_renderBody) return obj;
-    try
-    {
-        const body = obj.add(offsets.LogicCharacterClient_renderBody).readPointer();
-        if (!isValidPtr(body) || body.equals(obj)) return obj;
-        const objectVtable = obj.readPointer();
-        const bodyVtable = body.readPointer();
-        if (!bodyVtable.equals(objectVtable)) return obj;
-        return body;
-    }
-    catch (_)
-    {}
     return obj;
 }
 
@@ -235,9 +222,7 @@ function _captureProjectile(projectile, data, ownerTeamOverride)
         }
         const x = fns.LogicGameObjectClient_getX(projectile) | 0;
         const y = fns.LogicGameObjectClient_getY(projectile) | 0;
-        const speed = Math.max(1, offsets.ProjectileData_speed
-            ? data.add(offsets.ProjectileData_speed).readU32() | 0
-            : (fns.LogicProjectileData_getSpeed ? fns.LogicProjectileData_getSpeed(data) | 0 : 0));
+        const speed = 0;
         const radius = Math.max(0, offsets.ProjectileData_radius
             ? data.add(offsets.ProjectileData_radius).readU32() | 0
             : (fns.LogicProjectileData_getRadius ? fns.LogicProjectileData_getRadius(data) | 0 : 0));
