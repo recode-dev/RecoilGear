@@ -182,8 +182,22 @@ function rotate(vec, angle) {
     return vec;
 }
 
+function _missDistance(x1, y1, x2, y2, cx, cy) {
+    const dx = x2 - x1;
+    const dy = y2 - y1;
+    const lenSq = dx * dx + dy * dy;
+    const rx = cx - x1;
+    const ry = cy - y1;
+    if (!(lenSq > 0)) return Math.sqrt(rx * rx + ry * ry);
+    let t = (rx * dx + ry * dy) / lenSq;
+    t = t < 0 ? 0 : t > 1 ? 1 : t;
+    const qx = rx - dx * t;
+    const qy = ry - dy * t;
+    return Math.sqrt(qx * qx + qy * qy);
+}
+
 function segmentHitsCircle(x1, y1, x2, y2, cx, cy, radius) {
-    return LogicMath.getDistanceSquareToLine(x1, y1, x2, y2, cx, cy) <= radius * radius;
+    return _missDistance(x1, y1, x2, y2, cx, cy) <= radius;
 }
 
 const MOVE_INPUT_TYPE = 2;
@@ -197,7 +211,8 @@ const TUNE = {
     HORIZON_S: 1.4,
     KEEP_BAND: 250,
     MOMENTUM: 150,
-    ENGAGE: 100,
+    CURVE_MAX: 400,
+    CURVE_FRAC: 0.35,
     RELEASE_GRACE_MS: 60,
     WALL_HIT: 2400,
     MIN_ROOM: 400,
@@ -299,28 +314,29 @@ function _sweptEnd(x, y, vx, vy, left) {
     if (!(vlen > 1)) return null;
     let span = vlen * TUNE.HORIZON_S;
     if (left >= 0 && left < span) span = left;
-    const end = normalize(
-        {
-            x: vx,
-            y: vy
-        },
-        span | 0
-    );
-    return { x: x + end.x, y: y + end.y };
+    if (!(span > 0)) return { x: x, y: y, len: 0 };
+    const k = span / vlen;
+    return { x: x + vx * k, y: y + vy * k, len: span };
 }
 
-function _reachesMe(p, myX, myY, bodyR, shotR, vx, vy, left) {
-    const gap = distance(p.x, p.y, myX, myY) - bodyR - shotR;
-    if (left >= 0 && left < 0.85 * LogicMath.max(0, gap)) return false;
-    const contact = bodyR + shotR + TUNE.ENGAGE;
+function _contactFor(p, bodyR, shotR, left) {
+    let contact = bodyR + shotR;
+    if (_steerActive(p) || p.homing)
+        contact += LogicMath.min(TUNE.CURVE_MAX, TUNE.CURVE_FRAC * LogicMath.max(0, left));
+    return contact;
+}
+
+function _reachesMe(p, myX, myY, contact, vx, vy, left) {
+    const vlen = length(vx, vy);
     if (p.isIndirect && p.hasTarget) {
+        const toLand = distance(p.x, p.y, p.targetX, p.targetY);
+        if (left >= 0 && left < toLand) return false;
         return distance(p.targetX, p.targetY, myX, myY) <= contact;
     }
+    if (!(vlen > 1)) return distance(p.x, p.y, myX, myY) <= contact;
+    if (left >= 0 && left < distance(p.x, p.y, myX, myY) - contact) return false;
     const end = _sweptEnd(p.x, p.y, vx, vy, left);
-    if (!end) return distance(p.x, p.y, myX, myY) <= contact;
-    let miss = LogicMath.getDistanceToLine(p.x, p.y, end.x, end.y, myX, myY);
-    if (_steerActive(p) || p.homing) miss -= LogicMath.min(400, 0.35 * LogicMath.max(0, left));
-    return miss <= contact;
+    return _missDistance(p.x, p.y, end.x, end.y, myX, myY) <= contact;
 }
 
 function _steerActive(p) {
@@ -442,7 +458,8 @@ function _collectLive(myX, myY, myRadius, now) {
             if (!pathEngineActive(now) && !(p.travelDistance > 0))
                 left = LogicMath.min(left, TUNE.HORIZON_S * travel);
         }
-        if (!_reachesMe(p, myX, myY, bodyR, shotR, vx, vy, left)) {
+        const contact = _contactFor(p, bodyR, shotR, left);
+        if (!_reachesMe(p, myX, myY, contact, vx, vy, left)) {
             _pushLane(lanes, p.x, p.y, blob ? 0 : vx, blob ? 0 : vy, left);
             continue;
         }
@@ -452,7 +469,7 @@ function _collectLive(myX, myY, myRadius, now) {
             vx: blob ? 0 : vx,
             vy: blob ? 0 : vy,
             rad,
-            hitRad: shotR + bodyR + radPad,
+            hitRad: contact,
             left,
             owner: p.ownerIndex,
             sx: p.spawnX,
@@ -587,7 +604,7 @@ function _clearanceFor(threats, myX, myY, mvx, mvy) {
                 dist = reach;
             } else if (frame.x >= 0) {
                 dist = reach;
-            } else if ((LogicMath.abs(frame.x) >= maxT * vlen) | 0) {
+            } else if (LogicMath.abs(frame.x) >= maxT * vlen) {
                 const end = normalize(
                     {
                         x: vrx,
