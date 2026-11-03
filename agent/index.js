@@ -1,4 +1,4 @@
-import { getFunctions, initFunctions } from "./core/functions.js";
+import { initFunctions } from "./core/functions.js";
 
 import { offsets } from "./core/offsets.js";
 
@@ -25,9 +25,7 @@ let _lastFrameAt = 0;
 let _dodgeEveryMs = SERVER_TICK_MS;
 
 let _installed = false;
-let _ticker = null;
 let _lastLogicAt = 0;
-let _lastHookAt = 0;
 
 function findModule() {
     try {
@@ -38,20 +36,6 @@ function findModule() {
         if (mods[i].name.toLowerCase().indexOf("nulls") >= 0) return mods[i];
     }
     return null;
-}
-
-function battleModeClient() {
-    try {
-        const fns = getFunctions();
-        if (!fns.BattleMode_getInstance) return null;
-        const mode = fns.BattleMode_getInstance();
-        if (!mode || mode.isNull()) return null;
-        const client = mode.add(offsets.BattleMode_client).readPointer();
-        if (!client || client.isNull()) return null;
-        return client;
-    } catch (_) {
-        return null;
-    }
 }
 
 function tick(bm) {
@@ -109,28 +93,24 @@ export function install() {
     try {
         Interceptor.attach(_base.add(offsets.LogicBattleModeClient_update), {
             onEnter(args) {
-                _lastHookAt = Date.now();
                 tick(args[0]);
             }
         });
     } catch (_) {}
-
-    if (!_ticker) {
-        _ticker = setInterval(function () {
-            if (Date.now() - _lastHookAt < 250) return;
-            const bm = battleModeClient();
-            if (bm) tick(bm);
-        }, 16);
-    }
 
     _installed = true;
     return true;
 }
 
 if (!install()) {
+    let attempts = 0;
     const retry = setInterval(function () {
+        attempts++;
         try {
             if (install()) clearInterval(retry);
-        } catch (_) {}
+            else if (attempts >= 40) clearInterval(retry);
+        } catch (_) {
+            if (attempts >= 40) clearInterval(retry);
+        }
     }, 500);
 }
