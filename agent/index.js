@@ -109,12 +109,15 @@ function tick(bm)
     try
     {
         updateScanner(bm, now);
+    }
+    catch (_)
+    {}
+    try
+    {
         updateAutoaim();
     }
-    catch (e)
-    {
-        return;
-    }
+    catch (_)
+    {}
     try
     {
         maybeRefreshWallCache(bm, now);
@@ -177,4 +180,15 @@ export function install()
     return true;
 }
 
-install();
+if (!install())
+{
+    const retry = setInterval(function ()
+    {
+        try
+        {
+            if (install()) clearInterval(retry);
+        }
+        catch (_)
+        {}
+    }, 500);
+}

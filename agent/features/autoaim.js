@@ -72,7 +72,7 @@ function _sample(gid, x, y, moveSpeed, now)
     const vxWindow = (x - first.x) / span;
     const vyWindow = (y - first.y) / span;
     const magnitude = Math.sqrt(vxWindow * vxWindow + vyWindow * vyWindow);
-    if (magnitude < 30) return { x: x, y: y, vx: 0, vy: 0, juke: false };
+    if (magnitude < 30) return { x: x, y: y, vx: 0, vy: 0, ax: 0, ay: 0, juke: false };
 
     let dx = 0;
     let dy = 0;
@@ -120,6 +120,13 @@ function _sample(gid, x, y, moveSpeed, now)
 function _solve(mx, my, pred, speed, range)
 {
     if (_ownBeam) return { x: Math.round(pred.x), y: Math.round(pred.y), t: 0 };
+
+    if (range > 0)
+    {
+        const d0 = Math.sqrt((pred.x - mx) * (pred.x - mx) + (pred.y - my) * (pred.y - my));
+        if (d0 > range) return null;
+    }
+    if (!(speed > 0)) return { x: Math.round(pred.x), y: Math.round(pred.y), t: 0 };
 
     let px = pred.x;
     let py = pred.y;
@@ -212,8 +219,8 @@ function _aimAt(enemy, now)
     const mx = scanData.myX;
     const my = scanData.myY;
     const speed = _ownProjectileSpeed();
-    const pred = _sample(enemy.gid, ex, ey, enemy.moveSpeed, now);
-    if (!pred) return null;
+    const pred = _sample(enemy.gid, ex, ey, enemy.moveSpeed, now) ||
+        { x: ex, y: ey, vx: 0, vy: 0, ax: 0, ay: 0, juke: false };
     const aim = _solve(mx, my, pred, speed, _ownRange());
     if (!aim) return null;
     return aim;
@@ -250,7 +257,8 @@ function _pickTarget(now)
         if (_isSkipped(e.brawlerName)) continue;
         if ((e.teamId | 0) === myTeam) continue;
         if (losCheck(mx, my, e.x, e.y, BLOCKS_PROJECTILES) === false) continue;
-        const pred = _sample(e.gid, e.x, e.y, e.moveSpeed, now);
+        const pred = _sample(e.gid, e.x, e.y, e.moveSpeed, now) ||
+            { x: e.x, y: e.y, vx: 0, vy: 0, ax: 0, ay: 0, juke: false };
         const dx = e.x - mx;
         const dy = e.y - my;
         const d = Math.sqrt(dx * dx + dy * dy);
@@ -362,6 +370,9 @@ export function resetAutoaim()
 {
     _target = null;
     _track.clear();
-    _speed = 0;
+    _projectileSpeed = 0;
     _speedAt = 0;
+    _ownBeam = false;
+    _rangeCache = 0;
+    _rangeAt = 0;
 }

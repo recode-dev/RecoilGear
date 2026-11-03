@@ -285,7 +285,7 @@ export function updateAutododge()
     if (!isFinite(myX) || !isFinite(myY)) return;
     if (Math.abs(myX) < TUNE.MIN_POS && Math.abs(myY) < TUNE.MIN_POS) return;
     const speed = scanData.mySpeed || 720;
-    const myRadius = scanData.myRadius;
+    const myRadius = scanData.myRadius > 0 ? scanData.myRadius : 120;
     const hazards = _collectLive(myX, myY, myRadius);
     if (hazards.length === 0)
     {

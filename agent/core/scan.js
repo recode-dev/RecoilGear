@@ -35,6 +35,7 @@ export var scanData = {
     myX: 0,
     myY: 0,
     mySpeed: 720,
+    myRadius: 0,
     enemies: [],
     projectiles: [],
     measuredSpeed: 0,
@@ -264,7 +265,13 @@ function _updateLiveProjectiles(now)
             {
                 const observedVx = dx / dt;
                 const observedVy = dy / dt;
-                if (Math.sqrt(observedVx * observedVx + observedVy * observedVy) > 8500) continue;
+                if (Math.sqrt(observedVx * observedVx + observedVy * observedVy) > 8500)
+                {
+                    projectile.lastX = x;
+                    projectile.lastY = y;
+                    projectile.lastTs = now;
+                    continue;
+                }
                 const alpha = projectile.hasVelocitySample ? 0.4 : 1;
                 projectile.vx = projectile.vx * (1 - alpha) + observedVx * alpha;
                 projectile.vy = projectile.vy * (1 - alpha) + observedVy * alpha;
@@ -490,7 +497,10 @@ export function resetScannerCache()
     _liveProjectiles.clear();
     _friendlyIdx.clear();
     _charsByIndex.clear();
+    _speedByData.clear();
     scanData.projectiles = [];
+    scanData.measuredSpeed = 0;
+    scanData.myRadius = 0;
 }
 
 export function initScanner(base)
