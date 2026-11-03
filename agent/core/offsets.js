@@ -69,6 +69,5 @@ export const offsets = Object.freeze({
 
     LogicData_getName: 0x9a4f1c,
 
-    ByteStream__WriteBytes: 0xbd5f3c,
-
+    ByteStream__WriteBytes: 0xbd5f3c
 });

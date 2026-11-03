@@ -1,15 +1,5 @@
-import
-{
-    getFunctions,
-    isValidPtr,
-    ptrFromU32
-}
-from "../core/functions.js";
-import
-{
-    offsets
-}
-from "../core/offsets.js";
+import { getFunctions, isValidPtr, ptrFromU32 } from "../core/functions.js";
+import { offsets } from "../core/offsets.js";
 
 const MAX_MAP_TILES = 120;
 const MAX_TOTAL_TILES = MAX_MAP_TILES * MAX_MAP_TILES;
@@ -27,39 +17,31 @@ var needsRebuild = true;
 var lastFailedTs = 0;
 var tileWatchInstalled = false;
 
-function _syncTileSize()
-{
-    try
-    {
+function _syncTileSize() {
+    try {
         const fn = getFunctions().LogicTileMap_tileToLogic;
         if (!fn) return;
         const a = fn(0) | 0;
         const b = fn(1) | 0;
         const size = b - a;
         if (size >= 100 && size <= 2000) tileSize = size;
-    }
-    catch (_)
-    {}
+    } catch (_) {}
 }
 
-function _rebuildFrom(tileMap)
-{
+function _rebuildFrom(tileMap) {
     if (!isValidPtr(tileMap)) return false;
-    try
-    {
+    try {
         _syncTileSize();
-        try
-        {
+        try {
             const pf = tileMap.add(offsets.TileMap_pathFinder).readPointer();
             pathFinder = isValidPtr(pf) ? pf : null;
-        }
-        catch (_)
-        {
+        } catch (_) {
             pathFinder = null;
         }
         const width = tileMap.add(offsets.TileMap_Width).readS32();
         const height = tileMap.add(offsets.TileMap_Height).readS32();
-        if (width <= 0 || width > MAX_MAP_TILES || height <= 0 || height > MAX_MAP_TILES) return false;
+        if (width <= 0 || width > MAX_MAP_TILES || height <= 0 || height > MAX_MAP_TILES)
+            return false;
         const total = width * height;
         if (total > MAX_TOTAL_TILES) return false;
         const tiles = tileMap.add(offsets.TileMap_TilesArray).readPointer();
@@ -72,35 +54,27 @@ function _rebuildFrom(tileMap)
         const grid = new Uint8Array(total);
         const flagsByType = new Map();
 
-        for (let i = 0; i < total; i++)
-        {
+        for (let i = 0; i < total; i++) {
             const lo = view.getUint32(i * pointerSize, true);
             const hi = view.getUint32(i * pointerSize + 4, true);
             if (lo === 0 && hi === 0) continue;
             const tile = ptrFromU32(lo, hi);
             let tileType;
-            try
-            {
+            try {
                 tileType = tile.readPointer();
-            }
-            catch (_)
-            {
+            } catch (_) {
                 continue;
             }
             if (!isValidPtr(tileType)) continue;
             const key = tileType.toString();
             let flags = flagsByType.get(key);
-            if (flags === void 0)
-            {
+            if (flags === void 0) {
                 flags = 0;
-                try
-                {
+                try {
                     const packed = tileType.add(offsets.TileTypeData_BlocksMovement).readU16();
                     if (packed & 0xff) flags |= BLOCKS_MOVEMENT;
                     if (packed >> 8) flags |= BLOCKS_PROJECTILES;
-                }
-                catch (_)
-                {}
+                } catch (_) {}
                 flagsByType.set(key, flags);
             }
             grid[i] = flags;
@@ -111,15 +85,12 @@ function _rebuildFrom(tileMap)
         wallsHeight = height;
         needsRebuild = false;
         return true;
-    }
-    catch (_)
-    {
+    } catch (_) {
         return false;
     }
 }
 
-export function notifyBattleModeChanged(battleMode)
-{
+export function notifyBattleModeChanged(battleMode) {
     walls = null;
     wallsWidth = 0;
     wallsHeight = 0;
@@ -128,48 +99,37 @@ export function notifyBattleModeChanged(battleMode)
     maybeRefreshWallCache(battleMode, Date.now());
 }
 
-export function maybeRefreshWallCache(battleMode, now)
-{
+export function maybeRefreshWallCache(battleMode, now) {
     if (!needsRebuild || !isValidPtr(battleMode)) return;
     if (now === void 0) now = Date.now();
     if (now - lastFailedTs < RETRY_MS) return;
-    try
-    {
+    try {
         const tileMap = getFunctions().LogicBattleModeClient_getTileMap(battleMode);
         if (_rebuildFrom(tileMap)) return;
-    }
-    catch (_)
-    {}
+    } catch (_) {}
     lastFailedTs = now;
 }
 
-export function watchTileChanges(base)
-{
+export function watchTileChanges(base) {
     if (tileWatchInstalled) return;
-    try
-    {
-        Interceptor.attach(base.add(offsets.LogicTile__setData),
-        {
-            onEnter()
-            {
+    try {
+        Interceptor.attach(base.add(offsets.LogicTile__setData), {
+            onEnter() {
                 needsRebuild = true;
             }
         });
         tileWatchInstalled = true;
-    }
-    catch (_)
-    {}
+    } catch (_) {}
 }
-export function losCheck(wx0, wy0, wx1, wy1, checkBit)
-{
+export function losCheck(wx0, wy0, wx1, wy1, checkBit) {
     const grid = walls;
     if (!grid) return true;
     const width = wallsWidth;
     const height = wallsHeight;
-    let cx = wx0 / tileSize | 0;
-    let cy = wy0 / tileSize | 0;
-    const tx = wx1 / tileSize | 0;
-    const ty = wy1 / tileSize | 0;
+    let cx = (wx0 / tileSize) | 0;
+    let cy = (wy0 / tileSize) | 0;
+    const tx = (wx1 / tileSize) | 0;
+    const ty = (wy1 / tileSize) | 0;
     if (cx === tx && cy === ty) return true;
     const dx = Math.abs(tx - cx);
     const dy = -Math.abs(ty - cy);
@@ -177,16 +137,13 @@ export function losCheck(wx0, wy0, wx1, wy1, checkBit)
     const sy = cy < ty ? 1 : -1;
     let err = dx + dy;
     const maxSteps = dx - dy + 2;
-    for (let n = 0; n < maxSteps; n++)
-    {
+    for (let n = 0; n < maxSteps; n++) {
         const e2 = 2 * err;
-        if (e2 >= dy)
-        {
+        if (e2 >= dy) {
             err += dy;
             cx += sx;
         }
-        if (e2 <= dx)
-        {
+        if (e2 <= dx) {
             err += dx;
             cy += sy;
         }
@@ -196,25 +153,22 @@ export function losCheck(wx0, wy0, wx1, wy1, checkBit)
     }
     return true;
 }
-function isBlockedAt(wx, wy, checkBit)
-{
+function isBlockedAt(wx, wy, checkBit) {
     const grid = walls;
     if (!grid) return false;
     const width = wallsWidth;
     const height = wallsHeight;
     if (width <= 0 || height <= 0) return false;
-    const tx = wx / tileSize | 0;
-    const ty = wy / tileSize | 0;
+    const tx = (wx / tileSize) | 0;
+    const ty = (wy / tileSize) | 0;
     if (tx < 0 || tx >= width || ty < 0 || ty >= height) return false;
     return !!(grid[ty * width + tx] & checkBit);
 }
 
-export function firstWallHit(wx0, wy0, wx1, wy1)
-{
+export function firstWallHit(wx0, wy0, wx1, wy1) {
     const fn = getFunctions().LogicGamePlayUtil_getClosestPathfinderCollision;
     if (!fn || !isValidPtr(pathFinder)) return -1;
-    try
-    {
+    try {
         if (!probeOut) probeOut = Memory.alloc(8);
         probeOut.writeS32(0);
         probeOut.add(4).writeS32(0);
@@ -223,17 +177,19 @@ export function firstWallHit(wx0, wy0, wx1, wy1)
         const hy = probeOut.add(4).readS32() | 0;
         if (!(hit & 1)) return Math.round(Math.hypot(wx1 - wx0, wy1 - wy0));
         return Math.max(0, Math.round(Math.hypot(hx - wx0, hy - wy0)));
-    }
-    catch (_)
-    {
+    } catch (_) {
         return -1;
     }
 }
 
-export function isBlockedWide(wx, wy, radius, checkBit)
-{
+export function isBlockedWide(wx, wy, radius, checkBit) {
     if (isBlockedAt(wx, wy, checkBit)) return true;
     const r = radius > 0 ? radius : 0;
     if (r <= 0) return false;
-    return isBlockedAt(wx + r, wy, checkBit) || isBlockedAt(wx - r, wy, checkBit) || isBlockedAt(wx, wy + r, checkBit) || isBlockedAt(wx, wy - r, checkBit);
+    return (
+        isBlockedAt(wx + r, wy, checkBit) ||
+        isBlockedAt(wx - r, wy, checkBit) ||
+        isBlockedAt(wx, wy + r, checkBit) ||
+        isBlockedAt(wx, wy - r, checkBit)
+    );
 }

@@ -1,53 +1,16 @@
-import
-{
-    getFunctions,
-    initFunctions
-}
-from "./core/functions.js";
+import { getFunctions, initFunctions } from "./core/functions.js";
 
-import
-{
-    offsets
-}
-from "./core/offsets.js";
+import { offsets } from "./core/offsets.js";
 
-import
-{
-    initScanner,
-    resetScannerCache,
-    updateScanner
-}
-from "./core/scan.js";
+import { initScanner, resetScannerCache, updateScanner } from "./core/scan.js";
 
-import
-{
-    notifyBattleModeChanged,
-    watchTileChanges,
-    maybeRefreshWallCache
-}
-from "./utils/walls.js";
+import { notifyBattleModeChanged, watchTileChanges, maybeRefreshWallCache } from "./utils/walls.js";
 
-import
-{
-    setupLicense
-}
-from "./utils/license.js";
+import { setupLicense } from "./utils/license.js";
 
-import
-{
-    resetAutododge,
-    setupAutododge,
-    updateAutododge
-}
-from "./features/autododge.js";
+import { resetAutododge, setupAutododge, updateAutododge } from "./features/autododge.js";
 
-import
-{
-    resetAutoaim,
-    setupAutoaim,
-    updateAutoaim
-}
-from "./features/autoaim.js";
+import { resetAutoaim, setupAutoaim, updateAutoaim } from "./features/autoaim.js";
 
 let _base = null;
 let _lastBattle = null;
@@ -61,26 +24,19 @@ let _ticker = null;
 let _lastLogicAt = 0;
 let _lastHookAt = 0;
 
-function findModule()
-{
-    try
-    {
+function findModule() {
+    try {
         return Process.getModuleByName("Nulls Brawl");
-    }
-    catch (_)
-    {}
+    } catch (_) {}
     const mods = Process.enumerateModules();
-    for (let i = 0; i < mods.length; i++)
-    {
+    for (let i = 0; i < mods.length; i++) {
         if (mods[i].name.toLowerCase().indexOf("nulls") >= 0) return mods[i];
     }
     return null;
 }
 
-function battleModeClient()
-{
-    try
-    {
+function battleModeClient() {
+    try {
         const fns = getFunctions();
         if (!fns.BattleMode_getInstance) return null;
         const mode = fns.BattleMode_getInstance();
@@ -88,19 +44,15 @@ function battleModeClient()
         const client = mode.add(offsets.BattleMode_client).readPointer();
         if (!client || client.isNull()) return null;
         return client;
-    }
-    catch (_)
-    {
+    } catch (_) {
         return null;
     }
 }
 
-function tick(bm)
-{
+function tick(bm) {
     if (!bm || bm.isNull()) return;
 
-    if (!_lastBattle || !_lastBattle.equals(bm))
-    {
+    if (!_lastBattle || !_lastBattle.equals(bm)) {
         _lastBattle = bm;
         resetScannerCache();
         resetAutododge();
@@ -111,44 +63,29 @@ function tick(bm)
     const now = Date.now();
     const frameDt = now - _lastFrameAt;
     _lastFrameAt = now;
-    if (frameDt >= 4 && frameDt <= 100)
-    {
+    if (frameDt >= 4 && frameDt <= 100) {
         _frameMs = _frameMs * 0.85 + frameDt * 0.15;
-        const stride = Math.max(1, Math.ceil(SERVER_TICK_MS * 0.8 / _frameMs));
+        const stride = Math.max(1, Math.ceil((SERVER_TICK_MS * 0.8) / _frameMs));
         _dodgeEveryMs = stride * _frameMs - _frameMs * 0.5;
     }
-    try
-    {
+    try {
         updateScanner(bm, now);
-    }
-    catch (_)
-    {}
-    try
-    {
+    } catch (_) {}
+    try {
         updateAutoaim();
-    }
-    catch (_)
-    {}
-    try
-    {
+    } catch (_) {}
+    try {
         maybeRefreshWallCache(bm, now);
-    }
-    catch (_)
-    {}
-    if (now - _lastLogicAt >= _dodgeEveryMs)
-    {
+    } catch (_) {}
+    if (now - _lastLogicAt >= _dodgeEveryMs) {
         _lastLogicAt = now;
-        try
-        {
+        try {
             updateAutododge();
-        }
-        catch (_)
-        {}
+        } catch (_) {}
     }
 }
 
-export function install()
-{
+export function install() {
     if (_installed) return true;
     const mod = findModule();
     if (!mod) return false;
@@ -162,25 +99,19 @@ export function install()
     setupAutoaim();
 
     let hooked = false;
-    try
-    {
-        Interceptor.attach(_base.add(offsets.LogicBattleModeClient_update),
-        {
-            onEnter(args)
-            {
+    try {
+        Interceptor.attach(_base.add(offsets.LogicBattleModeClient_update), {
+            onEnter(args) {
                 _lastHookAt = Date.now();
                 tick(args[0]);
             }
         });
         hooked = true;
-    }
-    catch (_)
-    {}
+        void hooked;
+    } catch (_) {}
 
-    if (!_ticker)
-    {
-        _ticker = setInterval(function ()
-        {
+    if (!_ticker) {
+        _ticker = setInterval(function () {
             if (Date.now() - _lastHookAt < 250) return;
             const bm = battleModeClient();
             if (bm) tick(bm);
@@ -191,15 +122,10 @@ export function install()
     return true;
 }
 
-if (!install())
-{
-    const retry = setInterval(function ()
-    {
-        try
-        {
+if (!install()) {
+    const retry = setInterval(function () {
+        try {
             if (install()) clearInterval(retry);
-        }
-        catch (_)
-        {}
+        } catch (_) {}
     }, 500);
 }

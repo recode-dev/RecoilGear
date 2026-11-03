@@ -1,21 +1,11 @@
-import
-{
-    offsets
-}
-from "./offsets.js";
-import
-{
-    getFunctions
-}
-from "./functions.js";
+import { offsets } from "./offsets.js";
+import { getFunctions } from "./functions.js";
 
 const CMD_BUF_SIZE = 72;
 const _zeroBuf = new Uint8Array(CMD_BUF_SIZE).buffer;
 
-export function sendCommand(cmdType, fillFn)
-{
-    try
-    {
+export function sendCommand(cmdType, fillFn) {
+    try {
         const fns = getFunctions();
         const battle = fns.BattleMode_getInstance();
         if (!battle || battle.isNull()) return false;
@@ -31,9 +21,7 @@ export function sendCommand(cmdType, fillFn)
         if (fillFn) fillFn(ci, battle);
         fns.ClientInputManager_addInput(mgr, ci);
         return true;
-    }
-    catch (_)
-    {
+    } catch (_) {
         return false;
     }
 }

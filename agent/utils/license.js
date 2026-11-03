@@ -1,15 +1,6 @@
-import
-{
-    getBase,
-    getImage
-}
-from "../core/functions.js";
+import { getBase, getImage } from "../core/functions.js";
 
-import
-{
-    offsets
-}
-from "../core/offsets.js";
+import { offsets } from "../core/offsets.js";
 
 const REQUEST_BODY_PTR = 192;
 const REQUEST_BODY_SIZE = 200;
@@ -18,12 +9,12 @@ const LICENSE_PATH = "/res/license.bin";
 var license = null;
 var listener = null;
 
-export function setupLicense()
-{
+export function setupLicense() {
     if (listener) return;
 
     const off = offsets.ByteStream__WriteBytes;
-    if (typeof off !== "number" || off <= 0) throw new Error("license: missing offset ByteStream__WriteBytes");
+    if (typeof off !== "number" || off <= 0)
+        throw new Error("license: missing offset ByteStream__WriteBytes");
 
     const image = getImage();
     if (!image) throw new Error("license: image path is not initialized");
@@ -32,10 +23,8 @@ export function setupLicense()
 
     const malloc = new NativeFunction(Module.findGlobalExportByName("malloc"), "pointer", ["int"]);
 
-    listener = Interceptor.attach(getBase().add(off),
-    {
-        onEnter(args)
-        {
+    listener = Interceptor.attach(getBase().add(off), {
+        onEnter(args) {
             const body = JSON.stringify({ features: [], connection: "Keep-Alive" });
             const total = license.byteLength + body.length + 1;
             const buf = malloc(total);

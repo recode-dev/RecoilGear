@@ -1,33 +1,27 @@
-import
-{
-    offsets
-}
-from "./offsets.js";
+import { offsets } from "./offsets.js";
 
 var base = null;
 var image = null;
 var _n = null;
 
-export function isValidPtr(value)
-{
+export function isValidPtr(value) {
     return value && !value.isNull();
 }
 
-export function ptrFromU32(lo, hi)
-{
+export function ptrFromU32(lo, hi) {
     if (!lo && !hi) return ptr(0);
-    return ptr("0x" + (hi >>> 0).toString(16).padStart(8, "0") + (lo >>> 0).toString(16).padStart(8, "0"));
+    return ptr(
+        "0x" + (hi >>> 0).toString(16).padStart(8, "0") + (lo >>> 0).toString(16).padStart(8, "0")
+    );
 }
 
-function _nf(name, ret, args)
-{
+function _nf(name, ret, args) {
     const off = offsets[name];
     if (typeof off !== "number" || off <= 0) throw new Error("functions: missing offset " + name);
     return new NativeFunction(base.add(off), ret, args);
 }
 
-export function initFunctions(baseIn, imageIn)
-{
+export function initFunctions(baseIn, imageIn) {
     if (_n) return _n;
     base = baseIn;
     image = imageIn || null;
@@ -36,41 +30,73 @@ export function initFunctions(baseIn, imageIn)
         BattleMode_getInstance: _nf("BattleMode_getInstance", "pointer", []),
         LogicGameObjectClient_getX: _nf("LogicGameObjectClient_getX", "int32", ["pointer"]),
         LogicGameObjectClient_getY: _nf("LogicGameObjectClient_getY", "int32", ["pointer"]),
-        LogicBattleModeClient_getOwnCharacter: _nf("LogicBattleModeClient_getOwnCharacter", "pointer", ["pointer"]),
-        LogicBattleModeClient_setClientPredictionMoveTo: _nf("LogicBattleModeClient_setClientPredictionMoveTo", "void", ["pointer", "int", "int", "int"]),
-        ClientInput_constructor_int: _nf("ClientInput_constructor_int", "pointer", ["pointer", "int"]),
-        ClientInputManager_addInput: _nf("ClientInputManager_addInput", "void", ["pointer", "pointer"]),
-        LogicGameObjectClient_getGlobalID: _nf("LogicGameObjectClient_getGlobalID", "uint32", ["pointer"]),
+        LogicBattleModeClient_getOwnCharacter: _nf(
+            "LogicBattleModeClient_getOwnCharacter",
+            "pointer",
+            ["pointer"]
+        ),
+        LogicBattleModeClient_setClientPredictionMoveTo: _nf(
+            "LogicBattleModeClient_setClientPredictionMoveTo",
+            "void",
+            ["pointer", "int", "int", "int"]
+        ),
+        ClientInput_constructor_int: _nf("ClientInput_constructor_int", "pointer", [
+            "pointer",
+            "int"
+        ]),
+        ClientInputManager_addInput: _nf("ClientInputManager_addInput", "void", [
+            "pointer",
+            "pointer"
+        ]),
+        LogicGameObjectClient_getGlobalID: _nf("LogicGameObjectClient_getGlobalID", "uint32", [
+            "pointer"
+        ]),
         LogicGameObjectClient_getData: _nf("LogicGameObjectClient_getData", "pointer", ["pointer"]),
         LogicProjectileData_isBeam: _nf("LogicProjectileData_isBeam", "uint32", ["pointer"]),
         LogicTileMap_tileToLogic: _nf("LogicTileMap_tileToLogic", "int32", ["int32"]),
-        LogicGamePlayUtil_getClosestPathfinderCollision: _nf("LogicGamePlayUtil_getClosestPathfinderCollision", "uint32", ["int32", "int32", "int32", "int32", "int32", "pointer", "pointer", "uint32", "uint8"]),
+        LogicGamePlayUtil_getClosestPathfinderCollision: _nf(
+            "LogicGamePlayUtil_getClosestPathfinderCollision",
+            "uint32",
+            ["int32", "int32", "int32", "int32", "int32", "pointer", "pointer", "uint32", "uint8"]
+        ),
         LogicCharacterData_getSpeed: _nf("LogicCharacterData_getSpeed", "int32", ["pointer"]),
-        LogicCharacterData_getCollisionRadius: _nf("LogicCharacterData_getCollisionRadius", "uint32", ["pointer"]),
-        LogicBattleModeClient_getTileMap: _nf("LogicBattleModeClient__getTileMap", "pointer", ["pointer"]),
-        LogicCharacterClient_getWeaponSkill: _nf("LogicCharacterClient__getWeaponSkill", "pointer", ["pointer"]),
-        LogicSkillData_getCastingRange: _nf("LogicSkillData__getCastingRange", "int32", ["pointer"]),
-        LogicSkillData_getProjectileData: _nf("LogicSkillData__getProjectileData", "pointer", ["pointer", "int"]),
+        LogicCharacterData_getCollisionRadius: _nf(
+            "LogicCharacterData_getCollisionRadius",
+            "uint32",
+            ["pointer"]
+        ),
+        LogicBattleModeClient_getTileMap: _nf("LogicBattleModeClient__getTileMap", "pointer", [
+            "pointer"
+        ]),
+        LogicCharacterClient_getWeaponSkill: _nf(
+            "LogicCharacterClient__getWeaponSkill",
+            "pointer",
+            ["pointer"]
+        ),
+        LogicSkillData_getCastingRange: _nf("LogicSkillData__getCastingRange", "int32", [
+            "pointer"
+        ]),
+        LogicSkillData_getProjectileData: _nf("LogicSkillData__getProjectileData", "pointer", [
+            "pointer",
+            "int"
+        ]),
         LogicData_getName: _nf("LogicData_getName", "pointer", ["pointer"]),
-        operator_new: _nf("operator_new", "pointer", ["ulong"]),
+        operator_new: _nf("operator_new", "pointer", ["ulong"])
     };
     Object.freeze(_n);
     return _n;
 }
 
-export function getFunctions()
-{
+export function getFunctions() {
     if (!_n) throw new Error("Functions not initialized! Call initFunctions(base) first.");
     return _n;
 }
 
-export function getImage()
-{
+export function getImage() {
     return image;
 }
 
-export function getBase()
-{
+export function getBase() {
     if (!base) throw new Error("Functions not initialized! Call initFunctions(base) first.");
     return base;
 }
