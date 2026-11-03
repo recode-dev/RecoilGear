@@ -11,6 +11,12 @@ import
 from "../core/offsets.js";
 import
 {
+    gameDistance,
+    gameLengthFine
+}
+from "../core/math.js";
+import
+{
     scanData
 }
 from "../core/scan.js";
@@ -71,7 +77,7 @@ function _sample(gid, x, y, moveSpeed, now)
 
     const vxWindow = (x - first.x) / span;
     const vyWindow = (y - first.y) / span;
-    const magnitude = Math.sqrt(vxWindow * vxWindow + vyWindow * vyWindow);
+    const magnitude = gameLengthFine(vxWindow, vyWindow);
     if (magnitude < 30) return { x: x, y: y, vx: 0, vy: 0, ax: 0, ay: 0, juke: false };
 
     let dx = 0;
@@ -85,7 +91,7 @@ function _sample(gid, x, y, moveSpeed, now)
         break;
     }
 
-    const direction = Math.sqrt(dx * dx + dy * dy);
+    const direction = gameLengthFine(dx, dy);
     const speed = Math.min(magnitude, moveSpeed >= 200 && moveSpeed <= 1500 ? moveSpeed : magnitude);
     if (direction < 0.5 || speed > MAX_SPEED_EST) return null;
 
@@ -108,7 +114,7 @@ function _sample(gid, x, y, moveSpeed, now)
         break;
     }
 
-    if (Math.sqrt(ax * ax + ay * ay) > MAX_ACCEL)
+    if (gameLengthFine(ax, ay) > MAX_ACCEL)
     {
         ax = 0;
         ay = 0;
@@ -123,7 +129,7 @@ function _solve(mx, my, pred, speed, range)
 
     if (range > 0)
     {
-        const d0 = Math.sqrt((pred.x - mx) * (pred.x - mx) + (pred.y - my) * (pred.y - my));
+        const d0 = gameLengthFine(pred.x - mx, pred.y - my);
         if (d0 > range) return null;
     }
     if (!(speed > 0)) return { x: Math.round(pred.x), y: Math.round(pred.y), t: 0 };
@@ -133,7 +139,7 @@ function _solve(mx, my, pred, speed, range)
 
     for (let pass = 0; pass < LEAD_PASSES; pass++)
     {
-        const distance = Math.sqrt((px - mx) * (px - mx) + (py - my) * (py - my));
+        const distance = gameLengthFine(px - mx, py - my);
         if (range > 0 && distance > range) return null;
         const flight = distance / speed;
         if (flight > MAX_FLIGHT_S) return null;
@@ -261,7 +267,7 @@ function _pickTarget(now)
             { x: e.x, y: e.y, vx: 0, vy: 0, ax: 0, ay: 0, juke: false };
         const dx = e.x - mx;
         const dy = e.y - my;
-        const d = Math.sqrt(dx * dx + dy * dy);
+        const d = gameDistance(e.x, e.y, mx, my);
         if (range > 0 && d > range) continue;
         if (!pred.juke && d < calmD)
         {

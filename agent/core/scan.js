@@ -12,6 +12,11 @@ import
 from "./offsets.js";
 import
 {
+    gameLengthFine
+}
+from "./math.js";
+import
+{
     readScString
 }
 from "./scstring.js";
@@ -264,7 +269,7 @@ function _updateLiveProjectiles(now)
             {
                 const observedVx = dx / dt;
                 const observedVy = dy / dt;
-                if (Math.sqrt(observedVx * observedVx + observedVy * observedVy) > 8500)
+                if (gameLengthFine(observedVx, observedVy) > 8500)
                 {
                     projectile.lastX = x;
                     projectile.lastY = y;
@@ -276,7 +281,7 @@ function _updateLiveProjectiles(now)
                 projectile.vy = projectile.vy * (1 - alpha) + observedVy * alpha;
                 projectile.hasVelocitySample = true;
 
-            const measured = Math.round(Math.sqrt(projectile.vx * projectile.vx + projectile.vy * projectile.vy));
+            const measured = Math.round(gameLengthFine(projectile.vx, projectile.vy));
             if (measured >= 300 && measured <= 8500)
             {
                 projectile.speed = measured;

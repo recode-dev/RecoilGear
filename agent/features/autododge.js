@@ -15,6 +15,15 @@ import
 from "../core/offsets.js";
 import
 {
+    gameDistance,
+    gameLengthFine,
+    gameNormalize,
+    gameRotateX,
+    gameRotateY
+}
+from "../core/math.js";
+import
+{
     enableProjectileTracking,
     scanData
 }
@@ -73,16 +82,15 @@ function _buildRing()
     const n = TUNE.DIR_COUNT;
     for (let i = 0; i < n; i++)
     {
-        const a = Math.PI * 2 * i / n;
+        const a = Math.round(360 * i / n);
         _ring.push(
         {
-            x: Math.cos(a),
-            y: Math.sin(a)
+            x: gameRotateX(1000, 0, a) / 1000,
+            y: gameRotateY(1000, 0, a) / 1000
         });
     }
     _headingIdx = -1;
 }
-_buildRing();
 
 function _syncTuning()
 {
@@ -94,7 +102,7 @@ function _syncTuning()
     if (n !== TUNE.DIR_COUNT)
     {
         TUNE.DIR_COUNT = n;
-        _buildRing();
+        if (_ring.length) _buildRing();
     }
     TUNE.SKIN = Math.max(0, Math.min(120, _options.safetyMargin)) * 2;
 }
@@ -109,7 +117,7 @@ function _traveled(p)
     const sx = p.spawnX;
     const sy = p.spawnY;
     if (!isFinite(sx) || !isFinite(sy)) return 0;
-    return Math.hypot(p.x - sx, p.y - sy);
+    return gameLengthFine(p.x - sx, p.y - sy);
 }
 
 function _lifeLeft(p)
@@ -147,7 +155,7 @@ function _collectLive(myX, myY, myRadius)
             vx = 0;
             vy = 0;
         }
-        const spd = Math.hypot(vx, vy);
+        const spd = gameLengthFine(vx, vy);
         const slow = (p.speed || 0) > 0 && p.speed < 1600;
         const lockPath = !!p.isBeam;
         const blob = !lockPath && !indirect && slow;
@@ -157,8 +165,14 @@ function _collectLive(myX, myY, myRadius)
         let uy = 0;
         if (spd >= 1)
         {
-            ux = vx / spd;
-            uy = vy / spd;
+            const dir =
+            {
+                x: vx,
+                y: vy
+            };
+            gameNormalize(dir, 1000);
+            ux = dir.x / 1000;
+            uy = dir.y / 1000;
         }
         const skipAlong = blob || indirect;
         let playerAlong = 0;
@@ -172,7 +186,7 @@ function _collectLive(myX, myY, myRadius)
         }
         const left = _lifeLeft(p);
         if (left <= 10) continue;
-        const gap = Math.hypot(p.x - myX, p.y - myY) - bodyR - shotR;
+        const gap = gameDistance(p.x, p.y, myX, myY) - bodyR - shotR;
         if (left < 0.85 * Math.max(0, gap)) continue;
         if (!skipAlong && spd >= 1 && playerAlong > left + shotR) continue;
         out.push(
@@ -197,10 +211,10 @@ function _clearanceFor(threats, myX, myY, mvx, mvy)
     for (let i = 0; i < threats.length; i++)
     {
         const t = threats[i];
-        const spd = Math.hypot(t.vx, t.vy);
+        const spd = gameLengthFine(t.vx, t.vy);
         const relx = t.x - myX;
         const rely = t.y - myY;
-        const reach = Math.sqrt(relx * relx + rely * rely);
+        const reach = gameDistance(t.x, t.y, myX, myY);
         let maxT = horizon;
         if (spd > 1)
         {
@@ -225,7 +239,7 @@ function _clearanceFor(threats, myX, myY, mvx, mvy)
             cx = relx + vrx * ts;
             cy = rely + vry * ts;
         }
-        const clear = Math.sqrt(cx * cx + cy * cy) - t.rad;
+        const clear = gameLengthFine(cx, cy) - t.rad;
         if (clear < minClear) minClear = clear;
     }
     return minClear;
@@ -377,4 +391,5 @@ export function setupAutododge()
     }
     catch (e)
     {}
+    _buildRing();
 }
