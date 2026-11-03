@@ -929,7 +929,7 @@ function _captureProjectile(projectile, data, now) {
         // Позиция объекта выставляется decode/setPosition; при (0,0) спавн
         // достаём на первом тике, где позиция реальна (spawnPending).
         const spawnReady = x !== 0 || y !== 0;
-        let target = _readProjectileTarget(projectile, data, x, y);
+        const target = _readProjectileTarget(projectile, data, x, y);
         const flags = _readProjectileFlags(data);
         let isIndirect = _dataU8(data, offsets.ProjectileData_indirect);
         let travelType = _dataS32(data, offsets.ProjectileData_travelType, 0, 20);
