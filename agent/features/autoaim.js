@@ -47,9 +47,16 @@ var _projectileSpeed = 0;
 var _speedAt = 0;
 var _ownBeam = false;
 var _ownPierces = false;
+var _ownShotR = 0;
 var _rangeCache = 0;
 var _rangeAt = 0;
 var _hooks = false;
+
+const FALLBACK_SHOT_RADIUS = 300;
+
+function _shotRadius() {
+    return _ownShotR > 0 ? _ownShotR : FALLBACK_SHOT_RADIUS;
+}
 
 function _isSkipped(name) {
     if (!name) return true;
@@ -147,10 +154,11 @@ function _flightTime(rx, ry, vx, vy, speed) {
 }
 
 function _solve(mx, my, pred, speed, range) {
+    const pocket = _shotRadius() + (pred.rad > 0 ? pred.rad : 0);
     if (_ownBeam) return { x: Math.round(pred.x), y: Math.round(pred.y), t: 0 };
 
     if (range > 0) {
-        const d0 = distance(pred.x, pred.y, mx, my);
+        const d0 = distance(pred.x, pred.y, mx, my) - pocket;
         if (d0 > range) return null;
     }
     if (!(speed > 0)) return { x: Math.round(pred.x), y: Math.round(pred.y), t: 0 };
@@ -163,15 +171,15 @@ function _solve(mx, my, pred, speed, range) {
         for (let pass = 0; pass < LEAD_PASSES; pass++) {
             px = pred.x + pred.vx * t + 0.5 * pred.ax * t * t;
             py = pred.y + pred.vy * t + 0.5 * pred.ay * t * t;
-            const flown = distance(px, py, mx, my);
+            const flown = distance(px, py, mx, my) - pocket;
             if (!(flown > 0)) break;
             t = flown / speed;
         }
     } else {
         for (let pass = 0; pass < LEAD_PASSES; pass++) {
-            const flightTo = distance(px, py, mx, my);
+            const flightTo = distance(px, py, mx, my) - pocket;
             if (range > 0 && flightTo > range) return null;
-            const flight = flightTo / speed;
+            const flight = flightTo > 0 ? flightTo / speed : 0;
             if (flight > MAX_FLIGHT_S) return null;
             px = pred.x + pred.vx * flight + 0.5 * pred.ax * flight * flight;
             py = pred.y + pred.vy * flight + 0.5 * pred.ay * flight * flight;
@@ -179,7 +187,7 @@ function _solve(mx, my, pred, speed, range) {
         return { x: Math.round(px), y: Math.round(py), t: 0 };
     }
 
-    if (range > 0 && distance(px, py, mx, my) > range) return null;
+    if (range > 0 && distance(px, py, mx, my) - pocket > range) return null;
     if (t > MAX_FLIGHT_S) return null;
     return { x: Math.round(px), y: Math.round(py), t: t };
 }
@@ -209,6 +217,13 @@ function _ownProjectileSpeed() {
                 const passes = data.add(offsets.ProjectileData_passesEnvironment).readU8() & 1;
                 const pierces = data.add(offsets.ProjectileData_piercesEnvironment).readU8() & 1;
                 _ownPierces = (passes | pierces) === 1;
+                try {
+                    const rad = data.add(offsets.ProjectileData_radiusField).readS32() | 0;
+                    if (rad >= 1 && rad <= 2000) _ownShotR = rad;
+                    else _ownShotR = 0;
+                } catch (_) {
+                    _ownShotR = 0;
+                }
             }
         }
     } catch (_) {}
@@ -263,7 +278,7 @@ function _aimAt(enemy, now) {
     const mx = scanData.myX;
     const my = scanData.myY;
     const speed = _ownProjectileSpeed();
-    const pred = _sample(enemy.gid, ex, ey, enemy.moveSpeed, enemy.moveAngle, now) || {
+    const pred = _sample(enemy.gid, ex, ey, enemy.moveSpeed, moveAngle, now) || {
         x: ex,
         y: ey,
         vx: 0,
@@ -271,6 +286,7 @@ function _aimAt(enemy, now) {
         ax: 0,
         ay: 0
     };
+    pred.rad = enemy.radius | 0;
     const aim = _solve(mx, my, pred, speed, _ownRange());
     if (!aim) return null;
     return aim;
@@ -307,8 +323,9 @@ function _pickTarget(now) {
             ax: 0,
             ay: 0
         };
+        pred.rad = e.radius | 0;
         const d = distance(e.x, e.y, mx, my);
-        if (range > 0 && d > range) continue;
+        if (range > 0 && d - _shotRadius() - pred.rad > range) continue;
         if (d < calmD) {
             calmD = d;
             calm = e;
@@ -339,6 +356,7 @@ function _pickTarget(now) {
             cur.gid === best.gid
                 ? bestPred
                 : _sample(cur.gid, cur.x, cur.y, cur.moveSpeed, cur.moveAngle, now);
+        if (pred) pred.rad = cur.radius | 0;
     } else {
         pick = best;
         pred = bestPred;
@@ -396,6 +414,7 @@ export function resetAutoaim() {
     _speedAt = 0;
     _ownBeam = false;
     _ownPierces = false;
+    _ownShotR = 0;
     _rangeCache = 0;
     _rangeAt = 0;
 }

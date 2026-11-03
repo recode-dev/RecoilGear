@@ -1,7 +1,7 @@
 import { sendCommand } from "../core/commands.js";
 import { getFunctions } from "../core/functions.js";
 import { offsets } from "../core/offsets.js";
-import { enableProjectileTracking, scanData } from "../core/scan.js";
+import { collisionRadius, enableProjectileTracking, scanData } from "../core/scan.js";
 import {
     BLOCKS_MOVEMENT,
     BLOCKS_PROJECTILES,
@@ -682,6 +682,24 @@ function _push(now, myX, myY) {
     _lastSentAt = now;
 }
 
+function _selfBody() {
+    try {
+        const own = scanData.ownCharacter;
+        if (own && !own.isNull()) {
+            const fns = getFunctions();
+            if (fns.LogicGameObjectClient_getData) {
+                const value = collisionRadius(fns.LogicGameObjectClient_getData(own)) | 0;
+                if (value > 0) return value;
+            }
+        }
+    } catch (_) {}
+    try {
+        const value = scanData.myRadius | 0;
+        if (value > 0) return value;
+    } catch (_) {}
+    return 60;
+}
+
 export function updateAutododge() {
     if (scanData.lastUpdate === 0) return;
     const now = Date.now();
@@ -691,8 +709,8 @@ export function updateAutododge() {
     if (Math.abs(myX) < TUNE.MIN_POS && Math.abs(myY) < TUNE.MIN_POS) return;
 
     const speed = scanData.mySpeed;
-    const myRadius = scanData.myRadius;
-    if (!(speed > 0) || !(myRadius > 0)) {
+    const myRadius = _selfBody();
+    if (!(speed > 0)) {
         _clearHeading();
         return;
     }

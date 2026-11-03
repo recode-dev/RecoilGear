@@ -143,6 +143,19 @@ function _readProjectileRadius(data) {
     return _readProjectileField(data, offsets.ProjectileData_radiusField, 1, 2000);
 }
 
+export function collisionRadius(data) {
+    if (!isValidPtr(data)) return 0;
+    try {
+        const direct = data.add(offsets.CharacterData_collisionRadiusField).readS32() | 0;
+        if (direct > 0) return direct;
+    } catch (_) {}
+    try {
+        const getRadius = getFunctions().LogicCharacterData_getCollisionRadius;
+        if (getRadius) return getRadius(data) | 0;
+    } catch (_) {}
+    return 0;
+}
+
 function _readProjectileFlags(data) {
     let passes = 0;
     let pierces = 0;
@@ -479,8 +492,7 @@ export function updateScanner(bm, now) {
         scanData.mySpeed = 0;
         const ownData = functions.LogicGameObjectClient_getData(own);
         if (isValidPtr(ownData)) {
-            const getRadius = functions.LogicCharacterData_getCollisionRadius;
-            if (getRadius) scanData.myRadius = getRadius(ownData) | 0;
+            scanData.myRadius = collisionRadius(ownData) | 0;
             try {
                 const speed = functions.LogicCharacterData_getSpeed
                     ? functions.LogicCharacterData_getSpeed(ownData) | 0
@@ -533,12 +545,7 @@ export function updateScanner(bm, now) {
                             brawlerName = _readDataName(data);
                             _brawlerNameCache.set(gid, brawlerName);
                         }
-                        let radius = 0;
-                        try {
-                            radius = functions.LogicCharacterData_getCollisionRadius
-                                ? functions.LogicCharacterData_getCollisionRadius(data) | 0
-                                : 0;
-                        } catch (_) {}
+                        const radius = collisionRadius(data) | 0;
                         if (!brawlerName && radius <= 0) continue;
                         const kind = brawlerName ? "player" : "spawnable";
                         let moveSpeed = 0;
@@ -559,6 +566,7 @@ export function updateScanner(bm, now) {
                             teamId: team,
                             moveSpeed,
                             moveAngle: _readMoveAngle(obj),
+                            radius,
                             kind: kind
                         });
                     } catch (_) {}
