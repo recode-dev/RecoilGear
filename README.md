@@ -7,7 +7,6 @@ Frida agent for **Nulls Brawl v69.252**
 ```
 npm install frida-compile
 npx frida-compile agent/index.js -o dist/agent.js -B iife
-
 ```
 
 ## License
