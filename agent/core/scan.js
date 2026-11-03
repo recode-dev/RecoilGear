@@ -40,6 +40,18 @@ var _dataHooksInstalled = false;
 var _insideTravelCall = false;
 var _flightRange = new Map();
 var _probeBudget = 0;
+var _dataCache = new Map();
+var _angleCache = new Map();
+var _coreHooksInstalled = false;
+var _moveAppliedAt = 0;
+var _moveAppliedX = 0;
+var _moveAppliedY = 0;
+var _inputAt = 0;
+var _inputX = 0;
+var _inputY = 0;
+const CACHE_MAX = 2048;
+const DATA_TTL_MS = 3000;
+const ANGLE_TTL_MS = 120;
 
 export var scanData = {
     ownCharacter: ptr(0),
@@ -56,6 +68,119 @@ export var scanData = {
     lastUpdate: 0,
     pathRanAt: 0
 };
+
+function _ptrKey(value) {
+    try {
+        return value.toString();
+    } catch (_) {
+        return null;
+    }
+}
+
+export function dataOf(obj) {
+    if (!isValidPtr(obj)) return ptr(0);
+    const key = _ptrKey(obj);
+    const now = Date.now();
+    if (key) {
+        const hit = _dataCache.get(key);
+        if (hit && now - hit.ts <= DATA_TTL_MS) return hit.data;
+    }
+    const fns = getFunctions();
+    if (!fns.LogicGameObjectClient_getData) return ptr(0);
+    const data = fns.LogicGameObjectClient_getData(obj);
+    if (key && isValidPtr(data)) _cacheData(key, data, now);
+    return data;
+}
+
+function _cacheData(key, data, now) {
+    if (_dataCache.size > CACHE_MAX) _dataCache.clear();
+    _dataCache.set(key, { data: data, ts: now });
+}
+
+function _moveAngleOf(obj) {
+    if (!isValidPtr(obj)) return 0;
+    const key = _ptrKey(obj);
+    if (key) {
+        const hit = _angleCache.get(key);
+        if (hit && Date.now() - hit.ts <= ANGLE_TTL_MS) return hit.angle;
+    }
+    return _readMoveAngle(obj);
+}
+
+export function moveAppliedSince(x, y, ms) {
+    if (!(_moveAppliedAt > 0)) return false;
+    if (Date.now() - _moveAppliedAt > ms) return false;
+    const dx = x - _moveAppliedX;
+    const dy = y - _moveAppliedY;
+    return dx * dx + dy * dy <= 4;
+}
+
+export function inputSentSince(x, y, ms) {
+    if (!(_inputAt > 0) || Date.now() - _inputAt > ms) return false;
+    const dx = x - _inputX;
+    const dy = y - _inputY;
+    return dx * dx + dy * dy <= 4;
+}
+
+function _installCoreHooks(base) {
+    if (_coreHooksInstalled || !base) return;
+    _coreHooksInstalled = true;
+    try {
+        Interceptor.attach(base.add(offsets.LogicGameObjectClient_getData), {
+            onEnter(args) {
+                this.obj = args[0];
+            },
+            onLeave(retval) {
+                try {
+                    if (retval.isNull()) return;
+                    const key = _ptrKey(this.obj);
+                    if (!key) return;
+                    _cacheData(key, retval, Date.now());
+                } catch (_) {}
+            }
+        });
+    } catch (_) {}
+    try {
+        Interceptor.attach(base.add(offsets.LogicCharacterClient_getMoveAngle), {
+            onEnter(args) {
+                this.obj = args[0];
+            },
+            onLeave() {
+                try {
+                    if (!isValidPtr(this.obj)) return;
+                    const key = _ptrKey(this.obj);
+                    if (!key) return;
+                    const angle = this.obj.add(offsets.CharacterClient_moveAngle).readFloat();
+                    if (!isFinite(angle)) return;
+                    if (_angleCache.size > CACHE_MAX) _angleCache.clear();
+                    _angleCache.set(key, { angle: angle, ts: Date.now() });
+                } catch (_) {}
+            }
+        });
+    } catch (_) {}
+    try {
+        Interceptor.attach(base.add(offsets.LogicBattleModeClient_setClientPredictionMoveTo), {
+            onEnter(args) {
+                _moveAppliedAt = Date.now();
+                _moveAppliedX = args[1].toInt32();
+                _moveAppliedY = args[2].toInt32();
+            }
+        });
+    } catch (_) {}
+    try {
+        Interceptor.attach(base.add(offsets.ClientInputManager_addInput), {
+            onEnter(args) {
+                try {
+                    const ci = args[1];
+                    if (!isValidPtr(ci)) return;
+                    _inputX = ci.add(offsets.ClientInput_x).readS32() | 0;
+                    _inputY = ci.add(offsets.ClientInput_y).readS32() | 0;
+                    _inputAt = Date.now();
+                } catch (_) {}
+            }
+        });
+    } catch (_) {}
+}
 
 function _readDataName(data) {
     if (!isValidPtr(data)) return null;
@@ -721,7 +846,7 @@ function _captureProjectile(projectile, data, now) {
     if (!isValidPtr(projectile)) return;
     const fns = getFunctions();
     try {
-        if (!isValidPtr(data)) data = fns.LogicGameObjectClient_getData(projectile);
+        if (!isValidPtr(data)) data = dataOf(projectile);
         if (!isValidPtr(data)) return;
         const gid = String(fns.LogicGameObjectClient_getGlobalID(projectile));
         const x = fns.LogicGameObjectClient_getX(projectile) | 0;
@@ -1107,7 +1232,7 @@ export function updateScanner(bm, now) {
         scanData.myX = functions.LogicGameObjectClient_getX(own) | 0;
         scanData.myY = functions.LogicGameObjectClient_getY(own) | 0;
         scanData.mySpeed = 0;
-        const ownData = functions.LogicGameObjectClient_getData(own);
+        const ownData = dataOf(own);
         if (isValidPtr(ownData)) {
             scanData.myRadius = collisionRadius(ownData) | 0;
             const ownSpeed = _characterSpeed(ownData);
@@ -1140,7 +1265,7 @@ export function updateScanner(bm, now) {
                             obj = objects.add(i * stride).readPointer();
                         }
                         if (!isValidPtr(obj)) continue;
-                        const data = functions.LogicGameObjectClient_getData(obj);
+                        const data = dataOf(obj);
                         if (!isValidPtr(data)) continue;
                         const team = obj.add(offsets.GameObj_team).readU32();
                         if (data.readPointer().equals(vtableProj)) {
@@ -1174,7 +1299,7 @@ export function updateScanner(bm, now) {
                             body: obj,
                             teamId: team,
                             moveSpeed,
-                            moveAngle: _readMoveAngle(obj),
+                            moveAngle: _moveAngleOf(obj),
                             radius,
                             kind: kind
                         });
@@ -1197,6 +1322,8 @@ export function updateScanner(bm, now) {
 }
 
 export function resetScannerCache() {
+    _dataCache.clear();
+    _angleCache.clear();
     _brawlerNameCache.clear();
     _charRange.clear();
     _weaponMeta.clear();
@@ -1218,6 +1345,7 @@ export function resetScannerCache() {
 
 export function initScanner(base) {
     moduleBase = base;
+    _installCoreHooks(base);
 }
 
 export function enableProjectileTracking() {

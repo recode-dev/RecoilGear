@@ -16,6 +16,9 @@ var wallsHeight = 0;
 var needsRebuild = true;
 var lastFailedTs = 0;
 var tileWatchInstalled = false;
+var pfHookInstalled = false;
+var pfMemo = new Map();
+var pfMemoTs = 0;
 
 function _syncTileSize() {
     try {
@@ -91,6 +94,8 @@ function _rebuildFrom(tileMap) {
 }
 
 export function notifyBattleModeChanged(battleMode) {
+    pfMemo.clear();
+    pfMemoTs = 0;
     walls = null;
     wallsWidth = 0;
     wallsHeight = 0;
@@ -110,16 +115,81 @@ export function maybeRefreshWallCache(battleMode, now) {
     lastFailedTs = now;
 }
 
+const PF_MEMO_MAX = 256;
+const PF_BUCKET_MS = 40;
+
+function _pfKey(size, x1, y1, x2, y2, f1, f2) {
+    return size + "|" + x1 + "|" + y1 + "|" + x2 + "|" + y2 + "|" + f1 + "|" + f2;
+}
+
+function _pfRemember(size, x1, y1, x2, y2, f1, f2, dist) {
+    const now = Date.now();
+    if (now - pfMemoTs > PF_BUCKET_MS || pfMemo.size > PF_MEMO_MAX) {
+        pfMemo.clear();
+        pfMemoTs = now;
+    }
+    pfMemo.set(_pfKey(size, x1, y1, x2, y2, f1, f2), dist);
+}
+
+function _pfLookup(size, x1, y1, x2, y2, f1, f2) {
+    if (Date.now() - pfMemoTs > PF_BUCKET_MS) return -1;
+    const hit = pfMemo.get(_pfKey(size, x1, y1, x2, y2, f1, f2));
+    return hit === void 0 ? -1 : hit;
+}
+
+function _installPathHook(base) {
+    if (pfHookInstalled) return;
+    pfHookInstalled = true;
+    try {
+        const fns = getFunctions();
+        if (!fns.LogicGamePlayUtil_getClosestPathfinderCollision) return;
+        Interceptor.attach(base.add(offsets.LogicGamePlayUtil_getClosestPathfinderCollision), {
+            onEnter(args) {
+                this.size = args[0].toInt32();
+                this.x1 = args[1].toInt32();
+                this.y1 = args[2].toInt32();
+                this.x2 = args[3].toInt32();
+                this.y2 = args[4].toInt32();
+                this.out = args[6];
+                this.f1 = args[7].toInt32();
+                this.f2 = args[8].toInt32();
+            },
+            onLeave(retval) {
+                try {
+                    let dist = Math.round(Math.hypot(this.x2 - this.x1, this.y2 - this.y1));
+                    if (retval.toInt32() & 1) {
+                        const hx = this.out.readS32() | 0;
+                        const hy = this.out.add(4).readS32() | 0;
+                        dist = Math.max(0, Math.round(Math.hypot(hx - this.x1, hy - this.y1)));
+                    }
+                    _pfRemember(
+                        this.size,
+                        this.x1,
+                        this.y1,
+                        this.x2,
+                        this.y2,
+                        this.f1,
+                        this.f2,
+                        dist
+                    );
+                } catch (_) {}
+            }
+        });
+    } catch (_) {}
+}
+
 export function watchTileChanges(base) {
     if (tileWatchInstalled) return;
     try {
         Interceptor.attach(base.add(offsets.LogicTile__setData), {
             onEnter() {
                 needsRebuild = true;
+                pfMemo.clear();
             }
         });
         tileWatchInstalled = true;
     } catch (_) {}
+    _installPathHook(base);
 }
 export function losCheck(wx0, wy0, wx1, wy1, checkBit) {
     const grid = walls;
@@ -173,6 +243,8 @@ export function firstWallHit(wx0, wy0, wx1, wy1, size) {
     const fn = getFunctions().LogicGamePlayUtil_getClosestPathfinderCollision;
     if (!fn || !isValidPtr(pathFinder)) return -1;
     const bodySize = typeof size === "number" ? size | 0 : 0;
+    const memo = _pfLookup(bodySize, wx0 | 0, wy0 | 0, wx1 | 0, wy1 | 0, 1, 1);
+    if (memo >= 0) return memo;
     try {
         if (!probeOut) probeOut = Memory.alloc(8);
         probeOut.writeS32(0);
@@ -181,8 +253,11 @@ export function firstWallHit(wx0, wy0, wx1, wy1, size) {
             fn(bodySize, wx0 | 0, wy0 | 0, wx1 | 0, wy1 | 0, pathFinder, probeOut, 1, 1) | 0;
         const hx = probeOut.readS32() | 0;
         const hy = probeOut.add(4).readS32() | 0;
-        if (!(hit & 1)) return Math.round(Math.hypot(wx1 - wx0, wy1 - wy0));
-        return Math.max(0, Math.round(Math.hypot(hx - wx0, hy - wy0)));
+        const dist = !(hit & 1)
+            ? Math.round(Math.hypot(wx1 - wx0, wy1 - wy0))
+            : Math.max(0, Math.round(Math.hypot(hx - wx0, hy - wy0)));
+        _pfRemember(bodySize, wx0 | 0, wy0 | 0, wx1 | 0, wy1 | 0, 1, 1, dist);
+        return dist;
     } catch (_) {
         return -1;
     }

@@ -3,6 +3,7 @@ import { offsets } from "../core/offsets.js";
 import {
     BEAM_TICKS,
     TICKS_PER_SEC,
+    dataOf,
     rangeScaleCalibrated,
     enableProjectileTracking,
     onDataReload,
@@ -274,7 +275,7 @@ function _ownProjectileSpeed() {
                 );
                 if (!(rad > 0) && fns.LogicCharacterData_getProjectileStartRadius) {
                     try {
-                        const ownData = fns.LogicGameObjectClient_getData(own);
+                        const ownData = dataOf(own);
                         if (ownData && !ownData.isNull()) {
                             const start =
                                 fns.LogicCharacterData_getProjectileStartRadius(ownData) | 0;

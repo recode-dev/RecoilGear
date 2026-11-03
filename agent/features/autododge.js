@@ -1,7 +1,15 @@
 import { sendCommand } from "../core/commands.js";
 import { getFunctions } from "../core/functions.js";
 import { offsets } from "../core/offsets.js";
-import { collisionRadius, enableProjectileTracking, onDataReload, scanData } from "../core/scan.js";
+import {
+    collisionRadius,
+    dataOf,
+    enableProjectileTracking,
+    inputSentSince,
+    moveAppliedSince,
+    onDataReload,
+    scanData
+} from "../core/scan.js";
 import {
     BLOCKS_MOVEMENT,
     BLOCKS_PROJECTILES,
@@ -656,7 +664,9 @@ function _sendMove(logic, tx, ty) {
     if (!isFinite(tx) || !isFinite(ty)) return false;
     try {
         const fns = getFunctions();
-        fns.LogicBattleModeClient_setClientPredictionMoveTo(logic, tx, ty, 1);
+        if (moveAppliedSince(tx, ty, 15) && inputSentSince(tx, ty, 15)) return true;
+        if (!moveAppliedSince(tx, ty, 20))
+            fns.LogicBattleModeClient_setClientPredictionMoveTo(logic, tx, ty, 1);
         return sendCommand(MOVE_INPUT_TYPE, (ci) => {
             ci.add(offsets.ClientInput_x).writeS32(tx);
             ci.add(offsets.ClientInput_y).writeS32(ty);
@@ -746,7 +756,7 @@ function learnOwnHitbox() {
         if (!own || own.isNull()) return false;
         const fns = getFunctions();
         if (!fns.LogicGameObjectClient_getData) return false;
-        const radius = characterCollisionRadius(fns.LogicGameObjectClient_getData(own)) | 0;
+        const radius = characterCollisionRadius(dataOf(own)) | 0;
         if (!(radius > 0)) return false;
         _hitbox = radius;
         return true;
