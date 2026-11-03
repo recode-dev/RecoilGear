@@ -18,6 +18,7 @@ export const offsets = Object.freeze({
 
     ProjectileClient_data: 0x10,
     Projectile_isIndirect: 0x118,
+    ProjectileData_radius: 0x74,
 
     ClientInput_x: 0xc,
     ClientInput_y: 0x10,
