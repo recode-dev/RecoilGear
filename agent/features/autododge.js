@@ -1,13 +1,7 @@
 import { sendCommand } from "../core/commands.js";
 import { getFunctions } from "../core/functions.js";
 import { offsets } from "../core/offsets.js";
-import {
-    collisionRadius,
-    enableProjectileTracking,
-    onDataReload,
-    pathEngineActive,
-    scanData
-} from "../core/scan.js";
+import { collisionRadius, enableProjectileTracking, onDataReload, scanData } from "../core/scan.js";
 import {
     BLOCKS_MOVEMENT,
     BLOCKS_PROJECTILES,
@@ -276,23 +270,6 @@ function _ballR(p) {
     return p.radius;
 }
 
-function _traveled(p) {
-    const sx = p.spawnX;
-    const sy = p.spawnY;
-    if (!isFinite(sx) || !isFinite(sy)) return 0;
-    return length(p.x - sx, p.y - sy);
-}
-
-function _lifeLeft(p) {
-    const toTarget = p.hasTarget ? distance(p.x, p.y, p.targetX, p.targetY) : Infinity;
-    const reach = p.travelDistance > 0 ? p.travelDistance : p.castRange;
-    if (!(reach > 0)) return toTarget;
-    const flown = _traveled(p);
-    let left = LogicMath.min(reach - flown, toTarget);
-    if (p.piercesChars && toTarget !== Infinity) left = reach - flown;
-    return LogicMath.max(0, left) + _bounceBudget(p);
-}
-
 function _bounceBudget(p) {
     if (!p.bouncing || !(p.bounceAdd > 0)) return 0;
     const keep = p.bounceKeep > 0 && p.bounceKeep <= 1 ? p.bounceKeep : 0.5;
@@ -319,13 +296,6 @@ function _sweptEnd(x, y, vx, vy, left) {
     return { x: x + vx * k, y: y + vy * k, len: span };
 }
 
-function _contactFor(p, bodyR, shotR, left) {
-    let contact = bodyR + shotR;
-    if (_steerActive(p) || p.homing)
-        contact += LogicMath.min(TUNE.CURVE_MAX, TUNE.CURVE_FRAC * LogicMath.max(0, left));
-    return contact;
-}
-
 function _reachesMe(p, myX, myY, contact, vx, vy, left) {
     const vlen = length(vx, vy);
     if (p.isIndirect && p.hasTarget) {
@@ -350,31 +320,15 @@ function _steerActive(p) {
     return true;
 }
 
-function _pushLane(lanes, x, y, vx, vy, left) {
-    const end = _sweptEnd(x, y, vx, vy, left);
-    if (!end) return;
-    lanes.push({
-        x1: x,
-        y1: y,
-        x2: end.x,
-        y2: end.y
-    });
-}
-
 function _collectLive(myX, myY, myRadius, now) {
     const out = [];
-    const lanes = [];
     const shots = scanData.projectiles;
-    if (!shots || shots.length === 0) {
-        return { threats: out, lanes: lanes };
-    }
+    if (!shots || shots.length === 0) return out;
     const zoneSq = TUNE.AWARE * TUNE.AWARE;
-    const bodyR = myRadius + TUNE.SKIN;
     for (let i = 0; i < shots.length; i++) {
         const p = shots[i];
         if (!p) continue;
-        const gid = p.gid;
-        if (!gid) continue;
+        if (!p.gid) continue;
         if (distanceSquared(p.x, p.y, myX, myY) > zoneSq) continue;
         const indirect = !!p.isIndirect || (p.travelType | 0) > 0;
         let radPad = 0;
@@ -385,7 +339,7 @@ function _collectLive(myX, myY, myRadius, now) {
             vy = 0;
         }
         let spd = length(vx, vy);
-        if (spd < 1 && p.hasTarget) {
+        if (spd < 1 && p.hasTarget && p.speed > 0) {
             const dir = normalize(
                 {
                     x: p.targetX - p.x,
@@ -393,9 +347,8 @@ function _collectLive(myX, myY, myRadius, now) {
                 },
                 1000
             );
-            const shotSpeed = p.speed > 0 ? p.speed : 0;
-            vx = (dir.x / 1000) * shotSpeed;
-            vy = (dir.y / 1000) * shotSpeed;
+            vx = (dir.x / 1000) * p.speed;
+            vy = (dir.y / 1000) * p.speed;
             spd = length(vx, vy);
         }
         if (p.homing && spd > 1 && (p.seekX || p.seekY) && _steerActive(p)) {
@@ -405,9 +358,8 @@ function _collectLive(myX, myY, myRadius, now) {
         }
         const shotR = _ballR(p);
         if (!(shotR > 0)) continue;
-        let rad = shotR + bodyR + 60 + shotR * 0.45 + radPad;
-        if (p.preMs > 0) rad += LogicMath.min(80, shotR);
-        if (p.bouncing) rad += 30;
+        const hitR = shotR + myRadius;
+        const rad = hitR + TUNE.SKIN + 60 + shotR * 0.45 + radPad;
         const lockPath = !!p.isBeam || !!p.beamCopy;
         const blob = !lockPath && !indirect && spd < 120;
         if (blob && distance(p.x, p.y, myX, myY) > rad + 150) continue;
@@ -440,43 +392,30 @@ function _collectLive(myX, myY, myRadius, now) {
             )
                 continue;
         }
-        let left = _lifeLeft(p);
-        if (left <= 10) continue;
+        let left = p.seg > 0 ? p.seg : 0;
+        if (!blob && !(left > 0)) continue;
+        left += _bounceBudget(p);
+        if (!blob && left <= 10) continue;
         const travel = spd >= 1 ? spd : p.speed > 0 ? p.speed : 0;
-        const gap = distance(p.x, p.y, myX, myY) - bodyR - shotR;
-        if (!_heading) {
-            if (travel > 0) {
-                if (gap / travel > TUNE.ENGAGE_S) continue;
-            } else if (gap > TUNE.ENGAGE_NEAR) continue;
+        if (!_heading && travel > 0) {
+            const gap = distance(p.x, p.y, myX, myY) - hitR;
+            if (gap / travel > TUNE.ENGAGE_S) continue;
         }
-        if (!skipAlong && spd >= 1 && !p.piercesChars && playerAlong > left + shotR) continue;
-        if (travel > 0) {
-            if (p.lifeMs > 0 && isFinite(p.lifeMs))
-                left = LogicMath.min(left, (p.lifeMs / 1000) * travel);
-            if (p.preMs > 0) left += (p.preMs / 1000) * travel;
-            if (p.volleyMs > 0) left += (p.volleyMs / 1000) * travel;
-            if (!pathEngineActive(now) && !(p.travelDistance > 0))
-                left = LogicMath.min(left, TUNE.HORIZON_S * travel);
-        }
-        const contact = _contactFor(p, bodyR, shotR, left);
-        if (!_reachesMe(p, myX, myY, contact, vx, vy, left)) {
-            _pushLane(lanes, p.x, p.y, blob ? 0 : vx, blob ? 0 : vy, left);
-            continue;
-        }
+        if (!_reachesMe(p, myX, myY, hitR, vx, vy, blob ? -1 : left)) continue;
         out.push({
             x: p.x,
             y: p.y,
             vx: blob ? 0 : vx,
             vy: blob ? 0 : vy,
             rad,
-            hitRad: contact,
+            hitRad: hitR,
             left,
             owner: p.ownerIndex,
             sx: p.spawnX,
             sy: p.spawnY
         });
     }
-    return { threats: _mergeThreats(out, myX, myY), lanes: lanes };
+    return _mergeThreats(out, myX, myY);
 }
 
 function _mergeGroup(arr, px, py) {
@@ -741,7 +680,7 @@ export function pushDodgeTarget() {
     if (
         now - _lastDangerTs > TUNE.RELEASE_GRACE_MS &&
         !_pathsHitMe(
-            _collectLive(scanData.myX, scanData.myY, myRadius, now).threats,
+            _collectLive(scanData.myX, scanData.myY, myRadius, now),
             scanData.myX,
             scanData.myY
         )
@@ -839,8 +778,7 @@ export function updateAutododge() {
         return;
     }
 
-    const live = _collectLive(myX, myY, myRadius, now);
-    const hazards = live.threats;
+    const hazards = _collectLive(myX, myY, myRadius, now);
     if (hazards.length === 0) {
         if (_heading && now - _lastDangerTs > TUNE.RELEASE_GRACE_MS) _clearHeading();
         return;
@@ -848,7 +786,6 @@ export function updateAutododge() {
 
     const bodyR = _frameMargin();
     const paths = _threatPaths(hazards);
-    const lanes = live.lanes;
     const inDanger = _pathsHitMe(hazards, myX, myY);
     if (inDanger) _lastDangerTs = now;
 
@@ -887,7 +824,6 @@ export function updateAutododge() {
         let s = _clearanceFor(hazards, myX, myY, dirSpeed.x, dirSpeed.y);
         s -= (TUNE.WALL_HIT * (TUNE.REACH - room)) / TUNE.REACH;
         if (_crossesPath(paths, myX, myY, dirSpeed.x, dirSpeed.y)) s -= TUNE.CROSS_W;
-        else if (_crossesPath(lanes, myX, myY, dirSpeed.x, dirSpeed.y)) s -= TUNE.CROSS_W >> 1;
         if (prevDir) {
             const turn = LogicMath.getAngleBetween(
                 LogicMath.getAngle(d.x, d.y),

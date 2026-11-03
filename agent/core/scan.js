@@ -37,6 +37,8 @@ var _colCands = new Map();
 var _reloadCallbacks = [];
 var _dataHooksInstalled = false;
 var _insideTravelCall = false;
+var _flightRange = new Map();
+var _probeBudget = 0;
 
 export var scanData = {
     ownCharacter: ptr(0),
@@ -262,14 +264,14 @@ export function weaponRangeUnits(character) {
     return tiles * _rangeScaleUnits() + (index >= 0 ? _rangeBonus.get(index) || 0 : 0);
 }
 
-function _learnRangeBonus(ownerIndex, projectile, data, owner) {
-    if (ownerIndex < 0 || !isValidPtr(owner)) return;
-    const learned = _learnedFor(projectile, data);
-    if (!learned || !(learned.range > 0)) return;
+function _learnRangeBonus(ownerIndex, rangeUnits) {
+    if (ownerIndex < 0 || !(rangeUnits > 0)) return;
+    const owner = _charsByIndex.get(ownerIndex);
+    if (!isValidPtr(owner)) return;
     const tiles = _castingRangeTiles(owner);
     if (tiles <= 0) return;
-    _calibrateRangeScale(tiles, learned.range);
-    const bonus = learned.range - tiles * _rangeScaleUnits();
+    _calibrateRangeScale(tiles, rangeUnits);
+    const bonus = rangeUnits - tiles * _rangeScaleUnits();
     if (bonus < 0 || bonus > 4 * _rangeScaleUnits()) return;
     if ((_rangeBonus.get(ownerIndex) || 0) === bonus) return;
     _rangeBonus.set(ownerIndex, bonus);
@@ -339,6 +341,8 @@ function _columnBool(data, col) {
 }
 
 function _probeColumn(kind, read, data, value) {
+    if (_probeBudget <= 0) return;
+    _probeBudget--;
     let st = _colCands.get(kind);
     if (!st) {
         st = { cols: new Set(), rounds: 1 };
@@ -459,20 +463,21 @@ export function collisionRadius(data) {
 function _readProjectileFlags(data) {
     let passes = 0;
     let pierces = 0;
+    let piercesChars = 0;
     try {
         passes = data.add(offsets.ProjectileData_passesEnvironment).readU8() & 1;
     } catch (_) {}
     try {
         pierces = data.add(offsets.ProjectileData_piercesEnvironment).readU8() & 1;
     } catch (_) {}
-    const piercesChars = _readProjectileBool(
-        data,
-        offsets.ProjectileData_piercesCharacters,
-        "piercesChars"
-    );
-    if (!pierces)
-        pierces = _flagFrom(getFunctions().LogicProjectileClient_piercesEnvironment, data, data);
-    return { passes: !!passes, pierces: !!pierces, piercesChars: !!piercesChars };
+    try {
+        piercesChars = data.add(offsets.ProjectileData_piercesCharacters).readU8() & 1;
+    } catch (_) {}
+    return {
+        passes: passes,
+        pierces: pierces,
+        piercesChars: piercesChars
+    };
 }
 
 function _readProjectileU8(data, off, kind, min, max) {
@@ -711,112 +716,79 @@ function _readProjectileTarget(projectile, data, x, y) {
     return null;
 }
 
-function _captureProjectile(projectile, data) {
+function _captureProjectile(projectile, data, now) {
     if (!isValidPtr(projectile)) return;
     const fns = getFunctions();
     try {
         if (!isValidPtr(data)) data = fns.LogicGameObjectClient_getData(projectile);
         if (!isValidPtr(data)) return;
         const gid = String(fns.LogicGameObjectClient_getGlobalID(projectile));
+        const x = fns.LogicGameObjectClient_getX(projectile) | 0;
+        const y = fns.LogicGameObjectClient_getY(projectile) | 0;
         const existing = _liveProjectiles.get(gid);
         if (existing) {
             existing.ptr = projectile;
             existing.data = data;
+            existing.seen = true;
             return;
         }
-        const x = fns.LogicGameObjectClient_getX(projectile) | 0;
-        const y = fns.LogicGameObjectClient_getY(projectile) | 0;
-        const dataSpeed = _readProjectileSpeed(data);
         const radius = _readProjectileRadius(data);
-        const flags = _readProjectileFlags(data);
+        if (!(radius > 0)) return;
         const target = _readProjectileTarget(projectile, data, x, y);
+        const flags = _readProjectileFlags(data);
         let isIndirect = 0;
         try {
-            if (offsets.Projectile_isIndirect && isValidPtr(data)) {
-                isIndirect = data.add(offsets.Projectile_isIndirect).readU8() | 0;
-            }
+            isIndirect = data.add(offsets.Projectile_isIndirect).readU8() | 0;
         } catch (_) {}
-        let isBeam = false;
+        let travelType = _readClientU32(projectile, offsets.ProjectileClient_travelType, 16);
+        if (travelType < 0) travelType = 0;
+        let beam = 0;
         try {
-            isBeam = data.add(offsets.ProjectileData_isBeamField).readU8() > 0;
+            beam = data.add(offsets.ProjectileData_isBeamField).readU8() & 1;
         } catch (_) {}
-        if (!isBeam && fns.LogicProjectileClient_isBeam) {
-            try {
-                isBeam = !!fns.LogicProjectileClient_isBeam(data);
-            } catch (_) {}
-        }
         const ownerIndex = _readOwnerIndex(projectile);
-        const name = _readProjectileName(data);
-        const castRange = _rangeForOwner(ownerIndex);
-        _learnRangeBonus(ownerIndex, projectile, data, _charsByIndex.get(ownerIndex));
-        const meta = _readProjectileMeta(projectile, data, dataSpeed, castRange, isBeam);
-        let seekX = 0;
-        let seekY = 0;
-        if (meta.homing && (scanData.myX || scanData.myY)) {
-            const dx = scanData.myX - x;
-            const dy = scanData.myY - y;
-            const len = Math.sqrt(dx * dx + dy * dy);
-            if (len > 1) {
-                seekX = dx / len;
-                seekY = dy / len;
-            }
-        }
-        const now = Date.now();
-        _liveProjectiles.set(gid, {
+        const entry = {
             gid,
             ptr: projectile,
             data,
             ownerIndex,
-            name,
-            seekX,
-            seekY,
+            radius,
+            speed: _readProjectileSpeed(data),
             x,
             y,
             spawnX: x,
             spawnY: y,
-            speed: dataSpeed,
-            radius,
             targetX: target ? target.x : 0,
             targetY: target ? target.y : 0,
             hasTarget: !!target,
+            seg0: target ? length(target.x - x, target.y - y) : 0,
             passesEnv: flags.passes,
             piercesEnv: flags.pierces,
             piercesChars: flags.piercesChars,
-            isIndirect: isIndirect || meta.travelType > 0,
-            isBeam: meta.isBeam,
-            beamCopy: meta.beamCopy,
-            travelType: meta.travelType,
-            castRange,
-            preMs: meta.preMs,
-            lifeMs: meta.lifeMs,
-            ticks: meta.ticks,
-            travelDistance: meta.travel,
-            typeId: meta.typeId,
-            homing: meta.homing,
-            bouncing: meta.bouncing,
-            steer: meta.steer,
-            steerIgnoreMs: meta.steerIgnoreMs,
-            steerLifeMs: meta.steerLifeMs,
-            bounceAdd: meta.bounceAdd,
-            bounceMax: meta.bounceMax,
-            bounceKeep: meta.bounceKeep,
-            rehit: meta.rehit,
+            isIndirect: !!isIndirect || travelType > 0,
+            travelType,
+            isBeam: !!beam,
+            beamCopy: false,
+            ageMs: 0,
             spawnTs: now,
-            weapon: _weaponForOwner(ownerIndex),
             lastX: x,
             lastY: y,
             lastTs: now,
-            hasVelocitySample: false,
             vx: 0,
-            vy: 0
-        });
+            vy: 0,
+            hasVelocitySample: false,
+            seen: true,
+            meta: null
+        };
+        _liveProjectiles.set(gid, entry);
     } catch (_) {}
 }
 
 function _removeProjectile(projectile) {
     try {
         const gid = String(getFunctions().LogicGameObjectClient_getGlobalID(projectile));
-        _liveProjectiles.delete(gid);
+        const entry = _liveProjectiles.get(gid);
+        if (entry) entry.seen = false;
     } catch (_) {}
 }
 
@@ -858,6 +830,7 @@ function _notifyDataReload() {
     _charRange.clear();
     _weaponMeta.clear();
     _learnedTravel.clear();
+    _flightRange.clear();
     _rangeBonus.clear();
     _columnCache.clear();
     _colCands.clear();
@@ -914,7 +887,7 @@ function _installProjectileHooks(base) {
                 this.data = args[1];
             },
             onLeave() {
-                _captureProjectile(this.projectile, this.data);
+                _captureProjectile(this.projectile, this.data, Date.now());
             }
         });
     } catch (_) {}
@@ -931,7 +904,13 @@ function _installProjectileHooks(base) {
                 this.projectile = args[0];
             },
             onLeave() {
-                _captureProjectile(this.projectile, null);
+                try {
+                    const gid = String(
+                        getFunctions().LogicGameObjectClient_getGlobalID(this.projectile)
+                    );
+                    const entry = _liveProjectiles.get(gid);
+                    if (entry) entry.seen = true;
+                } catch (_) {}
             }
         });
     } catch (_) {}
@@ -940,131 +919,175 @@ function _installProjectileHooks(base) {
     _installDataReloadHooks(base);
 }
 
+export function learnedFlightRange(data) {
+    if (!isValidPtr(data)) return 0;
+    const v = _flightRange.get(data.toString()) || 0;
+    return v > 0 ? v : 0;
+}
+
+function _learnFlightRange(data, flown) {
+    if (!isValidPtr(data) || !(flown > 0)) return;
+    const key = data.toString();
+    const prev = _flightRange.get(key) || 0;
+    if (flown > prev) _flightRange.set(key, flown);
+}
+
+function _flightSeg(entry, flown) {
+    const learned = learnedFlightRange(entry.data);
+    const cap = learned > 0 ? learned + entry.radius : 0;
+    let seg = entry.seg0;
+    if (cap > 0 && (!(seg > 0) || seg > cap)) seg = cap;
+    if (!(seg > 0)) return 0;
+    const remain = seg - flown;
+    return remain > 0 ? remain : 0;
+}
+
+function _applyMeta(entry, meta) {
+    entry.meta = meta;
+    if (!meta) return;
+    entry.isBeam = !!meta.isBeam;
+    entry.beamCopy = !!meta.beamCopy;
+    entry.isIndirect = entry.isIndirect || meta.travelType > 0;
+    entry.preMs = meta.preMs;
+    entry.lifeMs = meta.lifeMs;
+    entry.ticks = meta.ticks;
+    if (meta.travel > 0) entry.travelDistance = meta.travel;
+    entry.homing = meta.homing;
+    entry.bouncing = meta.bouncing;
+    entry.steer = meta.steer;
+    entry.steerIgnoreMs = meta.steerIgnoreMs;
+    entry.steerLifeMs = meta.steerLifeMs;
+    entry.bounceAdd = meta.bounceAdd;
+    entry.bounceMax = meta.bounceMax;
+    entry.bounceKeep = meta.bounceKeep;
+    entry.rehit = meta.rehit;
+    entry.typeId = meta.typeId;
+}
+
 function _updateLiveProjectiles(now) {
     const fns = getFunctions();
     const output = [];
-    for (const [gid, projectile] of _liveProjectiles) {
+    let metaBudget = _probeBudget > 0 ? 1 : 0;
+    for (const [gid, entry] of _liveProjectiles) {
         try {
-            if (projectile.ptr.isNull()) {
+            if (!entry.seen || entry.ptr.isNull()) {
+                const flown = _traveled(entry, entry.lastX, entry.lastY);
+                if (flown > 0) {
+                    _learnFlightRange(entry.data, flown);
+                    _learnRangeBonus(entry.ownerIndex, flown + entry.radius);
+                }
                 _liveProjectiles.delete(gid);
                 continue;
             }
-            const x = fns.LogicGameObjectClient_getX(projectile.ptr) | 0;
-            const y = fns.LogicGameObjectClient_getY(projectile.ptr) | 0;
-            const dt = (now - projectile.lastTs) / 1000;
-            const dx = x - projectile.lastX;
-            const dy = y - projectile.lastY;
+            const x = fns.LogicGameObjectClient_getX(entry.ptr) | 0;
+            const y = fns.LogicGameObjectClient_getY(entry.ptr) | 0;
+            const dt = (now - entry.lastTs) / 1000;
+            const dx = x - entry.lastX;
+            const dy = y - entry.lastY;
             if (dt > 0.008 && dt < 0.3 && dx * dx + dy * dy >= 16) {
                 const observedVx = dx / dt;
                 const observedVy = dy / dt;
-                if (length(observedVx, observedVy) > 8500) {
-                    projectile.lastX = x;
-                    projectile.lastY = y;
-                    projectile.lastTs = now;
-                    continue;
-                }
-                const alpha = projectile.hasVelocitySample ? 0.4 : 1;
-                projectile.vx = projectile.vx * (1 - alpha) + observedVx * alpha;
-                projectile.vy = projectile.vy * (1 - alpha) + observedVy * alpha;
-                projectile.hasVelocitySample = true;
-
-                const measured = length(projectile.vx, projectile.vy);
-                if (measured >= 300 && measured <= 8500) {
-                    projectile.speed = measured;
-                    if (projectile.ownerIndex === scanData.myPlayerIndex) {
-                        const dataPtr = projectile.data;
-                        if (isValidPtr(dataPtr)) {
-                            const key = dataPtr.toString();
-                            const entry = _speedByData.get(key) || { sum: 0, count: 0 };
-                            entry.sum += measured;
-                            entry.count++;
-                            _speedByData.set(key, entry);
-                            scanData.measuredSpeed = Math.round(entry.sum / entry.count);
+                if (length(observedVx, observedVy) <= 8500) {
+                    const alpha = entry.hasVelocitySample ? 0.4 : 1;
+                    entry.vx = entry.vx * (1 - alpha) + observedVx * alpha;
+                    entry.vy = entry.vy * (1 - alpha) + observedVy * alpha;
+                    entry.hasVelocitySample = true;
+                    const measured = length(entry.vx, entry.vy);
+                    if (measured >= 300 && measured <= 8500) {
+                        entry.speed = measured;
+                        if (entry.ownerIndex === scanData.myPlayerIndex) {
+                            const dataPtr = entry.data;
+                            if (isValidPtr(dataPtr)) {
+                                const key = dataPtr.toString();
+                                const acc = _speedByData.get(key) || { sum: 0, count: 0 };
+                                acc.sum += measured;
+                                acc.count++;
+                                _speedByData.set(key, acc);
+                                scanData.measuredSpeed = Math.round(acc.sum / acc.count);
+                            }
                         }
                     }
                 }
             }
-            const liveTarget = _readProjectileTarget(projectile.ptr, projectile.data, x, y);
-            if (liveTarget) {
-                projectile.targetX = liveTarget.x;
-                projectile.targetY = liveTarget.y;
-                projectile.hasTarget = true;
-            } else {
-                projectile.hasTarget = false;
+            entry.lastX = x;
+            entry.lastY = y;
+            entry.lastTs = now;
+            entry.x = x;
+            entry.y = y;
+            entry.ageMs = Math.max(0, now - (entry.spawnTs || now));
+            const target = _readProjectileTarget(entry.ptr, entry.data, x, y);
+            if (target) {
+                entry.targetX = target.x;
+                entry.targetY = target.y;
+                entry.hasTarget = true;
+                if (!(entry.seg0 > 0))
+                    entry.seg0 = length(target.x - entry.spawnX, target.y - entry.spawnY);
             }
-            projectile.lastX = x;
-            projectile.lastY = y;
-            projectile.lastTs = now;
-            if (projectile.castRange <= 0) {
-                projectile.castRange = _rangeForOwner(projectile.ownerIndex);
+            if (!entry.meta && metaBudget > 0) {
+                metaBudget--;
+                _applyMeta(
+                    entry,
+                    _readProjectileMeta(entry.ptr, entry.data, entry.speed, 0, entry.isBeam)
+                );
             }
-            if (!(projectile.travelDistance > 0)) {
-                const learned = _learnedFor(projectile.ptr, projectile.data);
-                if (learned && learned.ticks > 0) {
-                    _learnRangeBonus(
-                        projectile.ownerIndex,
-                        projectile.ptr,
-                        projectile.data,
-                        _charsByIndex.get(projectile.ownerIndex)
-                    );
-                    projectile.ticks = learned.ticks;
-                    projectile.travelDistance =
-                        learned.range > 0
-                            ? learned.range
-                            : travelDistance(learned.ticks, learned.speed || projectile.speed);
-                    if (learned.beam) projectile.isBeam = true;
-                }
-            }
-            if (projectile.ownerIndex >= 0 && _friendlyIdx.has(projectile.ownerIndex)) continue;
-            if (projectile.ownerIndex >= 0 && projectile.ownerIndex === scanData.myPlayerIndex)
-                continue;
+            const flown = _traveled(entry, x, y);
+            entry.flown = flown;
+            entry.seg = _flightSeg(entry, flown);
+            if (entry.ownerIndex >= 0 && _friendlyIdx.has(entry.ownerIndex)) continue;
+            if (entry.ownerIndex === scanData.myPlayerIndex) continue;
+            if (!(entry.seg > 0) && !entry.hasTarget) continue;
             output.push({
                 gid,
-                name: projectile.name,
                 x,
                 y,
-                spawnX: projectile.spawnX,
-                spawnY: projectile.spawnY,
-                speed: projectile.speed,
-                radius: projectile.radius,
-                targetX: projectile.targetX,
-                targetY: projectile.targetY,
-                hasTarget: !!projectile.hasTarget,
-                passesEnv: !!projectile.passesEnv,
-                piercesEnv: !!projectile.piercesEnv,
-                isIndirect: !!projectile.isIndirect,
-                isBeam: !!projectile.isBeam,
-                beamCopy: !!projectile.beamCopy,
-                travelType: projectile.travelType || 0,
-                piercesChars: !!projectile.piercesChars,
-                castRange: projectile.castRange || 0,
-                preMs: projectile.preMs || 0,
-                lifeMs: projectile.lifeMs || 0,
-                ticks: projectile.ticks || 0,
-                travelDistance: projectile.travelDistance || 0,
-                ageMs: Math.max(0, now - (projectile.spawnTs || now)),
-                typeId: projectile.typeId,
-                homing: projectile.homing,
-                seekX: projectile.seekX,
-                seekY: projectile.seekY,
-                bouncing: projectile.bouncing,
-                steer: projectile.steer || 0,
-                steerIgnoreMs: projectile.steerIgnoreMs || 0,
-                steerLifeMs: projectile.steerLifeMs || 0,
-                bounceAdd: projectile.bounceAdd || 0,
-                bounceMax: projectile.bounceMax || 0,
-                bounceKeep: projectile.bounceKeep || 0,
-                rehit: !!projectile.rehit,
-                volleyMs: _volleyMs(projectile.weapon),
-                ownerIndex: projectile.ownerIndex,
-                vx: projectile.vx,
-                vy: projectile.vy
+                spawnX: entry.spawnX,
+                spawnY: entry.spawnY,
+                vx: entry.vx,
+                vy: entry.vy,
+                speed: entry.speed,
+                radius: entry.radius,
+                seg: entry.seg,
+                flown,
+                seg0: entry.seg0,
+                hasTarget: !!entry.hasTarget,
+                targetX: entry.targetX,
+                targetY: entry.targetY,
+                passesEnv: !!entry.passesEnv,
+                piercesEnv: !!entry.piercesEnv,
+                piercesChars: !!entry.piercesChars,
+                isIndirect: !!entry.isIndirect,
+                isBeam: !!entry.isBeam,
+                beamCopy: !!entry.beamCopy,
+                travelType: entry.travelType || 0,
+                preMs: entry.preMs || 0,
+                lifeMs: entry.lifeMs || 0,
+                ticks: entry.ticks || 0,
+                travelDistance: entry.travelDistance || 0,
+                ageMs: entry.ageMs,
+                typeId: entry.typeId,
+                homing: !!entry.homing,
+                seekX: entry.seekX || 0,
+                seekY: entry.seekY || 0,
+                bouncing: !!entry.bouncing,
+                steer: entry.steer || 0,
+                steerIgnoreMs: entry.steerIgnoreMs || 0,
+                steerLifeMs: entry.steerLifeMs || 0,
+                bounceAdd: entry.bounceAdd || 0,
+                bounceMax: entry.bounceMax || 0,
+                bounceKeep: entry.bounceKeep || 0,
+                rehit: !!entry.rehit,
+                volleyMs: _volleyMs(_weaponForOwner(entry.ownerIndex)),
+                ownerIndex: entry.ownerIndex
             });
         } catch (_) {
             _liveProjectiles.delete(gid);
         }
     }
     return output;
+}
+
+function _traveled(entry, x, y) {
+    return length(x - entry.spawnX, y - entry.spawnY);
 }
 
 export function updateScanner(bm, now) {
@@ -1096,6 +1119,8 @@ export function updateScanner(bm, now) {
             const ownSpeed = _characterSpeed(ownData);
             if (ownSpeed >= 300 && ownSpeed <= 3000) scanData.mySpeed = ownSpeed;
         }
+        _probeBudget = 8;
+        for (const entry of _liveProjectiles.values()) entry.seen = false;
         const enemies = [];
         const vtableProj = moduleBase.add(offsets.VTABLE_PROJECTILE_DATA);
         const objMgr = bm.add(offsets.BattleModeClient_objectManager).readPointer();
@@ -1126,7 +1151,7 @@ export function updateScanner(bm, now) {
                         if (!isValidPtr(data)) continue;
                         const team = obj.add(offsets.GameObj_team).readU32();
                         if (data.readPointer().equals(vtableProj)) {
-                            _captureProjectile(obj, data);
+                            _captureProjectile(obj, data, now);
                             continue;
                         }
                         if (team === scanData.myTeamId) {
@@ -1187,6 +1212,7 @@ export function resetScannerCache() {
     _charsByIndex.clear();
     _speedByData.clear();
     _learnedTravel.clear();
+    _flightRange.clear();
     _rangeBonus.clear();
     _columnCache.clear();
     _colCands.clear();
