@@ -12,14 +12,19 @@ import
 from "./offsets.js";
 import
 {
-    length,
-}
-from "../core/admath.js";
-import
-{
     readScString
 }
 from "./scstring.js";
+const GUARD = 0xb504;
+
+function length(x, y)
+{
+    if (x > GUARD || x < -GUARD || y > GUARD || y < -GUARD) return 46340;
+    const s = x * x + y * y;
+    if (s < 0) return 46340;
+    return Math.floor(Math.sqrt(s));
+}
+
 var moduleBase = null;
 var _brawlerNameCache = new Map();
 var _scanCount = 0;

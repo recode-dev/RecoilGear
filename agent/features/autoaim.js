@@ -11,14 +11,6 @@ import
 from "../core/offsets.js";
 import
 {
-    LogicMath,
-    distance,
-    length,
-    lengthSquared,
-}
-from "../core/admath.js";
-import
-{
     scanData
 }
 from "../core/scan.js";
@@ -28,6 +20,35 @@ import
     losCheck
 }
 from "../utils/walls.js";
+
+const MAXI = 0x7fffffff;
+const GUARD = 0xb504;
+
+const _sqrt = (v) =>
+{
+    if (v <= 0) return 0;
+    if (v >= MAXI) return 46340;
+    return Math.floor(Math.sqrt(v));
+};
+
+function length(x, y)
+{
+    if (x > GUARD || x < -GUARD || y > GUARD || y < -GUARD) return 46340;
+    const s = x * x + y * y;
+    return s < 0 ? 46340 : _sqrt(s);
+}
+
+function lengthSquared(x, y)
+{
+    if (x > GUARD || x < -GUARD || y > GUARD || y < -GUARD) return MAXI;
+    const s = x * x + y * y;
+    return s < 0 ? MAXI : s;
+}
+
+function distance(x1, y1, x2, y2)
+{
+    return length(x2 - x1, y2 - y1);
+}
 
 const SPEED_REFRESH_MS = 500;
 const SKIP_NAME_PARTS = ["BALL"];
@@ -142,8 +163,8 @@ function _solve(mx, my, pred, speed, range)
     for (let pass = 0; pass < LEAD_PASSES; pass++)
     {
         const flightTo = distance(px, py, mx, my);
-        if (range > 0 && distance > range) return null;
-        const flight = distance / speed;
+        if (range > 0 && flightTo > range) return null;
+        const flight = flightTo / speed;
         if (flight > MAX_FLIGHT_S) return null;
         px = pred.x + pred.vx * flight + 0.5 * pred.ax * flight * flight;
         py = pred.y + pred.vy * flight + 0.5 * pred.ay * flight * flight;
