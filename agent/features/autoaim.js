@@ -52,12 +52,6 @@ var _rangeCache = 0;
 var _rangeAt = 0;
 var _hooks = false;
 
-const FALLBACK_SHOT_RADIUS = 300;
-
-function _shotRadius() {
-    return _ownShotR > 0 ? _ownShotR : FALLBACK_SHOT_RADIUS;
-}
-
 function _isSkipped(name) {
     if (!name) return true;
     for (let i = 0; i < SKIP_NAME_PARTS.length; i++) {
@@ -154,7 +148,7 @@ function _flightTime(rx, ry, vx, vy, speed) {
 }
 
 function _solve(mx, my, pred, speed, range) {
-    const pocket = _shotRadius() + (pred.rad > 0 ? pred.rad : 0);
+    const pocket = (_ownShotR > 0 ? _ownShotR : 0) + (pred.rad > 0 ? pred.rad : 0);
     if (_ownBeam) return { x: Math.round(pred.x), y: Math.round(pred.y), t: 0 };
 
     if (range > 0) {
@@ -325,7 +319,7 @@ function _pickTarget(now) {
         };
         pred.rad = e.radius | 0;
         const d = distance(e.x, e.y, mx, my);
-        if (range > 0 && d - _shotRadius() - pred.rad > range) continue;
+        if (range > 0 && d - (_ownShotR > 0 ? _ownShotR : 0) - pred.rad > range) continue;
         if (d < calmD) {
             calmD = d;
             calm = e;
