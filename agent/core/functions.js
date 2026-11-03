@@ -80,7 +80,7 @@ export function initFunctions(baseIn, imageIn) {
             "int"
         ]),
         LogicData_getName: _nf("LogicData_getName", "pointer", ["pointer"]),
-        LogicCharacterClient_getMoveAngle: _nf("LogicCharacterClient_getMoveAngle", "float", [
+        LogicCharacterClient_getMoveAngle: _nf("LogicCharacterClient_getMoveAngle", "int32", [
             "pointer"
         ]),
         LogicProjectileClient_getPreExplosionTimeMs: _nf(

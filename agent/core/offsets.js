@@ -2,7 +2,6 @@ export const offsets = Object.freeze({
     BattleMode_client: 0x28,
     BattleModeClient_objectManager: 0x28,
     BattleMode_clientInputManager: 0x58,
-    BattleModeClient_ownTeam: 0xe4,
 
     ObjectManager_objectsArray: 0x0,
     ObjectManager_count: 0xc,
@@ -16,6 +15,9 @@ export const offsets = Object.freeze({
 
     GameObj_team: 0x40,
     GameObj_hp: 0xc4,
+    GameObj_x: 0x30,
+    GameObj_y: 0x34,
+    GameObj_data: 0x10,
     LogicGameObjectClient_ownerIndex: 0x3c,
 
     ProjectileClient_data: 0x10,
@@ -23,7 +25,11 @@ export const offsets = Object.freeze({
     ProjectileClient_targetY: 0x1f0,
     ProjectileClient_travelType: 0x204,
     ProjectileClient_isBeamCopy: 0x21c,
-    ProjectileClient_typeField: 0x28c,
+    ProjectileClient_lifeTicks: 0x1e8,
+    ProjectileClient_targetObject: 0xa0,
+    ProjectileClient_stunMs: 0x220,
+    ProjectileClient_effectMs: 0x228,
+
     ProjectileData_speedField: 0x124,
     ProjectileData_radiusField: 0x130,
     ProjectileData_passesEnvironment: 0x23c,
@@ -40,6 +46,7 @@ export const offsets = Object.freeze({
     ProjectileData_canHitAgainAfterBounce: 0x254,
     ProjectileData_distanceAddFromBounce: 0x1dc,
     ProjectileData_maxDistanceBounces: 0x1e0,
+    ProjectileData_typeField: 0x28c,
     CharacterData_speedField: 0x26c,
     CharacterData_collisionRadiusField: 0x2ac,
     CharacterClient_moveAngle: 0xb0,
@@ -81,6 +88,7 @@ export const offsets = Object.freeze({
 
     LogicSkillData__getCastingRange: 0x9de9cc,
     LogicSkillData__getProjectileData: 0x9e84a8,
+    LogicSkillData_projectilePointer: 0x78,
 
     LogicProjectileClient_getTargetX: 0x9cdaac,
     LogicProjectileClient_getTargetY: 0x9cdab4,
@@ -99,6 +107,7 @@ export const offsets = Object.freeze({
     LogicProjectileData_getIntValueFromColumn: 0x9cd5e0,
     LogicProjectileData_getBoolValueFromColumn: 0x9cd678,
     LogicProjectileData_getBoolValueFromColumnAlt: 0x9cd710,
+    LogicProjectileData_readerField: 0x68,
 
     LogicSkillData_getSpread: 0x9dec84,
     LogicSkillData_getNumBulletsInOneAttack: 0x9ded40,
@@ -119,18 +128,6 @@ export const offsets = Object.freeze({
 
     ByteStream__WriteBytes: 0xbd5f3c,
 
-    ProjectileClient_lifeTicks: 0x2c,
-    ProjectileClient_landingX: 0xb4,
-    ProjectileClient_landingY: 0xb8,
-    ProjectileClient_startX: 0xd0,
-    ProjectileClient_startY: 0xd4,
-    ProjectileClient_dirX: 0xe0,
-    ProjectileClient_dirY: 0xe4,
-    ProjectileClient_collisionRadius: 0xf0,
-    ProjectileClient_targetObject: 0x100,
-    ProjectileClient_travelOverrideFlag: 0x644,
-    ProjectileClient_travelOverride: 0x648,
-
     ProjectileData_indirect: 0x108,
     ProjectileData_gravity: 0x118,
     ProjectileData_constantFlyTime: 0x134,
@@ -138,8 +135,6 @@ export const offsets = Object.freeze({
     ProjectileData_earlyTicks: 0x13c,
     ProjectileData_shotByHero: 0x1d8,
     ProjectileData_chainsToEnemies: 0x1f0,
-    ProjectileData_stunLengthMs: 0x220,
-    ProjectileData_silenceDurationMs: 0x228,
     ProjectileData_grapplesEnemy: 0x245,
     ProjectileData_boomerangType: 0x250,
     ProjectileData_travelType: 0x260,
@@ -153,6 +148,5 @@ export const offsets = Object.freeze({
     ProjectileData_areaEffectTrailMinDistance: 0x1b0,
 
     LogicProjectileData_getTravelType: 0x9cdd48,
-    LogicSkillData_getRange: 0x978d74,
-    LogicSkillData_projectilePointer: 0x1d0
+    LogicSkillData_getRange: 0x978d74
 });

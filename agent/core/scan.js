@@ -8,9 +8,10 @@ export const TILE_UNITS = 100;
 export const TICKS_PER_SEC = 20;
 const TICK_MS = 1000 / TICKS_PER_SEC;
 export const BEAM_TICKS = 18000;
-const DATA_ROW_OFF = 0x8;
+const DATA_ROW_OFF = 0x68; // v69: [data+0x68] — ридер таблиц (доказано getIntValueFromColumn)
 const COLUMN_SPAN = 48;
 const STALE_MS = 10000;
+const DEFAULT_PROJECTILE_RADIUS = 40;
 
 function length(x, y) {
     if (x > GUARD || x < -GUARD || y > GUARD || y < -GUARD) return 46340;
@@ -22,13 +23,13 @@ function length(x, y) {
 var moduleBase = null;
 var _brawlerNameCache = new Map();
 var _scanCount = 0;
-var _activeGidSet = new Set();
 var _liveProjectiles = new Map();
 var _friendlyIdx = new Set();
 var _projectileHooksInstalled = false;
 var _charRange = new Map();
 var _weaponMeta = new Map();
 var _speedByData = new Map();
+var _charSpeedByData = new Map();
 var _charsByIndex = new Map();
 var _learnedTravel = new Map();
 var _rangeBonus = new Map();
@@ -74,6 +75,24 @@ function _ptrKey(value) {
         return value.toString();
     } catch (_) {
         return null;
+    }
+}
+
+// Прямое чтение поля [obj+0x10]: доказано LogicGameObjectClient_getData (v69).
+export function dataFieldOf(obj) {
+    if (!isValidPtr(obj)) return ptr(0);
+    try {
+        return obj.add(offsets.GameObj_data).readPointer();
+    } catch (_) {
+        return ptr(0);
+    }
+}
+
+function _fieldS32(obj, off) {
+    try {
+        return obj.add(off).readS32() | 0;
+    } catch (_) {
+        return 0;
     }
 }
 
@@ -150,10 +169,11 @@ function _installCoreHooks(base) {
                     if (!isValidPtr(this.obj)) return;
                     const key = _ptrKey(this.obj);
                     if (!key) return;
-                    const angle = this.obj.add(offsets.CharacterClient_moveAngle).readFloat();
-                    if (!isFinite(angle)) return;
+                    // v69: угол — целое число градусов (getMoveAngle: ldr w0,[x0,#0xb0]).
+                    const deg = this.obj.add(offsets.CharacterClient_moveAngle).readS32() | 0;
+                    if (deg < -720 || deg > 720) return;
                     if (_angleCache.size > CACHE_MAX) _angleCache.clear();
-                    _angleCache.set(key, { angle: angle, ts: Date.now() });
+                    _angleCache.set(key, { angle: (deg * Math.PI) / 180, ts: Date.now() });
                 } catch (_) {}
             }
         });
@@ -208,17 +228,22 @@ function _readProjectileName(value) {
     return null;
 }
 
+function _validAngleDeg(deg) {
+    return isFinite(deg) && deg >= -720 && deg <= 720;
+}
+
 function _readMoveAngle(obj) {
     const fns = getFunctions();
     if (fns.LogicCharacterClient_getMoveAngle) {
         try {
-            const a = fns.LogicCharacterClient_getMoveAngle(obj);
-            if (isFinite(a) && Math.abs(a) <= Math.PI * 2) return a;
+            // v69: getMoveAngle возвращает int-градусы, а не float (ldr w0,[x0,#0xb0]).
+            const deg = fns.LogicCharacterClient_getMoveAngle(obj) | 0;
+            if (_validAngleDeg(deg)) return (deg * Math.PI) / 180;
         } catch (_) {}
     }
     try {
-        const a = obj.add(offsets.CharacterClient_moveAngle).readFloat();
-        if (isFinite(a) && Math.abs(a) <= Math.PI * 2) return a;
+        const deg = obj.add(offsets.CharacterClient_moveAngle).readS32() | 0;
+        if (_validAngleDeg(deg)) return (deg * Math.PI) / 180;
     } catch (_) {}
     return 0;
 }
@@ -569,14 +594,22 @@ function _readProjectileSpeed(data) {
 
 function _characterSpeed(data) {
     if (!isValidPtr(data)) return 0;
+    const key = _ptrKey(data);
+    if (key) {
+        const hit = _charSpeedByData.get(key);
+        if (hit !== void 0) return hit;
+    }
+    let speed = 0;
     const fns = getFunctions();
     try {
         if (fns.LogicCharacterData_getSpeed) {
             const v = fns.LogicCharacterData_getSpeed(data) | 0;
-            if (v > 0) return v;
+            if (v > 0) speed = v;
         }
     } catch (_) {}
-    return _readProjectileField(data, offsets.CharacterData_speedField, 1, 6000);
+    if (!(speed > 0)) speed = _readProjectileField(data, offsets.CharacterData_speedField, 1, 6000);
+    if (key) _charSpeedByData.set(key, speed);
+    return speed;
 }
 
 export function collisionRadius(data) {
@@ -735,19 +768,15 @@ function _readProjectileMeta(projectile, data, speed, rangeUnits, beam) {
         travel = travelDistance(ticks, speed);
     }
     if (fns.LogicProjectileClient_getType) {
-        const holders = [data, projectile];
-        for (let i = 0; i < holders.length; i++) {
-            try {
-                const t = fns.LogicProjectileClient_getType(holders[i]) | 0;
-                if (t >= 0 && t <= 20) {
-                    typeId = t;
-                    break;
-                }
-            } catch (_) {}
-        }
+        // v69: геттер типа — метод ProjectileData, вызывается с data (доказано decode).
+        try {
+            const t = fns.LogicProjectileClient_getType(data) | 0;
+            if (t >= 0 && t <= 20) typeId = t;
+        } catch (_) {}
     }
     if (typeId < 0) {
-        const t = _readClientU32(projectile, offsets.ProjectileClient_typeField, 20);
+        // Поле типа лежит в ProjectileData (+0x28c), не в клиенте (клиент всего 0x230 байт).
+        const t = _readClientU32(data, offsets.ProjectileData_typeField, 20);
         if (t >= 0) typeId = t;
     }
     try {
@@ -831,19 +860,16 @@ function _readProjectileTarget(projectile, data, x, y) {
         if (hit) return hit;
     } catch (_) {}
     if (fns.LogicProjectileClient_getTargetX && fns.LogicProjectileClient_getTargetY) {
-        const holders = [projectile, data];
-        for (let i = 0; i < holders.length; i++) {
-            if (!isValidPtr(holders[i])) continue;
-            try {
-                const hit = _validTarget(
-                    fns.LogicProjectileClient_getTargetX(holders[i]) | 0,
-                    fns.LogicProjectileClient_getTargetY(holders[i]) | 0,
-                    x,
-                    y
-                );
-                if (hit) return hit;
-            } catch (_) {}
-        }
+        // getTargetX/getTargetY — методы клиента (читают [x+0x1ec]/[x+0x1f0]).
+        try {
+            const hit = _validTarget(
+                fns.LogicProjectileClient_getTargetX(projectile) | 0,
+                fns.LogicProjectileClient_getTargetY(projectile) | 0,
+                x,
+                y
+            );
+            if (hit) return hit;
+        } catch (_) {}
     }
     return null;
 }
@@ -885,33 +911,25 @@ function _clientS32(obj, off, min, max) {
 
 function _captureProjectile(projectile, data, now) {
     if (!isValidPtr(projectile)) return;
-    const fns = getFunctions();
+    const key = _ptrKey(projectile);
+    if (!key) return;
     try {
-        if (!isValidPtr(data)) data = dataOf(projectile);
+        if (!isValidPtr(data)) data = dataFieldOf(projectile);
         if (!isValidPtr(data)) return;
-        const gid = String(fns.LogicGameObjectClient_getGlobalID(projectile));
-        const x = fns.LogicGameObjectClient_getX(projectile) | 0;
-        const y = fns.LogicGameObjectClient_getY(projectile) | 0;
-        const existing = _liveProjectiles.get(gid);
+        const existing = _liveProjectiles.get(key);
         if (existing) {
             existing.ptr = projectile;
             existing.data = data;
             return;
         }
         let radius = _readProjectileRadius(data);
-        if (!(radius > 0))
-            radius = _clientS32(projectile, offsets.ProjectileClient_collisionRadius, 1, 500);
-        if (!(radius > 0)) return;
+        if (!(radius > 0)) radius = DEFAULT_PROJECTILE_RADIUS;
+        const x = _fieldS32(projectile, offsets.GameObj_x);
+        const y = _fieldS32(projectile, offsets.GameObj_y);
+        // Позиция объекта выставляется decode/setPosition; при (0,0) спавн
+        // достаём на первом тике, где позиция реальна (spawnPending).
+        const spawnReady = x !== 0 || y !== 0;
         let target = _readProjectileTarget(projectile, data, x, y);
-        const landingX = _clientS32(projectile, offsets.ProjectileClient_landingX, -200000, 200000);
-        const landingY = _clientS32(projectile, offsets.ProjectileClient_landingY, -200000, 200000);
-        if (
-            !target &&
-            (landingX || landingY) &&
-            Math.abs(landingX - x) < 30000 &&
-            Math.abs(landingY - y) < 30000
-        )
-            target = { x: landingX, y: landingY };
         const flags = _readProjectileFlags(data);
         let isIndirect = _dataU8(data, offsets.ProjectileData_indirect);
         let travelType = _dataS32(data, offsets.ProjectileData_travelType, 0, 20);
@@ -929,22 +947,17 @@ function _captureProjectile(projectile, data, now) {
             }
         }
         const dynamicRange = _dataU8(data, offsets.ProjectileData_allowDynamicRange);
-        const overrideFlag = _dataU8(data, offsets.ProjectileClient_travelOverrideFlag);
-        const overrideType = _dataS32(data, offsets.ProjectileClient_travelOverride, 0, 20);
-        if (overrideFlag && overrideType) travelType = overrideType;
-        const gravity = _dataS32(data, offsets.ProjectileData_gravity, 1, 20000);
-        const visualized = _dataU8(data, offsets.ProjectileData_visualizeEndPoint);
         if (travelType === 6 || dynamicRange) isIndirect = 1;
         let beam = 0;
         try {
             beam = data.add(offsets.ProjectileData_isBeamField).readU8() & 1;
         } catch (_) {}
         const ownerIndex = _readOwnerIndex(projectile);
-        const startX = _clientS32(projectile, offsets.ProjectileClient_startX, -200000, 200000);
-        const startY = _clientS32(projectile, offsets.ProjectileClient_startY, -200000, 200000);
+        // v69 (Ghidra): targetObject = [proj+0xa0], lifeTicks = [proj+0x1e8],
+        // stun = [proj+0x220], эффект = [proj+0x228] — доказано decode/ctor.
         const targetObj = _readPtrField(projectile, offsets.ProjectileClient_targetObject);
         const entry = {
-            gid,
+            gid: key,
             ptr: projectile,
             data,
             ownerIndex,
@@ -952,12 +965,13 @@ function _captureProjectile(projectile, data, now) {
             speed: _readProjectileSpeed(data),
             x,
             y,
-            spawnX: Math.abs(startX - x) < 500 ? startX : x,
-            spawnY: Math.abs(startY - y) < 500 ? startY : y,
+            spawnX: spawnReady ? x : 0,
+            spawnY: spawnReady ? y : 0,
+            spawnPending: !spawnReady,
             targetX: target ? target.x : 0,
             targetY: target ? target.y : 0,
             hasTarget: !!target || !!targetObj,
-            seg0: target ? length(target.x - x, target.y - y) : 0,
+            seg0: target && spawnReady ? length(target.x - x, target.y - y) : 0,
             passesEnv: flags.passes,
             piercesEnv: flags.pierces,
             piercesChars: flags.piercesChars,
@@ -973,51 +987,46 @@ function _captureProjectile(projectile, data, now) {
             vy: 0,
             hasVelocitySample: false,
             meta: null,
-            travelType: travelType,
-            dynamicRange: dynamicRange,
+            travelType,
+            dynamicRange,
             ignoreChars: _dataU8(data, offsets.ProjectileData_ignoreCharacterCollisions),
             ignoreEnv: _dataU8(data, offsets.ProjectileData_ignoreEnvironmentCollisions),
             grapples: _dataU8(data, offsets.ProjectileData_grapplesEnemy),
             boomerang: _dataS32(data, offsets.ProjectileData_boomerangType, 1, 8),
             chains: _dataU8(data, offsets.ProjectileData_chainsToEnemies),
-            stunMs: _dataS32(data, offsets.ProjectileData_stunLengthMs, 1, 60000),
-            silenceMs: _dataS32(data, offsets.ProjectileData_silenceDurationMs, 1, 60000),
+            stunMs: _clientS32(projectile, offsets.ProjectileClient_stunMs, 1, 60000),
+            silenceMs: _clientS32(projectile, offsets.ProjectileClient_effectMs, 1, 60000),
             triggerMs: _dataS32(data, offsets.ProjectileData_triggerWithDelayMs, 1, 60000),
             constantFly: _dataU8(data, offsets.ProjectileData_constantFlyTime),
             earlyTicks: _dataS32(data, offsets.ProjectileData_earlyTicks, 1, 400),
             homeDistance: _dataS32(data, offsets.ProjectileData_homeDistance, 1, 30000),
-            gravity: gravity,
+            gravity: _dataS32(data, offsets.ProjectileData_gravity, 1, 20000),
             shotByHero: _dataU8(data, offsets.ProjectileData_shotByHero),
-            visualized: visualized,
+            visualized: _dataU8(data, offsets.ProjectileData_visualizeEndPoint),
             attachArea: _dataU8(data, offsets.ProjectileData_attachAreaEffectToTarget),
             trail: _dataU8(data, offsets.ProjectileData_spawnAreaEffectTrail),
             trailMin: _dataS32(data, offsets.ProjectileData_areaEffectTrailMinDistance, 1, 20000),
             lifeTicks: _clientS32(projectile, offsets.ProjectileClient_lifeTicks, 1, 100000),
-            startX: startX,
-            startY: startY,
-            dirX: _clientS32(projectile, offsets.ProjectileClient_dirX, -200000, 200000),
-            dirY: _clientS32(projectile, offsets.ProjectileClient_dirY, -200000, 200000),
-            clientRadius: _clientS32(projectile, offsets.ProjectileClient_collisionRadius, 1, 500),
-            targetObj: targetObj,
-            travelOverrideFlag: overrideFlag,
-            travelOverride: overrideType
+            clientRadius: 0,
+            seekX: 0,
+            seekY: 0
         };
-        _liveProjectiles.set(gid, entry);
+        _liveProjectiles.set(key, entry);
     } catch (_) {}
 }
 
 function _removeProjectile(projectile) {
     if (!isValidPtr(projectile)) return;
-    for (const [gid, entry] of _liveProjectiles) {
-        if (!entry.ptr.equals(projectile)) continue;
-        const flown = _traveled(entry, entry.lastX, entry.lastY);
-        if (flown > 0) {
-            _learnFlightRange(entry.data, flown);
-            _learnRangeBonus(entry.ownerIndex, flown + entry.radius);
-        }
-        _liveProjectiles.delete(gid);
-        return;
+    const key = _ptrKey(projectile);
+    if (!key) return;
+    const entry = _liveProjectiles.get(key);
+    if (!entry || !entry.ptr.equals(projectile)) return;
+    const flown = _traveled(entry, entry.lastX, entry.lastY);
+    if (flown > 0) {
+        _learnFlightRange(entry.data, flown);
+        _learnRangeBonus(entry.ownerIndex, flown + entry.radius);
     }
+    _liveProjectiles.delete(key);
 }
 
 function _installTravelTicksHook(base) {
@@ -1062,6 +1071,7 @@ function _notifyDataReload() {
     _rangeBonus.clear();
     _columnCache.clear();
     _colCands.clear();
+    _charSpeedByData.clear();
     for (const [, projectile] of _liveProjectiles) {
         projectile.castRange = 0;
         projectile.travelDistance = 0;
@@ -1115,7 +1125,14 @@ function _installProjectileHooks(base) {
                 this.data = args[1];
             },
             onLeave() {
-                _captureProjectile(this.projectile, this.data, Date.now());
+                // Позиция/id ещё не инициализированы (base-ctor обнуляет их),
+                // тяжёлый захват делает decode-hook; здесь только прогрев кэша data.
+                try {
+                    if (isValidPtr(this.projectile) && isValidPtr(this.data)) {
+                        const key = _ptrKey(this.projectile);
+                        if (key) _cacheData(key, this.data, Date.now());
+                    }
+                } catch (_) {}
             }
         });
     } catch (_) {}
@@ -1189,7 +1206,6 @@ function _applyMeta(entry, meta) {
 }
 
 function _updateLiveProjectiles(now) {
-    const fns = getFunctions();
     const output = [];
     let metaBudget = _probeBudget > 0 ? 1 : 0;
     for (const [gid, entry] of _liveProjectiles) {
@@ -1198,8 +1214,9 @@ function _updateLiveProjectiles(now) {
                 _liveProjectiles.delete(gid);
                 continue;
             }
-            const x = fns.LogicGameObjectClient_getX(entry.ptr) | 0;
-            const y = fns.LogicGameObjectClient_getY(entry.ptr) | 0;
+            // v69: getX/getY == [obj+0x30]/[obj+0x34] — читаем напрямую, без натив-вызовов.
+            const x = _fieldS32(entry.ptr, offsets.GameObj_x);
+            const y = _fieldS32(entry.ptr, offsets.GameObj_y);
             const dt = (now - entry.lastTs) / 1000;
             const dx = x - entry.lastX;
             const dy = y - entry.lastY;
@@ -1233,13 +1250,19 @@ function _updateLiveProjectiles(now) {
             entry.lastTs = now;
             entry.x = x;
             entry.y = y;
+            if (entry.spawnPending && (x !== 0 || y !== 0)) {
+                // Спавн зафиксирован только когда позиция реальна.
+                entry.spawnX = x;
+                entry.spawnY = y;
+                entry.spawnPending = false;
+            }
             entry.ageMs = Math.max(0, now - (entry.spawnTs || now));
             const target = _readProjectileTarget(entry.ptr, entry.data, x, y);
             if (target) {
                 entry.targetX = target.x;
                 entry.targetY = target.y;
                 entry.hasTarget = true;
-                if (!(entry.seg0 > 0))
+                if (!(entry.seg0 > 0) && !entry.spawnPending)
                     entry.seg0 = length(target.x - entry.spawnX, target.y - entry.spawnY);
             }
             if (!entry.meta && metaBudget > 0) {
@@ -1345,14 +1368,16 @@ export function updateScanner(bm, now) {
         }
         scanData.ownCharacter = own;
         scanData.battleModeClient = bm;
-        scanData.myTeamId = bm.add(offsets.BattleModeClient_ownTeam).readS32();
+        // v69: поле 0xe4 у BattleModeClient не является командой; команда — [char+0x40]
+        // (доказано base-decode: код 0x119, старшие биты).
+        scanData.myTeamId = own.add(offsets.GameObj_team).readU32();
         scanData.myPlayerIndex = _readOwnerIndex(own);
         _friendlyIdx.clear();
         _friendlyIdx.add(scanData.myPlayerIndex);
         _charsByIndex.clear();
         _rememberCharacter(scanData.myPlayerIndex, own);
-        scanData.myX = functions.LogicGameObjectClient_getX(own) | 0;
-        scanData.myY = functions.LogicGameObjectClient_getY(own) | 0;
+        scanData.myX = _fieldS32(own, offsets.GameObj_x);
+        scanData.myY = _fieldS32(own, offsets.GameObj_y);
         scanData.mySpeed = 0;
         const ownData = dataOf(own);
         if (isValidPtr(ownData)) {
@@ -1387,7 +1412,8 @@ export function updateScanner(bm, now) {
                             obj = objects.add(i * stride).readPointer();
                         }
                         if (!isValidPtr(obj)) continue;
-                        const data = dataOf(obj);
+                        // v69: getData(obj) == [obj+0x10] (ldr x0,[x0,#0x10]) — читаем напрямую.
+                        const data = dataFieldOf(obj);
                         if (!isValidPtr(data)) continue;
                         const team = obj.add(offsets.GameObj_team).readU32();
                         if (data.readPointer().equals(vtableProj)) {
@@ -1400,12 +1426,17 @@ export function updateScanner(bm, now) {
                             continue;
                         }
                         if (obj.add(offsets.GameObj_hp).readU32() === 0) continue;
-                        const gid = String(functions.LogicGameObjectClient_getGlobalID(obj));
-                        let brawlerName = _brawlerNameCache.get(gid);
-                        if (brawlerName === void 0) {
-                            brawlerName = _readDataName(data);
-                            _brawlerNameCache.set(gid, brawlerName);
-                        }
+                        // Имена кэшируются по data: у одного бойца они общие.
+                        const dataKey = _ptrKey(data);
+                        let brawlerName;
+                        if (dataKey) {
+                            const cached = _brawlerNameCache.get(dataKey);
+                            if (cached !== void 0) brawlerName = cached;
+                            else {
+                                brawlerName = _readDataName(data);
+                                _brawlerNameCache.set(dataKey, brawlerName);
+                            }
+                        } else brawlerName = _readDataName(data);
                         const radius = collisionRadius(data) | 0;
                         if (!brawlerName && radius <= 0) continue;
                         const kind = brawlerName ? "player" : "spawnable";
@@ -1413,10 +1444,11 @@ export function updateScanner(bm, now) {
                         const playerIndex = _readOwnerIndex(obj);
                         if (brawlerName) _rememberCharacter(playerIndex, obj);
                         enemies.push({
-                            gid,
+                            // v69: [+8] globalId не заполняется — ключом служит сам объект.
+                            gid: _ptrKey(obj),
                             ptr: obj,
-                            x: functions.LogicGameObjectClient_getX(obj) | 0,
-                            y: functions.LogicGameObjectClient_getY(obj) | 0,
+                            x: _fieldS32(obj, offsets.GameObj_x),
+                            y: _fieldS32(obj, offsets.GameObj_y),
                             brawlerName,
                             body: obj,
                             teamId: team,
@@ -1431,11 +1463,9 @@ export function updateScanner(bm, now) {
         }
         _scanCount++;
         if ((_scanCount & 63) === 0) {
-            _activeGidSet.clear();
-            for (const enemy of enemies) _activeGidSet.add(enemy.gid);
-            for (const gid of _brawlerNameCache.keys()) {
-                if (!_activeGidSet.has(gid)) _brawlerNameCache.delete(gid);
-            }
+            // Имена иммутабельны в бою; изредка сбрасываем кэш от мёртвых указателей.
+            _brawlerNameCache.clear();
+            if (_charSpeedByData.size > 256) _charSpeedByData.clear();
         }
         scanData.enemies = enemies;
         scanData.projectiles = _updateLiveProjectiles(now);
@@ -1453,6 +1483,7 @@ export function resetScannerCache() {
     _friendlyIdx.clear();
     _charsByIndex.clear();
     _speedByData.clear();
+    _charSpeedByData.clear();
     _learnedTravel.clear();
     _flightRange.clear();
     _rangeBonus.clear();

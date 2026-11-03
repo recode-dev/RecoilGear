@@ -40,6 +40,10 @@ function distance(x1, y1, x2, y2) {
 }
 
 const SPEED_REFRESH_MS = 500;
+const SPEED_FAIL_RETRY_MS = 250;
+const HIST_CAP = 16;
+const VHIST_CAP = 12;
+const TRACK_PRUNE_MS = 2000;
 const SKIP_NAME_PARTS = ["BALL"];
 
 const SERVER_TICK_MS = 50;
@@ -58,6 +62,7 @@ var _gameTarget = null;
 var _track = new Map();
 var _projectileSpeed = 0;
 var _speedAt = 0;
+var _speedFailAt = 0;
 var _ownBeam = false;
 var _ownPierces = false;
 var _ownPiercesChars = false;
@@ -77,22 +82,44 @@ function _isSkipped(name) {
     return false;
 }
 
+function _newTrack(now) {
+    const track = {
+        hist: [],
+        histHead: 0,
+        histLen: 0,
+        vhist: [],
+        vHead: 0,
+        vLen: 0,
+        lastSeen: now
+    };
+    for (let i = 0; i < HIST_CAP; i++) track.hist.push({ x: 0, y: 0, t: 0 });
+    for (let i = 0; i < VHIST_CAP; i++) track.vhist.push({ x: 0, y: 0, t: 0 });
+    return track;
+}
+
 function _sample(gid, x, y, moveSpeed, moveAngle, now) {
     let track = _track.get(gid);
     if (!track) {
-        track = { hist: [] };
+        track = _newTrack(now);
         _track.set(gid, track);
     }
+    track.lastSeen = now;
 
-    track.hist.push({ x: x, y: y, t: now });
-    while (track.hist.length > 16) track.hist.shift();
+    // Кольцевой буфер вместо push/shift: ноль аллокаций в горячем пути.
+    const h = track.hist;
+    const slot = h[track.histHead];
+    slot.x = x;
+    slot.y = y;
+    slot.t = now;
+    track.histHead = (track.histHead + 1) % HIST_CAP;
+    track.histLen = track.histLen < HIST_CAP ? track.histLen + 1 : HIST_CAP;
 
-    const first = track.hist[0];
-    const span = (now - first.t) / 1000;
-    if (now - first.t < MIN_TRACK_MS || span <= 0) return null;
+    const oldest = h[(track.histHead - track.histLen + HIST_CAP) % HIST_CAP];
+    const span = (now - oldest.t) / 1000;
+    if (now - oldest.t < MIN_TRACK_MS || span <= 0) return null;
 
-    let vxWindow = (x - first.x) / span;
-    let vyWindow = (y - first.y) / span;
+    let vxWindow = (x - oldest.x) / span;
+    let vyWindow = (y - oldest.y) / span;
     const magnitude = length(vxWindow, vyWindow);
     if (magnitude < 30) return { x: x, y: y, vx: 0, vy: 0, ax: 0, ay: 0 };
 
@@ -107,8 +134,8 @@ function _sample(gid, x, y, moveSpeed, moveAngle, now) {
 
     let dx = 0;
     let dy = 0;
-    for (let index = track.hist.length - 2; index >= 0; index--) {
-        const point = track.hist[index];
+    for (let k = track.histLen - 2; k >= 0; k--) {
+        const point = h[(track.histHead - 1 - k + 2 * HIST_CAP) % HIST_CAP];
         if (point.x === x && point.y === y) continue;
         dx = x - point.x;
         dy = y - point.y;
@@ -125,14 +152,18 @@ function _sample(gid, x, y, moveSpeed, moveAngle, now) {
     const vx = (dx / direction) * speed;
     const vy = (dy / direction) * speed;
 
-    if (!track.vhist) track.vhist = [];
-    track.vhist.push({ x: vx, y: vy, t: now });
-    while (track.vhist.length > 12) track.vhist.shift();
+    const vh = track.vhist;
+    const vslot = vh[track.vHead];
+    vslot.x = vx;
+    vslot.y = vy;
+    vslot.t = now;
+    track.vHead = (track.vHead + 1) % VHIST_CAP;
+    track.vLen = track.vLen < VHIST_CAP ? track.vLen + 1 : VHIST_CAP;
 
     let ax = 0;
     let ay = 0;
-    for (let index = 0; index < track.vhist.length; index++) {
-        const past = track.vhist[index];
+    for (let k = 0; k < track.vLen; k++) {
+        const past = vh[(track.vHead - track.vLen + k + 2 * VHIST_CAP) % VHIST_CAP];
         const dt = (now - past.t) / 1000;
         if (dt < 0.12) continue;
         ax = (vx - past.x) / dt;
@@ -232,6 +263,9 @@ function _readInt(data, off, getter, min, max) {
 function _ownProjectileSpeed() {
     const now = Date.now();
     if (_projectileSpeed >= 300 && now - _speedAt < SPEED_REFRESH_MS) return _projectileSpeed;
+    // Не перечитываем нативные поля каждый кадр, если прошлая попытка не удалась.
+    if (_projectileSpeed < 300 && _speedFailAt > 0 && now - _speedFailAt < SPEED_FAIL_RETRY_MS)
+        return _projectileSpeed;
 
     let speed = 0;
     let engineSpeed = 0;
@@ -330,6 +364,8 @@ function _ownProjectileSpeed() {
     if (speed >= 300 && speed <= 8500) {
         _projectileSpeed = speed;
         _speedAt = now;
+    } else {
+        _speedFailAt = now;
     }
     return _projectileSpeed;
 }
@@ -507,6 +543,13 @@ function _pickTarget(now) {
     }
     if (!pick || !pred) return null;
 
+    // Прунинг мёртвых треков: не копим историю исчезнувших врагов.
+    if (_track.size > 24) {
+        for (const [key, tr] of _track) {
+            if (now - tr.lastSeen > TRACK_PRUNE_MS) _track.delete(key);
+        }
+    }
+
     if (!_solve(mx, my, pred, speed, range)) return null;
     return pick;
 }
@@ -514,6 +557,7 @@ function _pickTarget(now) {
 function _resetWeaponCache() {
     _projectileSpeed = 0;
     _speedAt = 0;
+    _speedFailAt = 0;
     _rangeCache = 0;
     _rangeAt = 0;
     _ownShotR = 0;

@@ -161,7 +161,9 @@ function segmentHitAlong(x1, y1, x2, y2, x3, y3, x4, y4) {
     if (den === 0) return -1;
     const ta = ((x3 - x1) * by - (y3 - y1) * bx) / den;
     const tb = ((x3 - x1) * ay - (y3 - y1) * ax) / den;
-    if (ta < 0 || ta > 1 || tb < 0 || tb > 1) return -1;
+    // ta≈0 — пересечение в точке старта: это ВЫХОД из зоны опасности,
+    // а не вход в неё, такие пересечения не штрафуем.
+    if (ta < 0.02 || ta > 1 || tb < 0 || tb > 1) return -1;
     return ta * length(ax, ay);
 }
 
@@ -329,6 +331,11 @@ function _steerActive(p) {
     return true;
 }
 
+const _scratchA = { x: 0, y: 0 };
+const _scratchB = { x: 0, y: 0 };
+const _scratchC = { x: 0, y: 0 };
+const _scratchD = { x: 0, y: 0 };
+
 function _collectLive(myX, myY, myRadius, now) {
     const out = [];
     const shots = scanData.projectiles;
@@ -343,9 +350,45 @@ function _collectLive(myX, myY, myRadius, now) {
         const indirect = !!p.isIndirect;
         const boomerang = (p.boomerang | 0) > 0;
         const grapples = !!p.grapples || tt === 10;
-        const attaches = tt === 9;
+        const attaches = tt === 9 || !!p.attachArea;
         const trigger = (p.triggerMs | 0) > 0;
-        let radPad = 0;
+        const shotR = _ballR(p);
+        if (!(shotR > 0)) continue;
+        const hitR = shotR + myRadius;
+        let rad = hitR + TUNE.SKIN + 60 + shotR * 0.45;
+        if (p.stunMs > 0 || p.silenceMs > 0) rad += 40;
+        if (p.attachArea) rad += 30;
+        if (p.trail) rad += LogicMath.min(200, p.trailMin || 0) / 2;
+
+        // Метатели: снаряд идёт по дуге через стены, опасна ТОЛЬКО точка приземления.
+        // Уклонение — отойти от точки падения, а не от линии полёта.
+        if (indirect && p.hasTarget && !boomerang && !grapples && !attaches) {
+            const lx = p.targetX;
+            const ly = p.targetY;
+            const dist = distance(p.x, p.y, lx, ly);
+            const left = p.seg > 0 ? p.seg : -1;
+            if (left >= 0 && left < dist) continue; // не долетит до своей цели
+            const flight = p.speed > 0 ? p.speed : 0;
+            const t2land = flight > 0 ? dist / flight : 0;
+            if (!_heading && t2land > TUNE.ENGAGE_S) continue; // рано: ещё не близко к посадке
+            if (distance(lx, ly, myX, myY) > rad + 150) continue;
+            out.push({
+                x: lx,
+                y: ly,
+                vx: 0,
+                vy: 0,
+                rad: rad,
+                // зона взрыва шире корпуса снаряда: опасная зона = padded-радиус
+                hitRad: rad,
+                left: -1,
+                chase: 0,
+                owner: p.ownerIndex,
+                sx: p.spawnX,
+                sy: p.spawnY
+            });
+            continue;
+        }
+
         let vx = p.vx;
         let vy = p.vy;
         if (!isFinite(vx) || !isFinite(vy)) {
@@ -353,59 +396,43 @@ function _collectLive(myX, myY, myRadius, now) {
             vy = 0;
         }
         let spd = length(vx, vy);
-        if (spd < 1 && p.hasTarget && p.speed > 0) {
-            const dir = normalize(
-                {
-                    x: p.targetX - p.x,
-                    y: p.targetY - p.y
-                },
-                1000
-            );
-            vx = (dir.x / 1000) * p.speed;
-            vy = (dir.y / 1000) * p.speed;
+        let chase = 0;
+        // Хоминг/прилипающие: перпендикулярный уход бессмысленен — модель погони.
+        if ((p.homing && _steerActive(p)) || attaches) {
+            chase = 1;
+            if (spd > 1) {
+                const dx = myX - p.x;
+                const dy = myY - p.y;
+                const d = length(dx, dy);
+                if (d > 1) {
+                    vx = (dx / d) * spd;
+                    vy = (dy / d) * spd;
+                }
+                rad += 60;
+            }
+        } else if (spd < 1 && p.hasTarget && p.speed > 0) {
+            _scratchA.x = p.targetX - p.x;
+            _scratchA.y = p.targetY - p.y;
+            normalize(_scratchA, 1000);
+            vx = (_scratchA.x / 1000) * p.speed;
+            vy = (_scratchA.y / 1000) * p.speed;
             spd = length(vx, vy);
         }
-        if (
-            (p.homing || grapples || attaches) &&
-            spd > 1 &&
-            (p.seekX || p.seekY) &&
-            _steerActive(p)
-        ) {
-            vx = p.seekX * spd;
-            vy = p.seekY * spd;
-            radPad = 60;
-        }
-        const shotR = _ballR(p);
-        if (!(shotR > 0)) continue;
-        const hitR = shotR + myRadius;
-        let rad = hitR + TUNE.SKIN + 60 + shotR * 0.45 + radPad;
-        if (p.stunMs > 0 || p.silenceMs > 0) rad += 40;
-        if (p.attachArea) rad += 30;
-        if (p.trail) rad += LogicMath.min(200, p.trailMin || 0) / 2;
         const lockPath = !!p.isBeam || !!p.beamCopy;
         const landed = trigger && !(p.seg > 0);
         const blob = landed || (!lockPath && !indirect && spd < 120);
         if (blob && distance(p.x, p.y, myX, myY) > rad + 150) continue;
         const skipAlong = blob || indirect || boomerang || grapples || attaches;
-        let playerAlong = 0;
         if (!skipAlong && spd >= 1) {
             const heading = LogicMath.normalizeAngle180(LogicMath.getAngle(vx, vy));
-            const frame = rotate(
-                {
-                    x: myX - p.x,
-                    y: myY - p.y
-                },
-                -heading
-            );
-            playerAlong = frame.x;
+            _scratchA.x = myX - p.x;
+            _scratchA.y = myY - p.y;
+            const frame = rotate(_scratchA, -heading);
+            const playerAlong = frame.x;
             if (playerAlong < -50) continue;
-            const reachDir = normalize(
-                {
-                    x: vx,
-                    y: vy
-                },
-                Math.max(playerAlong, 0) | 0
-            );
+            _scratchB.x = vx;
+            _scratchB.y = vy;
+            const reachDir = normalize(_scratchB, Math.max(playerAlong, 0) | 0);
             const hitX = p.hasTarget ? p.targetX : p.x + reachDir.x;
             const hitY = p.hasTarget ? p.targetY : p.y + reachDir.y;
             if (
@@ -431,9 +458,10 @@ function _collectLive(myX, myY, myRadius, now) {
             y: p.y,
             vx: blob ? 0 : vx,
             vy: blob ? 0 : vy,
-            rad,
+            rad: rad,
             hitRad: hitR,
-            left,
+            left: left,
+            chase: chase,
             owner: p.ownerIndex,
             sx: p.spawnX,
             sy: p.spawnY
@@ -486,6 +514,7 @@ function _mergeGroup(arr, px, py) {
         rad: half,
         hitRad: (hitHi - hitLo) / 2,
         left,
+        chase: ref.chase | 0,
         owner: ref.owner
     };
 }
@@ -547,37 +576,42 @@ function _clearanceFor(threats, myX, myY, mvx, mvy) {
         const spd = length(t.vx, t.vy);
         let maxT = TUNE.HORIZON_S;
         if (spd > 1) maxT = LogicMath.min(maxT, LogicMath.max(0, t.left) / spd);
-        const vrx = t.vx - mvx;
-        const vry = t.vy - mvy;
-        const vlen = length(vrx, vry);
         let dist;
-        if (lengthSquared(vrx, vry) < 1) {
-            dist = reach;
+        if (t.chase) {
+            // Погоня: бок не спасает, clearance растёт только от радиального отхода.
+            const away = reach > 1 ? -(mvx * relx + mvy * rely) / reach : 0;
+            dist = reach + (away - spd) * maxT;
+            if (dist < 0) dist = 0;
+        } else if (length(t.vx, t.vy) < 1) {
+            // Статичная угроза (мина/точка приземления): метрика ухода —
+            // расстояние через горизонт, а не минимум траектории (иначе все
+            // направления, кроме «навстречу», неразличимы).
+            const away = reach > 1 ? -(mvx * relx + mvy * rely) / reach : 0;
+            dist = reach + away * maxT;
         } else {
-            const heading = LogicMath.normalizeAngle180(LogicMath.getAngle(vrx, vry));
-            const frame = rotate(
-                {
-                    x: relx,
-                    y: rely
-                },
-                -heading
-            );
-            const towards = -dot(relx, rely, vrx, vry);
-            if (towards <= 0) {
+            const vrx = t.vx - mvx;
+            const vry = t.vy - mvy;
+            const vlen = length(vrx, vry);
+            if (lengthSquared(vrx, vry) < 1) {
                 dist = reach;
-            } else if (frame.x >= 0) {
-                dist = reach;
-            } else if (LogicMath.abs(frame.x) >= maxT * vlen) {
-                const end = normalize(
-                    {
-                        x: vrx,
-                        y: vry
-                    },
-                    (maxT * vlen) | 0
-                );
-                dist = distance(t.x + end.x, t.y + end.y, myX, myY);
             } else {
-                dist = LogicMath.getDistanceToLine(t.x, t.y, t.x + vrx, t.y + vry, myX, myY);
+                const heading = LogicMath.normalizeAngle180(LogicMath.getAngle(vrx, vry));
+                _scratchB.x = relx;
+                _scratchB.y = rely;
+                const frame = rotate(_scratchB, -heading);
+                const towards = -dot(relx, rely, vrx, vry);
+                if (towards <= 0) {
+                    dist = reach;
+                } else if (frame.x >= 0) {
+                    dist = reach;
+                } else if (LogicMath.abs(frame.x) >= maxT * vlen) {
+                    _scratchB.x = vrx;
+                    _scratchB.y = vry;
+                    const end = normalize(_scratchB, (maxT * vlen) | 0);
+                    dist = distance(t.x + end.x, t.y + end.y, myX, myY);
+                } else {
+                    dist = LogicMath.getDistanceToLine(t.x, t.y, t.x + vrx, t.y + vry, myX, myY);
+                }
             }
         }
         minClear = LogicMath.min(minClear, dist - t.rad);
@@ -592,6 +626,17 @@ function _pathEnd(t) {
 function _pathsHitMe(threats, px, py) {
     for (let i = 0; i < threats.length; i++) {
         const t = threats[i];
+        if (t.chase) {
+            // Догоняющий снаряд: опасно, если он успеет закрыть дистанцию за горизонт.
+            const reach = distance(t.x, t.y, px, py);
+            const spd = length(t.vx, t.vy);
+            const maxT =
+                spd > 1
+                    ? LogicMath.min(TUNE.HORIZON_S, LogicMath.max(0, t.left) / spd)
+                    : TUNE.HORIZON_S;
+            if (reach - t.hitRad <= spd * maxT) return true;
+            continue;
+        }
         const end = _pathEnd(t);
         const endX = end ? end.x : t.x;
         const endY = end ? end.y : t.y;
@@ -641,13 +686,9 @@ function _crossesPath(paths, px, py, stepX, stepY) {
 
 function _wallRoom(myX, myY, dir, bodyR) {
     const maxDist = TUNE.REACH;
-    const step = normalize(
-        {
-            x: dir.x,
-            y: dir.y
-        },
-        maxDist | 0
-    );
+    _scratchC.x = dir.x;
+    _scratchC.y = dir.y;
+    const step = normalize(_scratchC, maxDist | 0);
     const endX = myX + step.x;
     const endY = myY + step.y;
     const hit = firstWallHit(myX, myY, endX, endY, _bodySubtiles(_hitbox));
@@ -661,13 +702,9 @@ function _wallRoom(myX, myY, dir, bodyR) {
     let hi = maxDist;
     for (let i = 0; i < 6; i++) {
         const mid = (lo + hi) / 2;
-        const p = normalize(
-            {
-                x: dir.x,
-                y: dir.y
-            },
-            mid | 0
-        );
+        _scratchD.x = dir.x;
+        _scratchD.y = dir.y;
+        const p = normalize(_scratchD, mid | 0);
         if (isBlockedWide(myX + p.x, myY + p.y, bodyR, BLOCKS_MOVEMENT)) hi = mid;
         else lo = mid;
     }
@@ -719,13 +756,9 @@ function _anchor(myX, myY, dir, bodyR) {
     const room = _wallRoom(myX, myY, dir, bodyR);
     if (room <= 0) return null;
     const dist = room < TUNE.REACH ? room : TUNE.REACH;
-    const step = normalize(
-        {
-            x: dir.x,
-            y: dir.y
-        },
-        dist | 0
-    );
+    _scratchC.x = dir.x;
+    _scratchC.y = dir.y;
+    const step = normalize(_scratchC, dist | 0);
     return { x: myX + step.x, y: myY + step.y };
 }
 
@@ -835,13 +868,9 @@ export function updateAutododge() {
     let prevScore = -Infinity;
     for (let i = 0; i < _ring.length; i++) {
         const d = _ring[i];
-        const dirSpeed = normalize(
-            {
-                x: d.x,
-                y: d.y
-            },
-            speed | 0
-        );
+        _scratchA.x = d.x;
+        _scratchA.y = d.y;
+        const dirSpeed = normalize(_scratchA, speed | 0);
         const room = _wallRoom(myX, myY, d, bodyR);
         if (room <= 0) {
             if (i === prevIdx) prevScore = -Infinity;

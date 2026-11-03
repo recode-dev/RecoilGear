@@ -119,7 +119,7 @@ const PF_MEMO_MAX = 256;
 const PF_BUCKET_MS = 40;
 
 function _pfKey(size, x1, y1, x2, y2, f1, f2) {
-    return size + "|" + x1 + "|" + y1 + "|" + x2 + "|" + y2 + "|" + f1 + "|" + f2;
+    return `${size}|${x1}|${y1}|${x2}|${y2}|${f1}|${f2}`;
 }
 
 function _pfRemember(size, x1, y1, x2, y2, f1, f2, dist) {
