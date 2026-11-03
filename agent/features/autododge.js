@@ -78,8 +78,8 @@ function _buildRing()
         const a = Math.round(360 * i / n);
         _ring.push(
         {
-            x: getFunctions().LogicMath_getRotateDx(1000, 0, a) / 1000,
-            y: getFunctions().LogicMath_getRotateDy(1000, 0, a) / 1000
+            x: getFunctions().LogicMath_getRotateDx(10000, 0, a),
+            y: getFunctions().LogicMath_getRotateDy(10000, 0, a)
         });
     }
     _headingIdx = -1;
@@ -195,28 +195,24 @@ function _collectLive(myX, myY, myRadius)
 
 function _clearanceFor(threats, myX, myY, mvx, mvy)
 {
+    const fns = getFunctions();
     let minClear = Infinity;
-    const horizon = TUNE.HORIZON_S;
     for (let i = 0; i < threats.length; i++)
     {
         const t = threats[i];
-        _vec2.writeS32(t.vx | 0);
-        _vec2.add(4).writeS32(t.vy | 0);
-        const spd = getFunctions().LogicVector2_getLength(_vec2);
         const relx = t.x - myX;
         const rely = t.y - myY;
-        const reach = getFunctions().LogicGameplayUtil_getDistanceBetween(t.x | 0, t.y | 0, myX | 0, myY | 0);
-        let maxT = horizon;
-        if (spd > 1)
-        {
-            const untilGone = (Math.max(0, t.left) + reach) / spd;
-            maxT = Math.min(maxT, untilGone);
-        }
+        const reach = fns.LogicGameplayUtil_getDistanceBetween(t.x | 0, t.y | 0, myX | 0, myY | 0);
+        _vec2.writeS32(t.vx | 0);
+        _vec2.add(4).writeS32(t.vy | 0);
+        const spd = fns.LogicVector2_getLength(_vec2);
+        let maxT = TUNE.HORIZON_S;
+        if (spd > 1) maxT = Math.min(maxT, (Math.max(0, t.left) + reach) / spd);
         const vrx = t.vx - mvx;
         const vry = t.vy - mvy;
         _vec2.writeS32(vrx | 0);
         _vec2.add(4).writeS32(vry | 0);
-        const vlen = getFunctions().LogicVector2_getLength(_vec2);
+        const vlen = fns.LogicVector2_getLength(_vec2);
         let cx;
         let cy;
         if (vlen < 1)
@@ -226,9 +222,8 @@ function _clearanceFor(threats, myX, myY, mvx, mvy)
         }
         else
         {
-            const heading = getFunctions().LogicMath_normalizeAngle180(
-                getFunctions().LogicMath_getAngle(vrx | 0, vry | 0));
-            const along = getFunctions().LogicMath_getRotateDx(relx, rely, -heading);
+            const heading = fns.LogicMath_normalizeAngle180(fns.LogicMath_getAngle(vrx | 0, vry | 0));
+            const along = fns.LogicMath_getRotateDx(relx, rely, -heading);
             let ts = -along / vlen;
             if (ts < 0) ts = 0;
             else if (ts > maxT) ts = maxT;
@@ -237,7 +232,7 @@ function _clearanceFor(threats, myX, myY, mvx, mvy)
         }
         _vec2.writeS32(cx | 0);
         _vec2.add(4).writeS32(cy | 0);
-        const clear = getFunctions().LogicVector2_getLength(_vec2) - t.rad;
+        const clear = fns.LogicVector2_getLength(_vec2) - t.rad;
         if (clear < minClear) minClear = clear;
     }
     return minClear;
@@ -272,12 +267,16 @@ function _pathsHitMe(threats, px, py)
 
 function _wallAhead(myX, myY, dir, speed, bodyR)
 {
+    const fns = getFunctions();
     const step = speed * TUNE.PROBE_T;
     let raw = 0;
     for (let s = 1; s <= TUNE.PROBE_N; s++)
     {
-        const px = myX + dir.x * step * s;
-        const py = myY + dir.y * step * s;
+        _vec2.writeS32(dir.x | 0);
+        _vec2.add(4).writeS32(dir.y | 0);
+        fns.LogicVector2_normalize(_vec2, (step * s) | 0);
+        const px = myX + _vec2.readS32();
+        const py = myY + _vec2.add(4).readS32();
         if (isBlockedWide(px, py, bodyR, BLOCKS_MOVEMENT))
         {
             raw += TUNE.WALL_HIT * (TUNE.PROBE_N - s + 1);
@@ -348,14 +347,17 @@ export function updateAutododge()
     for (let i = 0; i < _ring.length; i++)
     {
         const d = _ring[i];
-        let s = _clearanceFor(hazards, myX, myY, speed * d.x, speed * d.y);
+        _vec2.writeS32(d.x | 0);
+        _vec2.add(4).writeS32(d.y | 0);
+        getFunctions().LogicVector2_normalize(_vec2, speed | 0);
+        let s = _clearanceFor(hazards, myX, myY, _vec2.readS32(), _vec2.add(4).readS32());
         s -= _wallAhead(myX, myY, d, speed, bodyR);
         if (prevDir)
         {
-            const prevHeading = getFunctions().LogicMath_normalizeAngle180(
-                getFunctions().LogicMath_getAngle(prevDir.x * 1000 | 0, prevDir.y * 1000 | 0));
-            s += TUNE.MOMENTUM *
-                getFunctions().LogicMath_getRotateDx(d.x * 1000 | 0, d.y * 1000 | 0, -prevHeading) / 1000;
+            const turn = getFunctions().LogicMath_normalizeAngle180(
+                getFunctions().LogicMath_getAngle(d.x | 0, d.y | 0) -
+                getFunctions().LogicMath_getAngle(prevDir.x | 0, prevDir.y | 0));
+            s += TUNE.MOMENTUM * (180 - Math.abs(turn)) / 180;
         }
         if (i === prevIdx) prevScore = s;
         if (s > bestScore)
@@ -390,8 +392,11 @@ export function updateAutododge()
     const chosen = _ring[chosenIdx];
     _headingIdx = chosenIdx;
     _heading = chosen;
-    const tx = Math.round(myX + chosen.x * TUNE.REACH);
-    const ty = Math.round(myY + chosen.y * TUNE.REACH);
+    _vec2.writeS32(chosen.x | 0);
+    _vec2.add(4).writeS32(chosen.y | 0);
+    getFunctions().LogicVector2_normalize(_vec2, TUNE.REACH | 0);
+    const tx = myX + _vec2.readS32();
+    const ty = myY + _vec2.add(4).readS32();
     if (!isFinite(tx) || !isFinite(ty)) return;
     const ddx = tx - _lastSentX;
     const ddy = ty - _lastSentY;
