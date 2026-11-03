@@ -1,0 +1,145 @@
+name: prepare
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: prepare-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  prepare:
+    if: github.event_name != 'push' || !startsWith(github.event.head_commit.message, 'chore(prepare)')
+    runs-on: ubuntu-latest
+    steps:
+      - name: checkout
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.head_ref || github.ref_name }}
+          fetch-depth: 0
+
+      - name: node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+
+      - name: tools
+        run: npm install --global prettier@3 eslint@9
+
+      - name: eslint config
+        run: |
+          cat > "$RUNNER_TEMP/eslint.config.mjs" <<'CFG'
+          export default [
+              {
+                  files: ['**/*.js'],
+                  languageOptions: {
+                      ecmaVersion: 2022,
+                      sourceType: 'module',
+                      globals: {
+                          ptr: 'readonly',
+                          NULL: 'readonly',
+                          Memory: 'readonly',
+                          NativeFunction: 'readonly',
+                          NativePointer: 'readonly',
+                          Module: 'readonly',
+                          Process: 'readonly',
+                          Interceptor: 'readonly',
+                          File: 'readonly',
+                          Script: 'readonly',
+                          send: 'readonly',
+                          recv: 'readonly',
+                          rpc: 'readonly',
+                          setTimeout: 'readonly',
+                          clearTimeout: 'readonly',
+                          setInterval: 'readonly',
+                          clearInterval: 'readonly',
+                          console: 'readonly'
+                      }
+                  },
+                  rules: {
+                      'no-unused-vars': ['error', { args: 'none', caughtErrors: 'none', varsIgnorePattern: '^_' }],
+                      'no-undef': 'error',
+                      'no-redeclare': 'error',
+                      'no-dupe-keys': 'error',
+                      'no-dupe-args': 'error',
+                      'no-duplicate-case': 'error',
+                      'no-unreachable': 'error',
+                      'no-unreachable-loop': 'error',
+                      'no-constant-condition': ['error', { checkLoops: false }],
+                      'no-empty': ['error', { allowEmptyCatch: true }],
+                      'no-fallthrough': 'error',
+                      'no-self-assign': 'error',
+                      'no-self-compare': 'error',
+                      'no-unmodified-loop-condition': 'error',
+                      'no-use-before-define': ['error', { functions: false, classes: false }],
+                      'eqeqeq': ['error', 'smart'],
+                      'no-eval': 'error',
+                      'no-implied-eval': 'error',
+                      'no-new-func': 'error',
+                      'no-debugger': 'error',
+                      'no-console': 'error',
+                      'prefer-const': 'error',
+                      'no-var': 'off'
+                  }
+              }
+          ];
+          CFG
+
+      - name: syntax
+        run: |
+          set -e
+          while IFS= read -r file; do
+            node --check "$file"
+          done < <(find agent -name '*.js' -type f)
+
+      - name: strip debug
+        run: |
+          find agent -name '*.js' -type f -print0 | xargs -0 -r sed -i -E \
+            -e '/^[[:space:]]*console\.(log|debug|info|warn|error)\(.*\);[[:space:]]*$/d' \
+            -e '/^[[:space:]]*debugger;[[:space:]]*$/d'
+
+      - name: prettier
+        run: |
+          prettier --write "agent/**/*.js" \
+            --print-width 100 \
+            --tab-width 4 \
+            --semi \
+            --no-single-quote \
+            --trailing-comma none \
+            --arrow-parens always \
+            --bracket-spacing \
+            --end-of-line lf
+
+      - name: eslint fix
+        run: eslint --config "$RUNNER_TEMP/eslint.config.mjs" agent --fix || true
+
+      - name: commit and push
+        if: github.event_name != 'pull_request'
+        run: |
+          git config user.name "prepare"
+          git config user.email "prepare@users.noreply.github.com"
+          git add -A
+          if git diff --cached --quiet; then
+            echo "nothing to fix"
+          else
+            git commit -m "chore(prepare): format and lint"
+            git push
+          fi
+
+      - name: verify
+        run: eslint --config "$RUNNER_TEMP/eslint.config.mjs" agent
+
+      - name: diff guard
+        if: github.event_name == 'pull_request'
+        run: |
+          if ! git diff --quiet; then
+            echo "::error::formatting or lint fixes were required, run prepare locally"
+            git --no-pager diff --stat
+            exit 1
+          fi
