@@ -444,13 +444,7 @@ function _collectLive(myX, myY, myRadius, now) {
         if (p.constantFly && p.earlyTicks > 0 && travel > 0 && left >= 0)
             left = LogicMath.min(left, (p.earlyTicks * travel) / TICKS_PER_SEC);
         if (left >= 0) left += _bounceBudget(p);
-        if (
-            !blob &&
-            left >= 0 &&
-            left <= 10 &&
-            distance(p.x, p.y, myX, myY) > hitR
-        )
-            continue;
+        if (!blob && left >= 0 && left <= 10 && distance(p.x, p.y, myX, myY) > hitR) continue;
         if (!_heading && travel > 0) {
             const gap = distance(p.x, p.y, myX, myY) - hitR;
             if (gap / travel > TUNE.ENGAGE_S) continue;

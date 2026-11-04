@@ -1399,10 +1399,7 @@ export function updateScanner(bm, now) {
                 if (own >= 0 && own <= 255) scanData.myTeamId = own;
             } catch (_) {}
             try {
-                const pcount = Math.min(
-                    objMgr.add(offsets.ObjectManager_count).readU32(),
-                    64
-                );
+                const pcount = Math.min(objMgr.add(offsets.ObjectManager_count).readU32(), 64);
                 for (let i = 0; i < pcount; i++) {
                     const entry = objMgr
                         .add(offsets.ObjectManager_objectsArray)
