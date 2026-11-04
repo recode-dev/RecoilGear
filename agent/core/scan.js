@@ -8,7 +8,6 @@ export const TILE_UNITS = 100;
 export const TICKS_PER_SEC = 20;
 const TICK_MS = 1000 / TICKS_PER_SEC;
 export const BEAM_TICKS = 18000;
-const DATA_ROW_OFF = 0x68;
 const COLUMN_SPAN = 48;
 const STALE_MS = 10000;
 const DEFAULT_PROJECTILE_RADIUS = 40;
@@ -25,7 +24,6 @@ var _brawlerNameCache = new Map();
 var _scanCount = 0;
 var _liveProjectiles = new Map();
 var _friendlyIdx = new Set();
-var _teamByIndex = new Map();
 var _projectileHooksInstalled = false;
 var _charRange = new Map();
 var _weaponMeta = new Map();
@@ -82,7 +80,7 @@ function _ptrKey(value) {
 export function dataFieldOf(obj) {
     if (!isValidPtr(obj)) return ptr(0);
     try {
-        return obj.add(offsets.GameObj_data).readPointer();
+        return obj.add(offsets.LogicGameObjectClient_data).readPointer();
     } catch (_) {
         return ptr(0);
     }
@@ -169,7 +167,7 @@ function _installCoreHooks(base) {
                     if (!isValidPtr(this.obj)) return;
                     const key = _ptrKey(this.obj);
                     if (!key) return;
-                    const deg = this.obj.add(offsets.CharacterClient_moveAngle).readS32() | 0;
+                    const deg = this.obj.add(offsets.LogicCharacterClient_moveAngle).readS32() | 0;
                     if (deg < -720 || deg > 720) return;
                     if (_angleCache.size > CACHE_MAX) _angleCache.clear();
                     _angleCache.set(key, { angle: (deg * Math.PI) / 180, ts: Date.now() });
@@ -221,7 +219,7 @@ function _readProjectileName(value) {
         if (direct) return direct;
     } catch (_) {}
     try {
-        const data = value.add(offsets.ProjectileClient_data).readPointer();
+        const data = value.add(offsets.LogicGameObjectClient_data).readPointer();
         if (isValidPtr(data)) return readScString(fns.LogicData_getName(data), 128);
     } catch (_) {}
     return null;
@@ -240,7 +238,7 @@ function _readMoveAngle(obj) {
         } catch (_) {}
     }
     try {
-        const deg = obj.add(offsets.CharacterClient_moveAngle).readS32() | 0;
+        const deg = obj.add(offsets.LogicCharacterClient_moveAngle).readS32() | 0;
         if (_validAngleDeg(deg)) return (deg * Math.PI) / 180;
     } catch (_) {}
     return 0;
@@ -260,15 +258,11 @@ function _rememberCharacter(index, character) {
 }
 
 function _teamOf(obj) {
-    const idx = _readOwnerIndex(obj);
-    if (idx >= 0) {
-        const t = _teamByIndex.get(idx);
-        if (t !== void 0) return t;
-    }
     try {
-        return obj.add(offsets.GameObj_team).readU32() | 0;
+        const t = obj.add(offsets.LogicGameObjectClient_team).readU32() | 0;
+        return t === -1 ? -1 : t;
     } catch (_) {
-        return 0;
+        return -1;
     }
 }
 
@@ -458,7 +452,7 @@ function _readProjectileField(data, off, min, max) {
 
 function _dataRow(data) {
     try {
-        const row = data.add(DATA_ROW_OFF).readPointer();
+        const row = data.add(offsets.LogicProjectileData_reader).readPointer();
         return isValidPtr(row) ? row : null;
     } catch (_) {
         return null;
@@ -474,14 +468,9 @@ function _columnInt(data, col) {
     }
     const row = _dataRow(data);
     if (!row) return 0;
-    if (fns.LogicDataReader_byIndex) {
+    if (fns.LogicData_getIntegerValueAt) {
         try {
-            return fns.LogicDataReader_byIndex(row, col) | 0;
-        } catch (_) {}
-    }
-    if (fns.LogicDataReader_byIndex2) {
-        try {
-            return fns.LogicDataReader_byIndex2(row, col) | 0;
+            return fns.LogicData_getIntegerValueAt(row, col) | 0;
         } catch (_) {}
     }
     return 0;
@@ -494,15 +483,15 @@ function _columnBool(data, col) {
             return fns.LogicProjectileData_getBoolValueFromColumn(data, col) ? 1 : 0;
         } catch (_) {}
     }
-    if (fns.LogicProjectileData_getBoolValueFromColumnAlt) {
+    if (fns.LogicProjectileData_getBoolValueFromColumn2) {
         try {
-            return fns.LogicProjectileData_getBoolValueFromColumnAlt(data, col) ? 1 : 0;
+            return fns.LogicProjectileData_getBoolValueFromColumn2(data, col) ? 1 : 0;
         } catch (_) {}
     }
     const row = _dataRow(data);
-    if (row && fns.LogicDataReader_byIndex3) {
+    if (row && fns.LogicData_getBooleanValueAt) {
         try {
-            return fns.LogicDataReader_byIndex3(row, col) ? 1 : 0;
+            return fns.LogicData_getBooleanValueAt(row, col) ? 1 : 0;
         } catch (_) {}
     }
     return 0;
@@ -583,7 +572,7 @@ function _readProjectileRadius(data) {
     const fns = getFunctions();
     return _readProjectileInt(
         data,
-        offsets.ProjectileData_radiusField,
+        offsets.LogicProjectileData_radius,
         "radius",
         1,
         2000,
@@ -595,7 +584,7 @@ function _readProjectileSpeed(data) {
     const fns = getFunctions();
     return _readProjectileInt(
         data,
-        offsets.ProjectileData_speedField,
+        offsets.LogicProjectileData_speed,
         "speed",
         1,
         20000,
@@ -618,7 +607,7 @@ function _characterSpeed(data) {
             if (v > 0) speed = v;
         }
     } catch (_) {}
-    if (!(speed > 0)) speed = _readProjectileField(data, offsets.CharacterData_speedField, 1, 6000);
+    if (!(speed > 0)) speed = _readProjectileField(data, offsets.LogicCharacterData_speed, 1, 6000);
     if (key) _charSpeedByData.set(key, speed);
     return speed;
 }
@@ -626,7 +615,7 @@ function _characterSpeed(data) {
 export function collisionRadius(data) {
     if (!isValidPtr(data)) return 0;
     try {
-        const direct = data.add(offsets.CharacterData_collisionRadiusField).readS32() | 0;
+        const direct = data.add(offsets.LogicCharacterData_collisionRadius).readS32() | 0;
         if (direct > 0) return direct;
     } catch (_) {}
     try {
@@ -641,13 +630,13 @@ function _readProjectileFlags(data) {
     let pierces = 0;
     let piercesChars = 0;
     try {
-        passes = data.add(offsets.ProjectileData_passesEnvironment).readU8() & 1;
+        passes = data.add(offsets.LogicProjectileData_passesEnvironment).readU8() & 1;
     } catch (_) {}
     try {
-        pierces = data.add(offsets.ProjectileData_piercesEnvironment).readU8() & 1;
+        pierces = data.add(offsets.LogicProjectileData_piercesEnvironmentField).readU8() & 1;
     } catch (_) {}
     try {
-        piercesChars = data.add(offsets.ProjectileData_piercesCharacters).readU8() & 1;
+        piercesChars = data.add(offsets.LogicProjectileData_piercesCharacters).readU8() & 1;
     } catch (_) {}
     return {
         passes: passes,
@@ -675,7 +664,7 @@ function _readProjectileU8(data, off, kind, min, max) {
 function _readBounceKeep(data) {
     const percent = _readProjectileU8(
         data,
-        offsets.ProjectileData_bouncePercent,
+        offsets.LogicProjectileData_bouncePercent,
         "bouncePercent",
         1,
         100
@@ -712,15 +701,28 @@ function _volleyMs(weapon) {
 
 function _readProjectileMeta(projectile, data, speed, rangeUnits, beam) {
     const fns = getFunctions();
-    let preMs = _readProjectileField(data, offsets.ProjectileData_preExplosionMs, 1, 60000);
+    let preMs = _readProjectileField(
+        data,
+        offsets.LogicProjectileData_preExplosionTimeMs,
+        1,
+        60000
+    );
     let typeId = -1;
     let steer = 0;
     let isBeam = !!beam;
-    let homing = _readProjectileBool(data, offsets.ProjectileData_isHomingMissile, "homing");
-    let bouncing = _readProjectileBool(data, offsets.ProjectileData_isBouncing, "bouncing");
+    let homing = _readProjectileBool(
+        data,
+        offsets.LogicProjectileData_isHomingMissileField,
+        "homing"
+    );
+    let bouncing = _readProjectileBool(
+        data,
+        offsets.LogicProjectileData_isBouncingField,
+        "bouncing"
+    );
     const steerIgnoreTicks = _readProjectileInt(
         data,
-        offsets.ProjectileData_steerIgnoreTicks,
+        offsets.LogicProjectileData_steerIgnoreTicks,
         "steerIgnore",
         1,
         400,
@@ -728,7 +730,7 @@ function _readProjectileMeta(projectile, data, speed, rangeUnits, beam) {
     );
     const steerLifeRaw = _readProjectileInt(
         data,
-        offsets.ProjectileData_steerLifeTime,
+        offsets.LogicProjectileData_steerLifeTime,
         "steerLife",
         1,
         20000,
@@ -736,7 +738,7 @@ function _readProjectileMeta(projectile, data, speed, rangeUnits, beam) {
     );
     const bounceAdd = _readProjectileInt(
         data,
-        offsets.ProjectileData_distanceAddFromBounce,
+        offsets.LogicProjectileData_distanceAddFromBounce,
         "bounceAdd",
         1,
         3000,
@@ -744,14 +746,18 @@ function _readProjectileMeta(projectile, data, speed, rangeUnits, beam) {
     );
     const bounceMax = _readProjectileInt(
         data,
-        offsets.ProjectileData_maxDistanceBounces,
+        offsets.LogicProjectileData_maxDistanceAddBounces,
         "bounceMax",
         1,
         20000,
         null
     );
     const bounceKeep = _readBounceKeep(data);
-    const rehit = _readProjectileBool(data, offsets.ProjectileData_canHitAgainAfterBounce, "rehit");
+    const rehit = _readProjectileBool(
+        data,
+        offsets.LogicProjectileData_canHitAgainAfterBounce,
+        "rehit"
+    );
     if (fns.LogicProjectileClient_getPreExplosionTimeMs && !(preMs > 0)) {
         try {
             const v = fns.LogicProjectileClient_getPreExplosionTimeMs(data) | 0;
@@ -785,17 +791,17 @@ function _readProjectileMeta(projectile, data, speed, rangeUnits, beam) {
         } catch (_) {}
     }
     if (typeId < 0) {
-        const t = _readClientU32(data, offsets.ProjectileData_typeField, 20);
+        const t = _readClientU32(data, offsets.LogicProjectileData_type, 20);
         if (t >= 0) typeId = t;
     }
     try {
-        const v = data.add(offsets.ProjectileData_steerStrength).readFloat();
+        const v = data.add(offsets.LogicProjectileData_steerStrength).readFloat();
         if (v > 0 && v <= 1000) steer = v;
     } catch (_) {}
-    const travelType = _readClientU32(projectile, offsets.ProjectileClient_travelType, 16);
+    const travelType = _readClientU32(projectile, offsets.LogicProjectileClient_travelType, 16);
     let beamCopy = 0;
     try {
-        beamCopy = projectile.add(offsets.ProjectileClient_isBeamCopy).readU8() & 1;
+        beamCopy = projectile.add(offsets.LogicProjectileClient_isBeamCopy).readU8() & 1;
     } catch (_) {}
     if (beamCopy) isBeam = true;
     const steerIgnoreMs = steerIgnoreTicks > 0 ? steerIgnoreTicks * TICK_MS : 0;
@@ -861,8 +867,8 @@ function _readProjectileTarget(projectile, data, x, y) {
     const fns = getFunctions();
     try {
         const hit = _validTarget(
-            projectile.add(offsets.ProjectileClient_targetX).readS32() | 0,
-            projectile.add(offsets.ProjectileClient_targetY).readS32() | 0,
+            projectile.add(offsets.LogicProjectileClient_targetX).readS32() | 0,
+            projectile.add(offsets.LogicProjectileClient_targetY).readS32() | 0,
             x,
             y
         );
@@ -933,15 +939,15 @@ function _captureProjectile(projectile, data, now) {
         }
         let radius = _readProjectileRadius(data);
         if (!(radius > 0)) radius = DEFAULT_PROJECTILE_RADIUS;
-        const x = _fieldS32(projectile, offsets.GameObj_x);
-        const y = _fieldS32(projectile, offsets.GameObj_y);
+        const x = _fieldS32(projectile, offsets.LogicGameObjectClient_x);
+        const y = _fieldS32(projectile, offsets.LogicGameObjectClient_y);
         const spawnReady = x !== 0 || y !== 0;
         const target = _readProjectileTarget(projectile, data, x, y);
         const flags = _readProjectileFlags(data);
-        let isIndirect = _dataU8(data, offsets.ProjectileData_indirect);
-        let travelType = _dataS32(data, offsets.ProjectileData_travelType, 0, 20);
+        let isIndirect = _dataU8(data, offsets.LogicProjectileData_indirect);
+        let travelType = _dataS32(data, offsets.LogicProjectileData_travelType, 0, 20);
         if (!travelType) {
-            const raw = _readClientU32(projectile, offsets.ProjectileClient_travelType, 20);
+            const raw = _readClientU32(projectile, offsets.LogicProjectileClient_travelType, 20);
             travelType = raw > 0 ? raw : 0;
         }
         if (!travelType) {
@@ -953,14 +959,14 @@ function _captureProjectile(projectile, data, now) {
                 } catch (_) {}
             }
         }
-        const dynamicRange = _dataU8(data, offsets.ProjectileData_allowDynamicRange);
+        const dynamicRange = _dataU8(data, offsets.LogicProjectileData_allowDynamicRange);
         if (travelType === 6 || dynamicRange) isIndirect = 1;
         let beam = 0;
         try {
-            beam = data.add(offsets.ProjectileData_isBeamField).readU8() & 1;
+            beam = data.add(offsets.LogicProjectileData_isBeamField).readU8() & 1;
         } catch (_) {}
         const ownerIndex = _readOwnerIndex(projectile);
-        const targetObj = _readPtrField(projectile, offsets.ProjectileClient_targetObject);
+        const targetObj = _readPtrField(projectile, offsets.LogicProjectileClient_targetObject);
         const entry = {
             gid: key,
             ptr: projectile,
@@ -994,24 +1000,29 @@ function _captureProjectile(projectile, data, now) {
             meta: null,
             travelType,
             dynamicRange,
-            ignoreChars: _dataU8(data, offsets.ProjectileData_ignoreCharacterCollisions),
-            ignoreEnv: _dataU8(data, offsets.ProjectileData_ignoreEnvironmentCollisions),
-            grapples: _dataU8(data, offsets.ProjectileData_grapplesEnemy),
-            boomerang: _dataS32(data, offsets.ProjectileData_boomerangType, 1, 8),
-            chains: _dataU8(data, offsets.ProjectileData_chainsToEnemies),
-            stunMs: _clientS32(projectile, offsets.ProjectileClient_stunMs, 1, 60000),
-            silenceMs: _clientS32(projectile, offsets.ProjectileClient_effectMs, 1, 60000),
-            triggerMs: _dataS32(data, offsets.ProjectileData_triggerWithDelayMs, 1, 60000),
-            constantFly: _dataU8(data, offsets.ProjectileData_constantFlyTime),
-            earlyTicks: _dataS32(data, offsets.ProjectileData_earlyTicks, 1, 400),
-            homeDistance: _dataS32(data, offsets.ProjectileData_homeDistance, 1, 30000),
-            gravity: _dataS32(data, offsets.ProjectileData_gravity, 1, 20000),
-            shotByHero: _dataU8(data, offsets.ProjectileData_shotByHero),
-            visualized: _dataU8(data, offsets.ProjectileData_visualizeEndPoint),
-            attachArea: _dataU8(data, offsets.ProjectileData_attachAreaEffectToTarget),
-            trail: _dataU8(data, offsets.ProjectileData_spawnAreaEffectTrail),
-            trailMin: _dataS32(data, offsets.ProjectileData_areaEffectTrailMinDistance, 1, 20000),
-            lifeTicks: _clientS32(projectile, offsets.ProjectileClient_lifeTicks, 1, 100000),
+            ignoreChars: _dataU8(data, offsets.LogicProjectileData_ignoreCharacterCollisions),
+            ignoreEnv: _dataU8(data, offsets.LogicProjectileData_ignoreEnvironmentCollisions),
+            grapples: _dataU8(data, offsets.LogicProjectileData_grapplesEnemy),
+            boomerang: _dataS32(data, offsets.LogicProjectileData_boomerang, 1, 8),
+            chains: _dataU8(data, offsets.LogicProjectileData_chainsToEnemies),
+            stunMs: _clientS32(projectile, offsets.LogicProjectileClient_stunMs, 1, 60000),
+            silenceMs: _clientS32(projectile, offsets.LogicProjectileClient_effectMs, 1, 60000),
+            triggerMs: _dataS32(data, offsets.LogicProjectileData_triggerWithDelayMs, 1, 60000),
+            constantFly: _dataU8(data, offsets.LogicProjectileData_constantFlyTime),
+            earlyTicks: _dataS32(data, offsets.LogicProjectileData_numEarlyTicks, 1, 400),
+            homeDistance: _dataS32(data, offsets.LogicProjectileData_homingDistance, 1, 30000),
+            gravity: _dataS32(data, offsets.LogicProjectileData_gravity, 1, 20000),
+            shotByHero: _dataU8(data, offsets.LogicProjectileData_isShotByHero),
+            visualized: _dataU8(data, offsets.LogicProjectileData_visualizeEndPoint),
+            attachArea: _dataU8(data, offsets.LogicProjectileData_attachAreaEffectToTarget),
+            trail: _dataU8(data, offsets.LogicProjectileData_spawnAreaEffectTrail),
+            trailMin: _dataS32(
+                data,
+                offsets.LogicProjectileData_areaEffectTrailMinDistance,
+                1,
+                20000
+            ),
+            lifeTicks: _clientS32(projectile, offsets.LogicProjectileClient_lifeTicks, 1, 100000),
             clientRadius: 0,
             seekX: 0,
             seekY: 0
@@ -1181,8 +1192,10 @@ function _flightSeg(entry, flown) {
     const learned = learnedFlightRange(entry.data);
     let cap = learned > 0 ? learned + entry.radius : 0;
     let seg = entry.seg0;
-    if (!(seg > 0) && !(cap > 0) && entry.lifeTicks > 0 && entry.speed > 0)
-        cap = (entry.lifeTicks * entry.speed) / TICKS_PER_SEC;
+    if (!(cap > 0) && entry.lifeTicks > 0 && entry.speed > 0) {
+        const lifeCap = (entry.lifeTicks * entry.speed) / TICKS_PER_SEC;
+        if (lifeCap > flown) cap = lifeCap;
+    }
     if (cap > 0 && (!(seg > 0) || seg > cap)) seg = cap;
     if (!(seg > 0)) return 0;
     const remain = seg - flown;
@@ -1220,8 +1233,8 @@ function _updateLiveProjectiles(now) {
                 _liveProjectiles.delete(gid);
                 continue;
             }
-            const x = _fieldS32(entry.ptr, offsets.GameObj_x);
-            const y = _fieldS32(entry.ptr, offsets.GameObj_y);
+            const x = _fieldS32(entry.ptr, offsets.LogicGameObjectClient_x);
+            const y = _fieldS32(entry.ptr, offsets.LogicGameObjectClient_y);
             const dt = (now - entry.lastTs) / 1000;
             const dx = x - entry.lastX;
             const dy = y - entry.lastY;
@@ -1379,8 +1392,8 @@ export function updateScanner(bm, now) {
         _friendlyIdx.add(scanData.myPlayerIndex);
         _charsByIndex.clear();
         _rememberCharacter(scanData.myPlayerIndex, own);
-        scanData.myX = _fieldS32(own, offsets.GameObj_x);
-        scanData.myY = _fieldS32(own, offsets.GameObj_y);
+        scanData.myX = _fieldS32(own, offsets.LogicGameObjectClient_x);
+        scanData.myY = _fieldS32(own, offsets.LogicGameObjectClient_y);
         scanData.mySpeed = 0;
         const ownData = dataOf(own);
         if (isValidPtr(ownData)) {
@@ -1390,31 +1403,13 @@ export function updateScanner(bm, now) {
         }
         _probeBudget = 8;
         const enemies = [];
-        const vtableProj = moduleBase.add(offsets.VTABLE_PROJECTILE_DATA);
-        const objMgr = bm.add(offsets.BattleModeClient_objectManager).readPointer();
+        const vtableProj = moduleBase.add(offsets.LogicProjectileData_vtable);
+        const objMgr = bm.add(offsets.BattleMode_logicBattleModeClient).readPointer();
         if (isValidPtr(objMgr)) {
-            _teamByIndex.clear();
-            try {
-                const own = objMgr.add(offsets.PlayerContainer_ownTeam).readS32() | 0;
-                if (own >= 0 && own <= 255) scanData.myTeamId = own;
-            } catch (_) {}
-            try {
-                const pcount = Math.min(objMgr.add(offsets.ObjectManager_count).readU32(), 64);
-                for (let i = 0; i < pcount; i++) {
-                    const entry = objMgr
-                        .add(offsets.ObjectManager_objectsArray)
-                        .readPointer()
-                        .add(i * 8)
-                        .readPointer();
-                    if (!isValidPtr(entry)) continue;
-                    const t = entry.add(offsets.PlayerContainer_entryTeam).readS32() | 0;
-                    if (t >= 0 && t <= 255) _teamByIndex.set(i, t);
-                }
-            } catch (_) {}
-            const objects = objMgr.add(offsets.ObjectManager_objectsArray).readPointer();
-            const count = objMgr.add(offsets.ObjectManager_count).readU32();
+            const objects = objMgr.add(offsets.LogicGameObjectManagerClient_objects).readPointer();
+            const count = objMgr.add(offsets.LogicGameObjectManagerClient_count).readU32();
             if (isValidPtr(objects) && count > 0 && count <= 1200) {
-                const stride = offsets.ObjectManager_ptrStride;
+                const stride = offsets.LogicGameObjectManagerClient_ptrStride;
                 let batchView = null;
                 try {
                     const buf = objects.readByteArray(count * stride);
@@ -1440,12 +1435,14 @@ export function updateScanner(bm, now) {
                             _captureProjectile(obj, data, now);
                             continue;
                         }
-                        if (team === scanData.myTeamId) {
+                        if (obj.equals(own)) continue;
+                        if (team !== -1 && team === scanData.myTeamId) {
                             const idx = _readOwnerIndex(obj);
                             if (idx >= 0) _friendlyIdx.add(idx);
                             continue;
                         }
-                        if (obj.add(offsets.GameObj_hp).readU32() === 0) continue;
+                        if (obj.add(offsets.LogicCharacterClient_hitpoints).readU32() === 0)
+                            continue;
                         const dataKey = _ptrKey(data);
                         let brawlerName;
                         if (dataKey) {
@@ -1465,8 +1462,8 @@ export function updateScanner(bm, now) {
                         enemies.push({
                             gid: _ptrKey(obj),
                             ptr: obj,
-                            x: _fieldS32(obj, offsets.GameObj_x),
-                            y: _fieldS32(obj, offsets.GameObj_y),
+                            x: _fieldS32(obj, offsets.LogicGameObjectClient_x),
+                            y: _fieldS32(obj, offsets.LogicGameObjectClient_y),
                             brawlerName,
                             body: obj,
                             teamId: team,
@@ -1498,7 +1495,6 @@ export function resetScannerCache() {
     _weaponMeta.clear();
     _liveProjectiles.clear();
     _friendlyIdx.clear();
-    _teamByIndex.clear();
     _charsByIndex.clear();
     _speedByData.clear();
     _charSpeedByData.clear();

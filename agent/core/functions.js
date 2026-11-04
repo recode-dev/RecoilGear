@@ -64,18 +64,16 @@ export function initFunctions(baseIn, imageIn) {
             "uint32",
             ["pointer"]
         ),
-        LogicBattleModeClient_getTileMap: _nf("LogicBattleModeClient__getTileMap", "pointer", [
+        LogicBattleModeClient_getTileMap: _nf("LogicBattleModeClient_getTileMap", "pointer", [
             "pointer"
         ]),
-        LogicCharacterClient_getWeaponSkill: _nf(
-            "LogicCharacterClient__getWeaponSkill",
-            "pointer",
-            ["pointer"]
-        ),
-        LogicSkillData_getCastingRange: _nf("LogicSkillData__getCastingRange", "int32", [
+        LogicCharacterClient_getWeaponSkill: _nf("LogicCharacterClient_getWeaponSkill", "pointer", [
             "pointer"
         ]),
-        LogicSkillData_getProjectileData: _nf("LogicSkillData__getProjectileData", "pointer", [
+        LogicSkillData_getCastingRange: _nf("LogicSkillData_getCastingRangeTiles", "int32", [
+            "pointer"
+        ]),
+        LogicSkillData_getProjectileData: _nf("LogicSkillData_getProjectileData", "pointer", [
             "pointer",
             "int"
         ]),
@@ -83,8 +81,8 @@ export function initFunctions(baseIn, imageIn) {
         LogicCharacterClient_getMoveAngle: _nf("LogicCharacterClient_getMoveAngle", "int32", [
             "pointer"
         ]),
-        LogicProjectileClient_getPreExplosionTimeMs: _nf(
-            "LogicProjectileClient_getPreExplosionTimeMs",
+        LogicProjectileData_getPreExplosionTimeMs: _nf(
+            "LogicProjectileData_getPreExplosionTimeMs",
             "int32",
             ["pointer"]
         ),
@@ -93,8 +91,8 @@ export function initFunctions(baseIn, imageIn) {
             "int32",
             "int32"
         ]),
-        LogicProjectileClient_getType: _nf("LogicProjectileClient_getType", "int32", ["pointer"]),
-        LogicProjectileClient_isBeam: _nf("LogicProjectileClient_isBeam", "uint32", ["pointer"]),
+        LogicProjectileData_getType: _nf("LogicProjectileData_getType", "int32", ["pointer"]),
+        LogicProjectileClient_isBeam: _nf("LogicProjectileData_isBeam", "uint32", ["pointer"]),
         LogicSkillData_getSpread: _nf("LogicSkillData_getSpread", "int32", ["pointer"]),
         LogicSkillData_getNumBulletsInOneAttack: _nf(
             "LogicSkillData_getNumBulletsInOneAttack",
@@ -110,17 +108,15 @@ export function initFunctions(baseIn, imageIn) {
         LogicProjectileClient_getTargetY: _nf("LogicProjectileClient_getTargetY", "int32", [
             "pointer"
         ]),
-        LogicProjectileClient_piercesEnvironment: _nf(
-            "LogicProjectileClient_piercesEnvironment",
+        LogicProjectileData_piercesEnvironment: _nf(
+            "LogicProjectileData_piercesEnvironment",
             "uint32",
             ["pointer"]
         ),
-        LogicProjectileClient_isHomingMissile: _nf(
-            "LogicProjectileClient_isHomingMissile",
-            "uint32",
-            ["pointer"]
-        ),
-        LogicProjectileClient_isBouncing: _nf("LogicProjectileClient_isBouncing", "uint32", [
+        LogicProjectileData_isHomingMissile: _nf("LogicProjectileData_isHomingMissile", "uint32", [
+            "pointer"
+        ]),
+        LogicProjectileData_isBouncing: _nf("LogicProjectileData_isBouncing", "uint32", [
             "pointer"
         ]),
         LogicProjectileData_getSpeed: _nf("LogicProjectileData_getSpeed", "int32", ["pointer"]),
@@ -139,8 +135,8 @@ export function initFunctions(baseIn, imageIn) {
             "uint32",
             ["pointer", "int"]
         ),
-        LogicProjectileData_getBoolValueFromColumnAlt: _nf(
-            "LogicProjectileData_getBoolValueFromColumnAlt",
+        LogicProjectileData_getBoolValueFromColumn2: _nf(
+            "LogicProjectileData_getBoolValueFromColumn2",
             "uint32",
             ["pointer", "int"]
         ),
@@ -149,9 +145,14 @@ export function initFunctions(baseIn, imageIn) {
             "int32",
             ["pointer"]
         ),
-        LogicDataReader_byIndex: _nf("LogicDataReader_byIndex", "int32", ["pointer", "int"]),
-        LogicDataReader_byIndex2: _nf("LogicDataReader_byIndex2", "int32", ["pointer", "int"]),
-        LogicDataReader_byIndex3: _nf("LogicDataReader_byIndex3", "uint32", ["pointer", "int"]),
+        LogicData_getBooleanValueAt: _nf("LogicData_getBooleanValueAt", "uint32", [
+            "pointer",
+            "int"
+        ]),
+        LogicData_getIntegerValueAt: _nf("LogicData_getIntegerValueAt", "int32", [
+            "pointer",
+            "int"
+        ]),
         operator_new: _nf("operator_new", "pointer", ["ulong"])
     };
     Object.freeze(_n);

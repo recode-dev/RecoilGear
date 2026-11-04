@@ -36,18 +36,18 @@ function _rebuildFrom(tileMap) {
     try {
         _syncTileSize();
         try {
-            const pf = tileMap.add(offsets.TileMap_pathFinder).readPointer();
+            const pf = tileMap.add(offsets.LogicTileMap_pathFinder).readPointer();
             pathFinder = isValidPtr(pf) ? pf : null;
         } catch (_) {
             pathFinder = null;
         }
-        const width = tileMap.add(offsets.TileMap_Width).readS32();
-        const height = tileMap.add(offsets.TileMap_Height).readS32();
+        const width = tileMap.add(offsets.LogicTileMap_width).readS32();
+        const height = tileMap.add(offsets.LogicTileMap_height).readS32();
         if (width <= 0 || width > MAX_MAP_TILES || height <= 0 || height > MAX_MAP_TILES)
             return false;
         const total = width * height;
         if (total > MAX_TOTAL_TILES) return false;
-        const tiles = tileMap.add(offsets.TileMap_TilesArray).readPointer();
+        const tiles = tileMap.add(offsets.LogicTileMap_tiles).readPointer();
         if (!isValidPtr(tiles)) return false;
 
         const pointerSize = Process.pointerSize;
@@ -74,7 +74,7 @@ function _rebuildFrom(tileMap) {
             if (flags === void 0) {
                 flags = 0;
                 try {
-                    const packed = tileType.add(offsets.TileTypeData_BlocksMovement).readU16();
+                    const packed = tileType.add(offsets.LogicTileData_blocksMovement).readU16();
                     if (packed & 0xff) flags |= BLOCKS_MOVEMENT;
                     if (packed >> 8) flags |= BLOCKS_PROJECTILES;
                 } catch (_) {}
@@ -181,7 +181,7 @@ function _installPathHook(base) {
 export function watchTileChanges(base) {
     if (tileWatchInstalled) return;
     try {
-        Interceptor.attach(base.add(offsets.LogicTile__setData), {
+        Interceptor.attach(base.add(offsets.LogicTile_setData), {
             onEnter() {
                 needsRebuild = true;
                 pfMemo.clear();

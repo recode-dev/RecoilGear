@@ -281,33 +281,33 @@ function _ownProjectileSpeed() {
                 skill && !skill.isNull() ? fns.LogicSkillData_getProjectileData(skill, 0) : null;
             if ((!data || data.isNull()) && skill && !skill.isNull()) {
                 try {
-                    const direct = skill
-                        .add(offsets.LogicSkillData_projectilePointer)
-                        .readPointer();
+                    const direct = skill.add(offsets.LogicSkillData_projectileData).readPointer();
                     if (direct && !direct.isNull()) data = direct;
                 } catch (_) {}
             }
             if (data && !data.isNull()) {
                 engineSpeed = _readInt(
                     data,
-                    offsets.ProjectileData_speedField,
+                    offsets.LogicProjectileData_speed,
                     fns.LogicProjectileData_getSpeed,
                     300,
                     8500
                 );
-                _ownBeam = data.add(offsets.ProjectileData_isBeamField).readU8() > 0;
-                const passes = data.add(offsets.ProjectileData_passesEnvironment).readU8() & 1;
-                const pierces = data.add(offsets.ProjectileData_piercesEnvironment).readU8() & 1;
+                _ownBeam = data.add(offsets.LogicProjectileData_isBeamField).readU8() > 0;
+                const passes = data.add(offsets.LogicProjectileData_passesEnvironment).readU8() & 1;
+                const pierces =
+                    data.add(offsets.LogicProjectileData_piercesEnvironmentField).readU8() & 1;
                 _ownPierces = (passes | pierces) === 1;
                 try {
                     _ownPiercesChars =
-                        (data.add(offsets.ProjectileData_piercesCharacters).readU8() & 1) === 1;
+                        (data.add(offsets.LogicProjectileData_piercesCharacters).readU8() & 1) ===
+                        1;
                 } catch (_) {
                     _ownPiercesChars = false;
                 }
                 let rad = _readInt(
                     data,
-                    offsets.ProjectileData_radiusField,
+                    offsets.LogicProjectileData_radius,
                     fns.LogicProjectileData_getRadius,
                     1,
                     2000
@@ -324,10 +324,10 @@ function _ownProjectileSpeed() {
                 }
                 _ownShotR = rad;
                 try {
-                    const steer = data.add(offsets.ProjectileData_steerStrength).readFloat();
+                    const steer = data.add(offsets.LogicProjectileData_steerStrength).readFloat();
                     const life = _readInt(
                         data,
-                        offsets.ProjectileData_steerLifeTime,
+                        offsets.LogicProjectileData_steerLifeTime,
                         null,
                         1,
                         20000
@@ -394,9 +394,14 @@ function _aimAt(enemy, now) {
     let ex = enemy.x;
     let ey = enemy.y;
     try {
-        ex = fns.LogicGameObjectClient_getX(target) | 0;
-        ey = fns.LogicGameObjectClient_getY(target) | 0;
+        const gx = fns.LogicGameObjectClient_getX(target) | 0;
+        const gy = fns.LogicGameObjectClient_getY(target) | 0;
+        if (isFinite(gx) && isFinite(gy) && (gx !== 0 || gy !== 0)) {
+            ex = gx;
+            ey = gy;
+        }
     } catch (_) {}
+    if (!isFinite(ex) || !isFinite(ey) || (ex === 0 && ey === 0)) return null;
     const mx = scanData.myX;
     const my = scanData.myY;
     const speed = _ownProjectileSpeed();
@@ -411,7 +416,13 @@ function _aimAt(enemy, now) {
     pred.rad = enemy.radius | 0;
     const aim = _solve(mx, my, pred, speed, _ownRange());
     if (!aim) return null;
-    return aim;
+    const ax = aim.x | 0;
+    const ay = aim.y | 0;
+    if (!isFinite(ax) || !isFinite(ay)) return null;
+    if (ax === 0 && ay === 0) return null;
+    if (ax < -100000 || ax > 100000 || ay < -100000 || ay > 100000) return null;
+    if (ax === (mx | 0) && ay === (my | 0)) return null;
+    return { x: ax, y: ay, t: aim.t };
 }
 
 function _lineupHits(list, mx, my, target, pocket) {
@@ -590,8 +601,15 @@ export function setupAutoaim() {
                 const aim = _aimPointNow();
                 if (!aim) return;
                 try {
-                    args[1] = ptr(aim.x | 0);
-                    args[2] = ptr(aim.y | 0);
+                    const ax = aim.x | 0;
+                    const ay = aim.y | 0;
+                    const mx = scanData.myX | 0;
+                    const my = scanData.myY | 0;
+                    if (!isFinite(ax) || !isFinite(ay)) return;
+                    if (ax === 0 && ay === 0) return;
+                    if (ax === mx && ay === my) return;
+                    args[1] = ptr(ax);
+                    args[2] = ptr(ay);
                 } catch (_) {}
             }
         });

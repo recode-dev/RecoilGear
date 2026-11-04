@@ -84,7 +84,9 @@ export function install() {
     _base = mod.base;
 
     initFunctions(_base, mod);
-    setupLicense();
+    try {
+        setupLicense();
+    } catch (_) {}
     initScanner(_base);
     watchTileChanges(_base);
     setupAutododge();
