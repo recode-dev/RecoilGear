@@ -17,6 +17,7 @@ export const offsets = Object.freeze({
     LogicGameObjectClient_y: 0x34,
     LogicGameObjectClient_ownerIndex: 0x3c,
     LogicGameObjectClient_team: 0x40,
+    LogicGameObjectClient_getTeam: 0xa23b0c,
     LogicCharacterClient_hitpoints: 0xc4,
     LogicCharacterClient_moveAngle: 0xb0,
 

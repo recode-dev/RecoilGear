@@ -257,7 +257,17 @@ function _rememberCharacter(index, character) {
     _charsByIndex.set(index, character);
 }
 
-function _teamOf(obj) {
+function _teamOf(obj, bm) {
+    const fns = getFunctions();
+    if (fns.LogicGameObjectClient_getTeam && isValidPtr(bm)) {
+        try {
+            const mgr = bm.add(offsets.BattleMode_logicBattleModeClient).readPointer();
+            if (isValidPtr(mgr)) {
+                const t = fns.LogicGameObjectClient_getTeam(obj, mgr) | 0;
+                if (t !== -1) return t;
+            }
+        } catch (_) {}
+    }
     try {
         const t = obj.add(offsets.LogicGameObjectClient_team).readU32() | 0;
         return t === -1 ? -1 : t;
@@ -1386,7 +1396,7 @@ export function updateScanner(bm, now) {
         }
         scanData.ownCharacter = own;
         scanData.battleModeClient = bm;
-        scanData.myTeamId = _teamOf(own);
+        scanData.myTeamId = _teamOf(own, bm);
         scanData.myPlayerIndex = _readOwnerIndex(own);
         _friendlyIdx.clear();
         _friendlyIdx.add(scanData.myPlayerIndex);
@@ -1430,7 +1440,7 @@ export function updateScanner(bm, now) {
                         if (!isValidPtr(obj)) continue;
                         const data = dataFieldOf(obj);
                         if (!isValidPtr(data)) continue;
-                        const team = _teamOf(obj);
+                        const team = _teamOf(obj, bm);
                         if (data.readPointer().equals(vtableProj)) {
                             _captureProjectile(obj, data, now);
                             continue;

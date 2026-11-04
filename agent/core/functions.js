@@ -52,6 +52,10 @@ export function initFunctions(baseIn, imageIn) {
             "pointer"
         ]),
         LogicGameObjectClient_getData: _nf("LogicGameObjectClient_getData", "pointer", ["pointer"]),
+        LogicGameObjectClient_getTeam: _nf("LogicGameObjectClient_getTeam", "int32", [
+            "pointer",
+            "pointer"
+        ]),
         LogicTileMap_tileToLogic: _nf("LogicTileMap_tileToLogic", "int32", ["int32"]),
         LogicGamePlayUtil_getClosestPathfinderCollision: _nf(
             "LogicGamePlayUtil_getClosestPathfinderCollision",
