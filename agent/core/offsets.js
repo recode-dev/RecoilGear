@@ -5,6 +5,7 @@ export const offsets = Object.freeze({
     LogicGameObjectManagerClient_objects: 0x0,
     LogicGameObjectManagerClient_count: 0xc,
     LogicGameObjectManagerClient_ptrStride: 0x8,
+    LogicGameObjectManagerClient_ownTeam: 0xe4,
 
     LogicTileMap_pathFinder: 0x60,
     LogicTileMap_width: 0xc4,
@@ -18,6 +19,7 @@ export const offsets = Object.freeze({
     LogicGameObjectClient_ownerIndex: 0x3c,
     LogicGameObjectClient_team: 0x40,
     LogicGameObjectClient_getTeam: 0xa23b0c,
+    LogicGamePlayUtil_isEnemy: 0x4cf7a4,
     LogicCharacterClient_hitpoints: 0xc4,
     LogicCharacterClient_moveAngle: 0xb0,
 

@@ -24,6 +24,8 @@ var _brawlerNameCache = new Map();
 var _scanCount = 0;
 var _liveProjectiles = new Map();
 var _friendlyIdx = new Set();
+var _objectsArr = null;
+var _objCount = 0;
 var _projectileHooksInstalled = false;
 var _charRange = new Map();
 var _weaponMeta = new Map();
@@ -273,6 +275,51 @@ function _teamOf(obj, bm) {
         return t === -1 ? -1 : t;
     } catch (_) {
         return -1;
+    }
+}
+
+// v69 FUN_1004cf7a4 - the game's own "is this object hostile to the local
+// player" predicate: getTeam(obj, objMgr) != *(int*)(objMgr + 0xe4). -1 is a
+// REAL team value here (the local side), so raw equality must be used - the
+// "team !== -1" leniency in _teamOf would classify teammates as enemies.
+function _isEnemyOf(obj, bm, unknownAsEnemy) {
+    if (!isValidPtr(obj)) return unknownAsEnemy === true;
+    const fns = getFunctions();
+    if (fns.LogicGamePlayUtil_isEnemy) {
+        try {
+            return fns.LogicGamePlayUtil_isEnemy(obj) !== 0;
+        } catch (_) {}
+    }
+    try {
+        const mode = isValidPtr(bm) ? bm : scanData.battleModeClient;
+        if (isValidPtr(mode)) {
+            const mgr = mode.add(offsets.BattleMode_logicBattleModeClient).readPointer();
+            if (isValidPtr(mgr)) {
+                const myTeam = mgr.add(offsets.LogicGameObjectManagerClient_ownTeam).readS32() | 0;
+                if (fns.LogicGameObjectClient_getTeam) {
+                    try {
+                        return (fns.LogicGameObjectClient_getTeam(obj, mgr) | 0) !== myTeam;
+                    } catch (_) {}
+                }
+            }
+        }
+    } catch (_) {}
+    return unknownAsEnemy === true;
+}
+
+export function isEnemyObject(obj) {
+    return _isEnemyOf(obj, scanData.battleModeClient, false);
+}
+
+function _objectAt(idx) {
+    if (idx < 0 || idx >= _objCount || !isValidPtr(_objectsArr)) return null;
+    try {
+        const o = _objectsArr
+            .add(idx * offsets.LogicGameObjectManagerClient_ptrStride)
+            .readPointer();
+        return isValidPtr(o) ? o : null;
+    } catch (_) {
+        return null;
     }
 }
 
@@ -1148,17 +1195,14 @@ function _installProjectileHooks(base) {
         Interceptor.attach(base.add(offsets.LogicProjectileClient_ctor), {
             onEnter(args) {
                 this.projectile = args[0];
-                this.data = args[1];
+                // v69 ctor is (this, dataType): args[1] is a small type id, NOT a
+                // data pointer. Capturing it as data used to create ghost entries
+                // and poison the data cache, so pass null and let
+                // _captureProjectile resolve obj+0x10 itself.
             },
             onLeave() {
                 try {
-                    if (isValidPtr(this.projectile) && isValidPtr(this.data)) {
-                        const key = _ptrKey(this.projectile);
-                        if (key) _cacheData(key, this.data, Date.now());
-                    }
-                } catch (_) {}
-                try {
-                    _captureProjectile(this.projectile, this.data, Date.now());
+                    _captureProjectile(this.projectile, null, Date.now());
                 } catch (_) {}
             }
         });
@@ -1303,6 +1347,14 @@ function _updateLiveProjectiles(now) {
             const flown = _traveled(entry, x, y);
             entry.flown = flown;
             entry.seg = _flightSeg(entry, flown);
+            // owner-based self/team filter (v69): resolve the shooter object and ask
+            // the game's own isEnemy. Covers my own shots (owner object == own
+            // character) and teammates' shots even when ownerIndex is -1 (the
+            // packed-decode "self" marker) or when _friendlyIdx has no entry yet.
+            const ownerObj = entry.ownerIndex >= 0 ? _objectAt(entry.ownerIndex) : null;
+            if (ownerObj && scanData.ownCharacter && ownerObj.equals(scanData.ownCharacter))
+                continue;
+            if (ownerObj && !_isEnemyOf(ownerObj, scanData.battleModeClient, true)) continue;
             if (entry.ownerIndex >= 0 && _friendlyIdx.has(entry.ownerIndex)) continue;
             if (entry.ownerIndex === scanData.myPlayerIndex) continue;
             if (!(entry.seg > 0) && !entry.hasTarget) continue;
@@ -1418,6 +1470,8 @@ export function updateScanner(bm, now) {
         if (isValidPtr(objMgr)) {
             const objects = objMgr.add(offsets.LogicGameObjectManagerClient_objects).readPointer();
             const count = objMgr.add(offsets.LogicGameObjectManagerClient_count).readU32();
+            _objectsArr = isValidPtr(objects) ? objects : null;
+            _objCount = isValidPtr(objects) && count > 0 && count <= 1200 ? count : 0;
             if (isValidPtr(objects) && count > 0 && count <= 1200) {
                 const stride = offsets.LogicGameObjectManagerClient_ptrStride;
                 let batchView = null;
@@ -1446,7 +1500,7 @@ export function updateScanner(bm, now) {
                             continue;
                         }
                         if (obj.equals(own)) continue;
-                        if (team !== -1 && team === scanData.myTeamId) {
+                        if (!_isEnemyOf(obj, bm, false)) {
                             const idx = _readOwnerIndex(obj);
                             if (idx >= 0) _friendlyIdx.add(idx);
                             continue;
@@ -1505,6 +1559,8 @@ export function resetScannerCache() {
     _weaponMeta.clear();
     _liveProjectiles.clear();
     _friendlyIdx.clear();
+    _objectsArr = null;
+    _objCount = 0;
     _charsByIndex.clear();
     _speedByData.clear();
     _charSpeedByData.clear();

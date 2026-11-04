@@ -56,6 +56,7 @@ export function initFunctions(baseIn, imageIn) {
             "pointer",
             "pointer"
         ]),
+        LogicGamePlayUtil_isEnemy: _nf("LogicGamePlayUtil_isEnemy", "int32", ["pointer"]),
         LogicTileMap_tileToLogic: _nf("LogicTileMap_tileToLogic", "int32", ["int32"]),
         LogicGamePlayUtil_getClosestPathfinderCollision: _nf(
             "LogicGamePlayUtil_getClosestPathfinderCollision",

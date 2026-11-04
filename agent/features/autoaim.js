@@ -4,6 +4,7 @@ import {
     BEAM_TICKS,
     TICKS_PER_SEC,
     dataOf,
+    isEnemyObject,
     rangeScaleCalibrated,
     enableProjectileTracking,
     onDataReload,
@@ -472,7 +473,12 @@ function _aimPointNow() {
     const now = Date.now();
     const live = _target ? _ptrAlive(_target.ptr) : null;
     let enemy = live ? _target : _pickTarget(now);
-    if (!enemy) enemy = _enemyByPtr(_gameTarget);
+    if (!enemy) {
+        // Game-autoshoot fallback: only trust it when the game's own enemy
+        // predicate agrees, otherwise the shot would go to a teammate.
+        const viaGame = _enemyByPtr(_gameTarget);
+        if (viaGame && isEnemyObject(viaGame.body || viaGame.ptr)) enemy = viaGame;
+    }
     if (!enemy) return null;
     return _aimAt(enemy, now);
 }
