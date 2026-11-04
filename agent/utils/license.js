@@ -12,7 +12,7 @@ var listener = null;
 export function setupLicense() {
     if (listener) return;
     try {
-        const off = offsets.LogicHttpRequest_clear;
+        const off = offsets.LogicHttpRequest_encode;
         if (typeof off !== "number" || off <= 0) return;
 
         const image = getImage();

@@ -143,5 +143,5 @@ export const offsets = Object.freeze({
 
     LogicSkillData_getRange: 0x978d74,
 
-    LogicHttpRequest_clear: 0
+    LogicHttpRequest_encode: 0xbd5f3c
 });
