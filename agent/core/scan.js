@@ -914,6 +914,7 @@ function _captureProjectile(projectile, data, now) {
         if (existing) {
             existing.ptr = projectile;
             existing.data = data;
+            existing.ownerIndex = _readOwnerIndex(projectile);
             return;
         }
         let radius = _readProjectileRadius(data);
@@ -1240,6 +1241,7 @@ function _updateLiveProjectiles(now) {
             entry.lastTs = now;
             entry.x = x;
             entry.y = y;
+            entry.ownerIndex = _readOwnerIndex(entry.ptr);
             if (entry.spawnPending && (x !== 0 || y !== 0)) {
                 entry.spawnX = x;
                 entry.spawnY = y;
