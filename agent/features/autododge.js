@@ -307,11 +307,7 @@ function _sweptEnd(x, y, vx, vy, left) {
 
 function _reachesMe(p, myX, myY, contact, vx, vy, left) {
     const vlen = length(vx, vy);
-    if (
-        p.isIndirect &&
-        p.hasTarget &&
-        ((p.travelType | 0) === 6 || (p.gravity | 0) > 0)
-    ) {
+    if (p.isIndirect && p.hasTarget && ((p.travelType | 0) === 6 || (p.gravity | 0) > 0)) {
         const toLand = distance(p.x, p.y, p.targetX, p.targetY);
         if (left >= 0 && left + 1 < toLand) return false;
         return distance(p.targetX, p.targetY, myX, myY) <= contact;
@@ -577,13 +573,11 @@ function _clearanceFor(threats, myX, myY, mvx, mvy) {
         if (spd > 1) maxT = LogicMath.min(maxT, LogicMath.max(0, t.left) / spd);
         let dist;
         if (t.chase) {
-            const away =
-                reach > 1 ? -(mvx * relx + mvy * rely) / reach : length(mvx, mvy);
+            const away = reach > 1 ? -(mvx * relx + mvy * rely) / reach : length(mvx, mvy);
             dist = reach + (away - spd) * maxT;
             if (dist < 0) dist = 0;
         } else if (length(t.vx, t.vy) < 1) {
-            const away =
-                reach > 1 ? -(mvx * relx + mvy * rely) / reach : length(mvx, mvy);
+            const away = reach > 1 ? -(mvx * relx + mvy * rely) / reach : length(mvx, mvy);
             dist = reach + away * maxT;
         } else {
             const vrx = t.vx - mvx;
