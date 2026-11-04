@@ -308,9 +308,11 @@ function _sweptEnd(x, y, vx, vy, left) {
 function _reachesMe(p, myX, myY, contact, vx, vy, left) {
     const vlen = length(vx, vy);
     if (p.isIndirect && p.hasTarget && ((p.travelType | 0) === 6 || (p.gravity | 0) > 0)) {
-        const toLand = distance(p.x, p.y, p.targetX, p.targetY);
-        if (left >= 0 && left + 1 < toLand) return false;
-        return distance(p.targetX, p.targetY, myX, myY) <= contact;
+        if (distance(p.targetX, p.targetY, myX, myY) <= contact) {
+            const toLand = distance(p.x, p.y, p.targetX, p.targetY);
+            if (left >= 0 && left + 1 < toLand) return false;
+            return true;
+        }
     }
     if (!(vlen > 1)) return distance(p.x, p.y, myX, myY) <= contact;
     if (left >= 0 && left < distance(p.x, p.y, myX, myY) - contact) return false;
@@ -362,27 +364,28 @@ function _collectLive(myX, myY, myRadius, now) {
         if (indirect && lob && p.hasTarget && !boomerang && !grapples && !attaches) {
             const lx = p.targetX;
             const ly = p.targetY;
-            const dist = distance(p.x, p.y, lx, ly);
-            const left = p.seg > 0 ? p.seg : -1;
-            if (left >= 0 && left + 1 < dist) continue;
-            const flight = p.speed > 0 ? p.speed : 0;
-            const t2land = flight > 0 ? dist / flight : 0;
-            if (!_heading && t2land > TUNE.ENGAGE_S) continue;
-            if (distance(lx, ly, myX, myY) > rad + 150) continue;
-            out.push({
-                x: lx,
-                y: ly,
-                vx: 0,
-                vy: 0,
-                rad: rad,
-                hitRad: rad,
-                left: -1,
-                chase: 0,
-                owner: p.ownerIndex,
-                sx: p.spawnX,
-                sy: p.spawnY
-            });
-            continue;
+            if (distance(lx, ly, myX, myY) <= rad + 150) {
+                const dist = distance(p.x, p.y, lx, ly);
+                const left = p.seg > 0 ? p.seg : -1;
+                if (left >= 0 && left + 1 < dist) continue;
+                const flight = p.speed > 0 ? p.speed : 0;
+                const t2land = flight > 0 ? dist / flight : 0;
+                if (!_heading && t2land > TUNE.ENGAGE_S) continue;
+                out.push({
+                    x: lx,
+                    y: ly,
+                    vx: 0,
+                    vy: 0,
+                    rad: rad,
+                    hitRad: rad,
+                    left: -1,
+                    chase: 0,
+                    owner: p.ownerIndex,
+                    sx: p.spawnX,
+                    sy: p.spawnY
+                });
+                continue;
+            }
         }
 
         let vx = p.vx;
