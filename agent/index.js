@@ -17,15 +17,8 @@ import {
 
 import { resetAutoaim, setupAutoaim, updateAutoaim } from "./features/autoaim.js";
 
-let _base = null;
 let _lastBattle = null;
-const SERVER_TICK_MS = 50;
-let _frameMs = 16.7;
-let _lastFrameAt = 0;
-let _dodgeEveryMs = SERVER_TICK_MS;
-
 let _installed = false;
-let _lastLogicAt = 0;
 
 function findModule() {
     try {
@@ -50,15 +43,11 @@ function tick(bm) {
     }
 
     const now = Date.now();
-    const frameDt = now - _lastFrameAt;
-    _lastFrameAt = now;
-    if (frameDt >= 4 && frameDt <= 100) {
-        _frameMs = _frameMs * 0.85 + frameDt * 0.15;
-        const stride = Math.max(1, Math.ceil((SERVER_TICK_MS * 0.8) / _frameMs));
-        _dodgeEveryMs = stride * _frameMs - _frameMs * 0.5;
-    }
     try {
         updateScanner(bm, now);
+    } catch (_) {}
+    try {
+        maybeRefreshWallCache(bm, now);
     } catch (_) {}
     try {
         pushDodgeTarget();
@@ -67,33 +56,26 @@ function tick(bm) {
         updateAutoaim();
     } catch (_) {}
     try {
-        maybeRefreshWallCache(bm, now);
+        updateAutododge();
     } catch (_) {}
-    if (now - _lastLogicAt >= _dodgeEveryMs) {
-        _lastLogicAt = now;
-        try {
-            updateAutododge();
-        } catch (_) {}
-    }
 }
 
 export function install() {
     if (_installed) return true;
     const mod = findModule();
     if (!mod) return false;
-    _base = mod.base;
 
-    initFunctions(_base, mod);
+    initFunctions(mod.base, mod);
     try {
         setupLicense();
     } catch (_) {}
-    initScanner(_base);
-    watchTileChanges(_base);
+    initScanner(mod.base);
+    watchTileChanges(mod.base);
     setupAutododge();
     setupAutoaim();
 
     try {
-        Interceptor.attach(_base.add(offsets.LogicBattleModeClient_update), {
+        Interceptor.attach(mod.base.add(offsets.LogicBattleModeClient_update), {
             onEnter(args) {
                 tick(args[0]);
             }

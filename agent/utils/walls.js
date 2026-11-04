@@ -19,6 +19,11 @@ var tileWatchInstalled = false;
 var pfHookInstalled = false;
 var pfMemo = new Map();
 var pfMemoTs = 0;
+var gridVersion = 1;
+
+export function wallsVersion() {
+    return gridVersion;
+}
 
 function _syncTileSize() {
     try {
@@ -87,6 +92,7 @@ function _rebuildFrom(tileMap) {
         wallsWidth = width;
         wallsHeight = height;
         needsRebuild = false;
+        gridVersion++;
         return true;
     } catch (_) {
         return false;
@@ -191,6 +197,21 @@ export function watchTileChanges(base) {
     } catch (_) {}
     _installPathHook(base);
 }
+export function losCheckWide(wx0, wy0, wx1, wy1, checkBit, radius) {
+    if (losCheck(wx0, wy0, wx1, wy1, checkBit) === false) return false;
+    const r = radius > 0 ? radius : 0;
+    if (r <= 0) return true;
+    const dx = wx1 - wx0;
+    const dy = wy1 - wy0;
+    const len = Math.sqrt(dx * dx + dy * dy);
+    if (!(len > 1)) return isBlockedAt(wx1, wy1, checkBit) === false;
+    const px = (-dy / len) * r;
+    const py = (dx / len) * r;
+    if (losCheck(wx0 + px, wy0 + py, wx1 + px, wy1 + py, checkBit) === false) return false;
+    if (losCheck(wx0 - px, wy0 - py, wx1 - px, wy1 - py, checkBit) === false) return false;
+    return true;
+}
+
 export function losCheck(wx0, wy0, wx1, wy1, checkBit) {
     const grid = walls;
     if (!grid) return true;
@@ -217,7 +238,11 @@ export function losCheck(wx0, wy0, wx1, wy1, checkBit) {
             err += dx;
             cy += sy;
         }
-        if (cx === tx && cy === ty) return true;
+        if (cx === tx && cy === ty) {
+            if (tx >= 0 && tx < width && ty >= 0 && ty < height && grid[ty * width + tx] & checkBit)
+                return false;
+            return true;
+        }
         if (cx < 0 || cx >= width || cy < 0 || cy >= height) continue;
         if (grid[cy * width + cx] & checkBit) return false;
     }
@@ -243,20 +268,20 @@ export function firstWallHit(wx0, wy0, wx1, wy1, size) {
     const fn = getFunctions().LogicGamePlayUtil_getClosestPathfinderCollision;
     if (!fn || !isValidPtr(pathFinder)) return -1;
     const bodySize = typeof size === "number" ? size | 0 : 0;
-    const memo = _pfLookup(bodySize, wx0 | 0, wy0 | 0, wx1 | 0, wy1 | 0, 1, 1);
+    const memo = _pfLookup(bodySize, wx0 | 0, wy0 | 0, wx1 | 0, wy1 | 0, 0, 0);
     if (memo >= 0) return memo;
     try {
         if (!probeOut) probeOut = Memory.alloc(8);
         probeOut.writeS32(0);
         probeOut.add(4).writeS32(0);
         const hit =
-            fn(bodySize, wx0 | 0, wy0 | 0, wx1 | 0, wy1 | 0, pathFinder, probeOut, 1, 1) | 0;
+            fn(bodySize, wx0 | 0, wy0 | 0, wx1 | 0, wy1 | 0, pathFinder, probeOut, 0, 0) | 0;
         const hx = probeOut.readS32() | 0;
         const hy = probeOut.add(4).readS32() | 0;
         const dist = !(hit & 1)
             ? Math.round(Math.hypot(wx1 - wx0, wy1 - wy0))
             : Math.max(0, Math.round(Math.hypot(hx - wx0, hy - wy0)));
-        _pfRemember(bodySize, wx0 | 0, wy0 | 0, wx1 | 0, wy1 | 0, 1, 1, dist);
+        _pfRemember(bodySize, wx0 | 0, wy0 | 0, wx1 | 0, wy1 | 0, 0, 0, dist);
         return dist;
     } catch (_) {
         return -1;

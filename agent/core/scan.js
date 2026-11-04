@@ -54,6 +54,7 @@ var _inputY = 0;
 const CACHE_MAX = 2048;
 const DATA_TTL_MS = 3000;
 const ANGLE_TTL_MS = 120;
+var _outArr = [];
 
 export var scanData = {
     ownCharacter: ptr(0),
@@ -116,6 +117,33 @@ function _cacheData(key, data, now) {
     _dataCache.set(key, { data: data, ts: now });
 }
 
+const RING_CAP = 24;
+var _ringKeys = new Array(RING_CAP);
+var _ringVals = new Array(RING_CAP);
+var _ringHead = 0;
+
+function _ringMemo(obj, val) {
+    const raw = obj.toInt32();
+    for (let i = 0; i < RING_CAP; i++) {
+        if (_ringKeys[i] === raw) return;
+    }
+    const key = _ptrKey(obj);
+    if (!key) return;
+    const slot = _ringHead;
+    _ringHead = (_ringHead + 1) % RING_CAP;
+    _ringKeys[slot] = raw;
+    _ringVals[slot] = key;
+    _cacheData(key, val, Date.now());
+}
+
+function _ringLookup(obj) {
+    const raw = obj.toInt32();
+    for (let i = 0; i < RING_CAP; i++) {
+        if (_ringKeys[i] === raw) return _ringVals[i];
+    }
+    return null;
+}
+
 function _moveAngleOf(obj) {
     if (!isValidPtr(obj)) return 0;
     const key = _ptrKey(obj);
@@ -152,9 +180,8 @@ function _installCoreHooks(base) {
             onLeave(retval) {
                 try {
                     if (retval.isNull()) return;
-                    const key = _ptrKey(this.obj);
-                    if (!key) return;
-                    _cacheData(key, retval, Date.now());
+                    if (_ringLookup(this.obj) !== null) return;
+                    _ringMemo(this.obj, retval);
                 } catch (_) {}
             }
         });
@@ -167,12 +194,19 @@ function _installCoreHooks(base) {
             onLeave() {
                 try {
                     if (!isValidPtr(this.obj)) return;
-                    const key = _ptrKey(this.obj);
-                    if (!key) return;
+                    const key = _ringLookup(this.obj);
+                    if (key !== null) return;
                     const deg = this.obj.add(offsets.LogicCharacterClient_moveAngle).readS32() | 0;
                     if (deg < -720 || deg > 720) return;
+                    const slotKey = _ptrKey(this.obj);
+                    if (!slotKey) return;
+                    const raw = this.obj.toInt32();
+                    const slot = _ringHead;
+                    _ringHead = (_ringHead + 1) % RING_CAP;
+                    _ringKeys[slot] = raw;
+                    _ringVals[slot] = slotKey;
                     if (_angleCache.size > CACHE_MAX) _angleCache.clear();
-                    _angleCache.set(key, { angle: (deg * Math.PI) / 180, ts: Date.now() });
+                    _angleCache.set(slotKey, { angle: (deg * Math.PI) / 180, ts: Date.now() });
                 } catch (_) {}
             }
         });
@@ -552,26 +586,45 @@ function _columnBool(data, col) {
 
 function _probeColumn(kind, read, data, value) {
     if (_probeBudget <= 0) return;
-    _probeBudget--;
     let st = _colCands.get(kind);
     if (!st) {
-        st = { cols: new Set(), rounds: 1 };
-        for (let col = 0; col < COLUMN_SPAN; col++) {
-            if (read(data, col) === value) st.cols.add(col);
+        let budget = 2;
+        st = { cols: null, next: 0, rounds: 1 };
+        while (budget > 0 && _probeBudget > 0 && st.next < COLUMN_SPAN) {
+            _probeBudget--;
+            budget--;
+            if (read(data, st.next) === value) {
+                if (!st.cols) st.cols = new Set();
+                st.cols.add(st.next);
+            }
+            st.next++;
+        }
+        if (st.next >= COLUMN_SPAN && !st.cols) {
+            _columnCache.set(kind, -1);
+            _colCands.set(kind, { cols: null, next: COLUMN_SPAN, rounds: 99 });
+            return;
         }
         _colCands.set(kind, st);
-    } else if (st.cols && st.rounds < 10) {
-        st.rounds++;
-        for (const col of Array.from(st.cols)) {
-            if (read(data, col) !== value) st.cols.delete(col);
-        }
-    } else {
+        if (st.cols && st.cols.size === 1 && st.next >= COLUMN_SPAN)
+            _columnCache.set(kind, st.cols.values().next().value);
         return;
     }
-    if (st.cols.size === 1) _columnCache.set(kind, st.cols.values().next().value);
-    else if (st.cols.size === 0) {
-        st.cols = null;
-        _columnCache.set(kind, -1);
+    if (!st.cols || st.next >= COLUMN_SPAN) return;
+    let budget = 2;
+    while (budget > 0 && _probeBudget > 0 && st.next < COLUMN_SPAN) {
+        _probeBudget--;
+        budget--;
+        if (read(data, st.next) === value) st.cols.add(st.next);
+        st.next++;
+    }
+    if (st.next >= COLUMN_SPAN) {
+        if (st.cols.size === 1) _columnCache.set(kind, st.cols.values().next().value);
+        else if (st.cols.size === 0) _columnCache.set(kind, -1);
+        else if (st.rounds < 10) {
+            st.rounds++;
+            st.next = 0;
+            return;
+        } else _columnCache.set(kind, -1);
     }
 }
 
@@ -1124,10 +1177,6 @@ function _installProjectilePathHook(base) {
     } catch (_) {}
 }
 
-export function pathEngineActive(now) {
-    return scanData.pathRanAt > 0 && (now || Date.now()) - scanData.pathRanAt < 1500;
-}
-
 export function onDataReload(callback) {
     if (typeof callback === "function") _reloadCallbacks.push(callback);
 }
@@ -1271,13 +1320,14 @@ function _applyMeta(entry, meta) {
 }
 
 function _updateLiveProjectiles(now) {
-    const output = [];
+    const output = _outArr;
+    output.length = 0;
     let metaBudget = _probeBudget > 0 ? 1 : 0;
-    for (const [gid, entry] of _liveProjectiles) {
+    _liveProjectiles.forEach(function (entry, gid) {
         try {
             if (now - (entry.spawnTs || now) > STALE_MS) {
                 _liveProjectiles.delete(gid);
-                continue;
+                return;
             }
             const x = _fieldS32(entry.ptr, offsets.LogicGameObjectClient_x);
             const y = _fieldS32(entry.ptr, offsets.LogicGameObjectClient_y);
@@ -1341,81 +1391,83 @@ function _updateLiveProjectiles(now) {
             entry.seg = _flightSeg(entry, flown);
             const ownerObj =
                 entry.ownerIndex >= 0 ? _charsByIndex.get(entry.ownerIndex) || null : null;
-            if (ownerObj && scanData.ownCharacter && ownerObj.equals(scanData.ownCharacter))
-                continue;
-            if (ownerObj && !_isEnemyOf(ownerObj, scanData.battleModeClient, true)) continue;
-            if (entry.ownerIndex >= 0 && _friendlyIdx.has(entry.ownerIndex)) continue;
-            if (entry.ownerIndex === scanData.myPlayerIndex) continue;
-            if (!(entry.seg > 0) && !entry.hasTarget) continue;
-            output.push({
-                gid,
-                x,
-                y,
-                spawnX: entry.spawnX,
-                spawnY: entry.spawnY,
-                vx: entry.vx,
-                vy: entry.vy,
-                speed: entry.speed,
-                radius: entry.radius,
-                seg: entry.seg,
-                flown,
-                seg0: entry.seg0,
-                hasTarget: !!entry.hasTarget,
-                targetX: entry.targetX,
-                targetY: entry.targetY,
-                passesEnv: !!entry.passesEnv,
-                piercesEnv: !!entry.piercesEnv,
-                piercesChars: !!entry.piercesChars,
-                isIndirect: !!entry.isIndirect,
-                isBeam: !!entry.isBeam,
-                beamCopy: !!entry.beamCopy,
-                travelType: entry.travelType || 0,
-                dynamicRange: entry.dynamicRange || 0,
-                ignoreChars: entry.ignoreChars || 0,
-                ignoreEnv: entry.ignoreEnv || 0,
-                grapples: entry.grapples || 0,
-                boomerang: entry.boomerang || 0,
-                chains: entry.chains || 0,
-                stunMs: entry.stunMs || 0,
-                silenceMs: entry.silenceMs || 0,
-                triggerMs: entry.triggerMs || 0,
-                constantFly: entry.constantFly || 0,
-                earlyTicks: entry.earlyTicks || 0,
-                homeDistance: entry.homeDistance || 0,
-                gravity: entry.gravity || 0,
-                shotByHero: entry.shotByHero || 0,
-                levelBorder: entry.levelBorder || 0,
-                visualized: entry.visualized || 0,
-                attachArea: entry.attachArea || 0,
-                trail: entry.trail || 0,
-                trailMin: entry.trailMin || 0,
-                lifeTicks: entry.lifeTicks || 0,
-                clientRadius: entry.clientRadius || 0,
-                travelOverride: entry.travelOverride || 0,
-                preMs: entry.preMs || 0,
-                lifeMs: entry.lifeMs || 0,
-                ticks: entry.ticks || 0,
-                travelDistance: entry.travelDistance || 0,
-                ageMs: entry.ageMs,
-                typeId: entry.typeId,
-                homing: !!entry.homing,
-                seekX: entry.seekX || 0,
-                seekY: entry.seekY || 0,
-                bouncing: !!entry.bouncing,
-                steer: entry.steer || 0,
-                steerIgnoreMs: entry.steerIgnoreMs || 0,
-                steerLifeMs: entry.steerLifeMs || 0,
-                bounceAdd: entry.bounceAdd || 0,
-                bounceMax: entry.bounceMax || 0,
-                bounceKeep: entry.bounceKeep || 0,
-                rehit: !!entry.rehit,
-                volleyMs: _volleyMs(_weaponForOwner(entry.ownerIndex)),
-                ownerIndex: entry.ownerIndex
-            });
+            if (ownerObj && scanData.ownCharacter && ownerObj.equals(scanData.ownCharacter)) return;
+            if (ownerObj && !_isEnemyOf(ownerObj, scanData.battleModeClient, true)) return;
+            if (entry.ownerIndex >= 0 && _friendlyIdx.has(entry.ownerIndex)) return;
+            if (entry.ownerIndex === scanData.myPlayerIndex) return;
+            if (!(entry.seg > 0) && !entry.hasTarget) return;
+            let o = entry.out;
+            if (!o) {
+                o = {};
+                entry.out = o;
+                o.gid = gid;
+                o.radius = entry.radius;
+                o.passesEnv = !!entry.passesEnv;
+                o.piercesEnv = !!entry.piercesEnv;
+                o.piercesChars = !!entry.piercesChars;
+                o.isIndirect = !!entry.isIndirect;
+                o.isBeam = !!entry.isBeam;
+                o.beamCopy = !!entry.beamCopy;
+                o.travelType = entry.travelType || 0;
+                o.dynamicRange = entry.dynamicRange || 0;
+                o.ignoreChars = entry.ignoreChars || 0;
+                o.ignoreEnv = entry.ignoreEnv || 0;
+                o.grapples = entry.grapples || 0;
+                o.boomerang = entry.boomerang || 0;
+                o.chains = entry.chains || 0;
+                o.stunMs = entry.stunMs || 0;
+                o.silenceMs = entry.silenceMs || 0;
+                o.triggerMs = entry.triggerMs || 0;
+                o.constantFly = entry.constantFly || 0;
+                o.earlyTicks = entry.earlyTicks || 0;
+                o.homeDistance = entry.homeDistance || 0;
+                o.gravity = entry.gravity || 0;
+                o.shotByHero = entry.shotByHero || 0;
+                o.levelBorder = entry.levelBorder || 0;
+                o.visualized = entry.visualized || 0;
+                o.attachArea = entry.attachArea || 0;
+                o.trail = entry.trail || 0;
+                o.trailMin = entry.trailMin || 0;
+                o.lifeTicks = entry.lifeTicks || 0;
+                o.clientRadius = entry.clientRadius || 0;
+                o.volleyMs = _volleyMs(_weaponForOwner(entry.ownerIndex));
+            }
+            o.x = x;
+            o.y = y;
+            o.spawnX = entry.spawnX;
+            o.spawnY = entry.spawnY;
+            o.seg0 = entry.seg0;
+            o.vx = entry.vx;
+            o.vy = entry.vy;
+            o.speed = entry.speed;
+            o.seg = entry.seg;
+            o.flown = flown;
+            o.hasTarget = !!entry.hasTarget;
+            o.targetX = entry.targetX;
+            o.targetY = entry.targetY;
+            o.ageMs = entry.ageMs;
+            o.preMs = entry.preMs || 0;
+            o.lifeMs = entry.lifeMs || 0;
+            o.ticks = entry.ticks || 0;
+            o.travelDistance = entry.travelDistance || 0;
+            o.typeId = entry.typeId;
+            o.homing = !!entry.homing;
+            o.seekX = entry.seekX || 0;
+            o.seekY = entry.seekY || 0;
+            o.bouncing = !!entry.bouncing;
+            o.steer = entry.steer || 0;
+            o.steerIgnoreMs = entry.steerIgnoreMs || 0;
+            o.steerLifeMs = entry.steerLifeMs || 0;
+            o.bounceAdd = entry.bounceAdd || 0;
+            o.bounceMax = entry.bounceMax || 0;
+            o.bounceKeep = entry.bounceKeep || 0;
+            o.rehit = !!entry.rehit;
+            o.ownerIndex = entry.ownerIndex;
+            output.push(o);
         } catch (_) {
             _liveProjectiles.delete(gid);
         }
-    }
+    });
     return output;
 }
 
@@ -1491,7 +1543,6 @@ export function updateScanner(bm, now) {
                         if (!isValidPtr(obj)) continue;
                         const data = dataFieldOf(obj);
                         if (!isValidPtr(data)) continue;
-                        const team = _teamOf(obj, bm);
                         if (data.readPointer().equals(vtableProj)) {
                             _captureProjectile(obj, data, now);
                             continue;
@@ -1505,8 +1556,7 @@ export function updateScanner(bm, now) {
                             }
                             continue;
                         }
-                        if (obj.add(offsets.LogicCharacterClient_hitpoints).readU32() === 0)
-                            continue;
+                        if (obj.add(offsets.LogicCharacterClient_hitpoints).readU32() === 0) continue;
                         const dataKey = _ptrKey(data);
                         let brawlerName;
                         if (dataKey) {
@@ -1530,7 +1580,7 @@ export function updateScanner(bm, now) {
                             y: _fieldS32(obj, offsets.LogicGameObjectClient_y),
                             brawlerName,
                             body: obj,
-                            teamId: team,
+                            teamId: _teamOf(obj, bm),
                             moveSpeed,
                             moveAngle: _moveAngleOf(obj),
                             radius,
@@ -1570,6 +1620,13 @@ export function resetScannerCache() {
     _columnCache.clear();
     _colCands.clear();
     _rangeScale = 0;
+    _outArr.length = 0;
+    _ringKeys.length = 0;
+    _ringVals.length = 0;
+    for (let i = 0; i < RING_CAP; i++) {
+        _ringKeys.push(0);
+        _ringVals.push(null);
+    }
     scanData.pathRanAt = 0;
     scanData.projectiles = [];
     scanData.measuredSpeed = 0;

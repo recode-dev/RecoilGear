@@ -100,7 +100,6 @@ export const offsets = Object.freeze({
     LogicGameObjectClient_getX: 0xa23afc,
     LogicGameObjectClient_getY: 0xa23b04,
     LogicGameObjectClient_getData: 0x117050,
-    LogicGameObjectClient_getGlobalID: 0x46464c,
 
     LogicCharacterData_getSpeed: 0x9911ec,
     LogicCharacterData_getCollisionRadius: 0x9913e8,

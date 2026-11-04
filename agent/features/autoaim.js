@@ -12,7 +12,7 @@ import {
     travelFor,
     weaponRangeUnits
 } from "../core/scan.js";
-import { BLOCKS_PROJECTILES, losCheck } from "../utils/walls.js";
+import { BLOCKS_PROJECTILES, losCheck, losCheckWide } from "../utils/walls.js";
 
 const MAXI = 0x7fffffff;
 const GUARD = 0xb504;
@@ -416,6 +416,34 @@ function _aimAt(enemy, now) {
     pred.rad = enemy.radius | 0;
     const aim = _solve(mx, my, pred, speed, _ownRange());
     if (!aim) return null;
+    if (!_ownPierces) {
+        const pocketR = _ownShotR > 0 ? _ownShotR : 40;
+        if (!isFinite(aim.x) || !isFinite(aim.y)) return null;
+        if (!losCheckWide(mx, my, aim.x, aim.y, BLOCKS_PROJECTILES, pocketR)) {
+            let cleared = null;
+            for (let k = 0; k < 3; k++) {
+                const frac = k === 0 ? 0.55 : k === 1 ? 0.25 : 0;
+                const cx = pred.x + (aim.x - pred.x) * frac;
+                const cy = pred.y + (aim.y - pred.y) * frac;
+                if (
+                    isFinite(cx) &&
+                    isFinite(cy) &&
+                    losCheckWide(mx, my, cx, cy, BLOCKS_PROJECTILES, pocketR)
+                ) {
+                    cleared = { x: Math.round(cx), y: Math.round(cy), t: aim.t * frac };
+                    break;
+                }
+            }
+            if (!cleared) return null;
+            const ax = cleared.x | 0;
+            const ay = cleared.y | 0;
+            if (!isFinite(ax) || !isFinite(ay)) return null;
+            if (ax === 0 && ay === 0) return null;
+            if (ax < -100000 || ax > 100000 || ay < -100000 || ay > 100000) return null;
+            if (ax === (mx | 0) && ay === (my | 0)) return null;
+            return cleared;
+        }
+    }
     const ax = aim.x | 0;
     const ay = aim.y | 0;
     if (!isFinite(ax) || !isFinite(ay)) return null;
@@ -500,7 +528,12 @@ function _pickTarget(now) {
         if (!e || !e.ptr || e.ptr.isNull()) continue;
         if (e.kind !== "player") continue;
         if (_isSkipped(e.brawlerName)) continue;
-        if (!_ownPierces && losCheck(mx, my, e.x, e.y, BLOCKS_PROJECTILES) === false) continue;
+        if (
+            !_ownPierces &&
+            losCheckWide(mx, my, e.x, e.y, BLOCKS_PROJECTILES, _ownShotR > 0 ? _ownShotR : 40) ===
+                false
+        )
+            continue;
         const pred = _sample(e.gid, e.x, e.y, e.moveSpeed, e.moveAngle, now) || {
             x: e.x,
             y: e.y,

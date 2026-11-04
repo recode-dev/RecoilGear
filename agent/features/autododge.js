@@ -17,7 +17,8 @@ import {
     firstWallHit,
     isBlockedWide,
     losCheck,
-    tileSizeUnits
+    tileSizeUnits,
+    wallsVersion
 } from "../utils/walls.js";
 
 const DEG = 90;
@@ -250,6 +251,14 @@ const _options = {
     directionPrecision: 40,
     safetyMargin: 25
 };
+let _threatCacheAt = -1;
+let _threatCache = null;
+let _roomMemo = null;
+let _roomMemoVer = 0;
+let _roomMemoX = 0;
+let _roomMemoY = 0;
+const ROOM_Q = 50;
+const WALL_VALIDATE = 10;
 
 function _buildRing() {
     _ring.length = 0;
@@ -334,6 +343,8 @@ const _scratchA = { x: 0, y: 0 };
 const _scratchB = { x: 0, y: 0 };
 const _scratchC = { x: 0, y: 0 };
 const _scratchD = { x: 0, y: 0 };
+const _scores = new Float64Array(160);
+const _order = new Int32Array(160);
 
 function _collectLive(myX, myY, myRadius, now) {
     const out = [];
@@ -704,18 +715,52 @@ function _wallRoom(myX, myY, dir, bodyR) {
     return room > TUNE.MIN_ROOM ? room : 0;
 }
 
+function _roomFor(myX, myY, idx, bodyR) {
+    const ver = wallsVersion();
+    const qx = (myX / ROOM_Q) | 0;
+    const qy = (myY / ROOM_Q) | 0;
+    if (
+        !_roomMemo ||
+        _roomMemoVer !== ver ||
+        _roomMemoX !== qx ||
+        _roomMemoY !== qy
+    ) {
+        _roomMemo = new Int16Array(_ring.length);
+        for (let i = 0; i < _roomMemo.length; i++) _roomMemo[i] = -32768;
+        _roomMemoVer = ver;
+        _roomMemoX = qx;
+        _roomMemoY = qy;
+    }
+    const m = _roomMemo[idx];
+    if (m !== -32768) return m;
+    const room = _wallRoom(myX, myY, _ring[idx], bodyR);
+    _roomMemo[idx] = room;
+    return room;
+}
+
 function _sendMove(logic, tx, ty) {
     if (!logic || logic.isNull()) return false;
     if (!isFinite(tx) || !isFinite(ty)) return false;
+    const now = Date.now();
+    if (tx === _lastSentX && ty === _lastSentY && now - _lastSentAt < 40) return true;
     try {
         const fns = getFunctions();
-        if (moveAppliedSince(tx, ty, 15) && inputSentSince(tx, ty, 15)) return true;
+        if (moveAppliedSince(tx, ty, 15) && inputSentSince(tx, ty, 15)) {
+            _lastSentX = tx;
+            _lastSentY = ty;
+            _lastSentAt = now;
+            return true;
+        }
         if (!moveAppliedSince(tx, ty, 20))
             fns.LogicBattleModeClient_setClientPredictionMoveTo(logic, tx, ty, 1);
-        return sendCommand(MOVE_INPUT_TYPE, (ci) => {
+        const ok = sendCommand(MOVE_INPUT_TYPE, (ci) => {
             ci.add(offsets.ClientInput_x).writeS32(tx);
             ci.add(offsets.ClientInput_y).writeS32(ty);
         });
+        _lastSentX = tx;
+        _lastSentY = ty;
+        _lastSentAt = now;
+        return ok;
     } catch (_) {
         return false;
     }
@@ -728,12 +773,19 @@ function _clearHeading() {
     _weakSince = 0;
 }
 
+function _collectLiveCached(myX, myY, myRadius, now) {
+    if (_threatCache && _threatCacheAt === scanData.lastUpdate) return _threatCache;
+    _threatCache = _collectLive(myX, myY, myRadius, now);
+    _threatCacheAt = scanData.lastUpdate;
+    return _threatCache;
+}
+
 export function pushDodgeTarget() {
     if (!_heading) return;
     const now = Date.now();
     const myRadius = _hitbox > 0 ? _hitbox : scanData.myRadius;
     const danger = _pathsHitMe(
-        _collectLive(scanData.myX, scanData.myY, myRadius, now),
+        _collectLiveCached(scanData.myX, scanData.myY, myRadius, now),
         scanData.myX,
         scanData.myY
     );
@@ -766,9 +818,6 @@ function _push(now, myX, myY) {
     }
     if (!isFinite(_targetX) || !isFinite(_targetY)) return;
     _sendMove(scanData.battleModeClient, _targetX, _targetY);
-    _lastSentX = _targetX;
-    _lastSentY = _targetY;
-    _lastSentAt = now;
 }
 
 function characterCollisionRadius(data) {
@@ -862,7 +911,7 @@ export function updateAutododge() {
         return;
     }
 
-    const hazards = _collectLive(myX, myY, myRadius, now);
+    const hazards = _collectLiveCached(myX, myY, myRadius, now);
     if (hazards.length === 0) {
         if (_heading && now - _lastDangerTs > TUNE.RELEASE_GRACE_MS) _clearHeading();
         return;
@@ -888,21 +937,14 @@ export function updateAutododge() {
 
     const prevIdx = _headingIdx >= 0 && _headingIdx < _ring.length ? _headingIdx : -1;
     const prevDir = prevIdx >= 0 ? _ring[prevIdx] : null;
-    let bestIdx = 0;
-    let bestScore = -Infinity;
-    let prevScore = -Infinity;
-    for (let i = 0; i < _ring.length; i++) {
+    const n = _ring.length;
+    const scores = _scores;
+    for (let i = 0; i < n; i++) {
         const d = _ring[i];
         _scratchA.x = d.x;
         _scratchA.y = d.y;
         const dirSpeed = normalize(_scratchA, speed | 0);
-        const room = _wallRoom(myX, myY, d, bodyR);
-        if (room <= 0) {
-            if (i === prevIdx) prevScore = -Infinity;
-            continue;
-        }
         let s = _clearanceFor(hazards, myX, myY, dirSpeed.x, dirSpeed.y);
-        s -= (TUNE.WALL_HIT * (TUNE.REACH - room)) / TUNE.REACH;
         if (_crossesPath(paths, myX, myY, dirSpeed.x, dirSpeed.y)) s -= TUNE.CROSS_W;
         if (prevDir) {
             const turn = LogicMath.getAngleBetween(
@@ -911,11 +953,49 @@ export function updateAutododge() {
             );
             s += (TUNE.MOMENTUM * (180 - turn)) / 180;
         }
+        scores[i] = s;
+        _order[i] = i;
+    }
+    for (let i = 1; i < n; i++) {
+        const v = _order[i];
+        let j = i - 1;
+        while (j >= 0 && scores[_order[j]] < scores[v]) {
+            _order[j + 1] = _order[j];
+            j--;
+        }
+        _order[j + 1] = v;
+    }
+
+    let bestIdx = -1;
+    let bestScore = -Infinity;
+    let prevScore = -Infinity;
+    let validated = 0;
+    for (let k = 0; k < n; k++) {
+        const i = _order[k];
+        if (validated >= WALL_VALIDATE && i !== prevIdx) break;
+        const room = _roomFor(myX, myY, i, bodyR);
+        validated++;
+        if (room <= 0) {
+            if (i === prevIdx) prevScore = -Infinity;
+            continue;
+        }
+        const s = scores[i] - (TUNE.WALL_HIT * (TUNE.REACH - room)) / TUNE.REACH;
         if (i === prevIdx) prevScore = s;
         if (s > bestScore) {
             bestScore = s;
             bestIdx = i;
         }
+        if (validated >= WALL_VALIDATE && bestIdx >= 0) break;
+    }
+    if (bestIdx < 0) {
+        if (!_heading) return;
+        if (!_weakSince) _weakSince = now;
+        if (now - _weakSince >= TUNE.WEAK_RELEASE_MS) {
+            _clearHeading();
+            return;
+        }
+        _push(now, myX, myY);
+        return;
     }
 
     let chosenIdx = bestIdx;
@@ -976,6 +1056,9 @@ export function resetAutododge() {
     _lastSentAt = 0;
     _targetX = 0;
     _targetY = 0;
+    _threatCache = null;
+    _threatCacheAt = -1;
+    _roomMemo = null;
 }
 
 export function setupAutododge() {

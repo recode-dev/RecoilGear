@@ -48,9 +48,6 @@ export function initFunctions(baseIn, imageIn) {
             "pointer",
             "pointer"
         ]),
-        LogicGameObjectClient_getGlobalID: _nf("LogicGameObjectClient_getGlobalID", "uint32", [
-            "pointer"
-        ]),
         LogicGameObjectClient_getData: _nf("LogicGameObjectClient_getData", "pointer", ["pointer"]),
         LogicGameObjectClient_getTeam: _nf("LogicGameObjectClient_getTeam", "int32", [
             "pointer",
