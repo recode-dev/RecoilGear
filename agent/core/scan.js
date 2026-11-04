@@ -1121,6 +1121,9 @@ function _installProjectileHooks(base) {
                         if (key) _cacheData(key, this.data, Date.now());
                     }
                 } catch (_) {}
+                try {
+                    _captureProjectile(this.projectile, this.data, Date.now());
+                } catch (_) {}
             }
         });
     } catch (_) {}
