@@ -347,7 +347,7 @@ function _collectLive(myX, myY, myRadius, now) {
         if (!p.gid) continue;
         if (distanceSquared(p.x, p.y, myX, myY) > zoneSq) continue;
         const tt = p.travelType | 0;
-        const indirect = !!p.isIndirect;
+        const indirect = !!p.isIndirect || tt > 0;
         const lob = tt === 6 || (p.gravity | 0) > 0;
         const boomerang = (p.boomerang | 0) > 0;
         const grapples = !!p.grapples || tt === 10;
@@ -420,7 +420,7 @@ function _collectLive(myX, myY, myRadius, now) {
         const landed = trigger && !(p.seg > 0);
         const blob = landed || (!lockPath && !indirect && spd < 120);
         if (blob && distance(p.x, p.y, myX, myY) > rad + 150) continue;
-        const skipAlong = blob || indirect || boomerang || grapples || attaches;
+        const skipAlong = blob || indirect || boomerang || grapples || attaches || lob;
         if (!skipAlong && spd >= 1) {
             const heading = LogicMath.normalizeAngle180(LogicMath.getAngle(vx, vy));
             _scratchA.x = myX - p.x;

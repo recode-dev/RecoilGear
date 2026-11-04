@@ -1162,9 +1162,9 @@ function _learnFlightRange(data, flown) {
 function _flightSeg(entry, flown) {
     const learned = learnedFlightRange(entry.data);
     let cap = learned > 0 ? learned + entry.radius : 0;
-    if (!(cap > 0) && entry.lifeTicks > 0 && entry.speed > 0)
-        cap = (entry.lifeTicks * entry.speed) / TICKS_PER_SEC;
     let seg = entry.seg0;
+    if (!(seg > 0) && !(cap > 0) && entry.lifeTicks > 0 && entry.speed > 0)
+        cap = (entry.lifeTicks * entry.speed) / TICKS_PER_SEC;
     if (cap > 0 && (!(seg > 0) || seg > cap)) seg = cap;
     if (!(seg > 0)) return 0;
     const remain = seg - flown;
