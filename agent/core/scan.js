@@ -758,14 +758,14 @@ function _readProjectileMeta(projectile, data, speed, rangeUnits, beam) {
         offsets.LogicProjectileData_canHitAgainAfterBounce,
         "rehit"
     );
-    if (fns.LogicProjectileClient_getPreExplosionTimeMs && !(preMs > 0)) {
+    if (fns.LogicProjectileData_getPreExplosionTimeMs && !(preMs > 0)) {
         try {
-            const v = fns.LogicProjectileClient_getPreExplosionTimeMs(data) | 0;
+            const v = fns.LogicProjectileData_getPreExplosionTimeMs(data) | 0;
             if (v > 0 && v <= 60000) preMs = v;
         } catch (_) {}
     }
-    if (!homing) homing = _flagFrom(fns.LogicProjectileClient_isHomingMissile, data, projectile);
-    if (!bouncing) bouncing = _flagFrom(fns.LogicProjectileClient_isBouncing, data, projectile);
+    if (!homing) homing = _flagFrom(fns.LogicProjectileData_isHomingMissile, data, projectile);
+    if (!bouncing) bouncing = _flagFrom(fns.LogicProjectileData_isBouncing, data, projectile);
     const learned = _learnedFor(projectile, data);
     let ticks = 0;
     if (learned && learned.ticks > 0) {
@@ -784,9 +784,9 @@ function _readProjectileMeta(projectile, data, speed, rangeUnits, beam) {
         lifeMs = ticks * TICK_MS;
         travel = travelDistance(ticks, speed);
     }
-    if (fns.LogicProjectileClient_getType) {
+    if (fns.LogicProjectileData_getType) {
         try {
-            const t = fns.LogicProjectileClient_getType(data) | 0;
+            const t = fns.LogicProjectileData_getType(data) | 0;
             if (t >= 0 && t <= 20) typeId = t;
         } catch (_) {}
     }
