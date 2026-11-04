@@ -278,10 +278,6 @@ function _teamOf(obj, bm) {
     }
 }
 
-// v69 FUN_1004cf7a4 - the game's own "is this object hostile to the local
-// player" predicate: getTeam(obj, objMgr) != *(int*)(objMgr + 0xe4). -1 is a
-// REAL team value here (the local side), so raw equality must be used - the
-// "team !== -1" leniency in _teamOf would classify teammates as enemies.
 function _isEnemyOf(obj, bm, unknownAsEnemy) {
     if (!isValidPtr(obj)) return unknownAsEnemy === true;
     const fns = getFunctions();
@@ -1195,10 +1191,6 @@ function _installProjectileHooks(base) {
         Interceptor.attach(base.add(offsets.LogicProjectileClient_ctor), {
             onEnter(args) {
                 this.projectile = args[0];
-                // v69 ctor is (this, dataType): args[1] is a small type id, NOT a
-                // data pointer. Capturing it as data used to create ghost entries
-                // and poison the data cache, so pass null and let
-                // _captureProjectile resolve obj+0x10 itself.
             },
             onLeave() {
                 try {
@@ -1347,11 +1339,6 @@ function _updateLiveProjectiles(now) {
             const flown = _traveled(entry, x, y);
             entry.flown = flown;
             entry.seg = _flightSeg(entry, flown);
-            // owner-based self/team filter: resolve the shooter through the
-            // player-index -> character map built by the scan. NEVER index the
-            // object array with ownerIndex - that array is compacted and its
-            // slots are not player indexes (v69: own char was seen at slot 1
-            // with ownerIndex 0, which made enemy shots resolve to selfObj).
             const ownerObj =
                 entry.ownerIndex >= 0 ? _charsByIndex.get(entry.ownerIndex) || null : null;
             if (ownerObj && scanData.ownCharacter && ownerObj.equals(scanData.ownCharacter))
@@ -1450,10 +1437,6 @@ export function updateScanner(bm, now) {
         }
         scanData.ownCharacter = own;
         scanData.battleModeClient = bm;
-        // v69: per-object team reads (getTeam chain / +0x40 field) are unreliable
-        // - the game resolves teams via objects[ownerIndex] on a compacted array.
-        // The manager's own team field (+0xe4) is what the game's own isEnemy
-        // predicate compares against, so it is the authoritative "my team".
         let myTeamFromMgr = -1;
         try {
             const mgrForTeam = bm.add(offsets.BattleMode_logicBattleModeClient).readPointer();

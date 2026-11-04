@@ -500,10 +500,6 @@ function _pickTarget(now) {
         if (!e || !e.ptr || e.ptr.isNull()) continue;
         if (e.kind !== "player") continue;
         if (_isSkipped(e.brawlerName)) continue;
-        // scanData.enemies is rebuilt every tick by the scan, which already
-        // classifies objects with the game's own isEnemy. Re-asking isEnemy
-        // here (outside the update context) proved unreliable on v69 and
-        // rejected real enemies as "same-team", so the scan verdict is final.
         if (!_ownPierces && losCheck(mx, my, e.x, e.y, BLOCKS_PROJECTILES) === false) continue;
         const pred = _sample(e.gid, e.x, e.y, e.moveSpeed, e.moveAngle, now) || {
             x: e.x,
