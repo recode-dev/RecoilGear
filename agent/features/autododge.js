@@ -716,7 +716,7 @@ function _sendMove(logic, tx, ty) {
             ci.add(offsets.ClientInput_x).writeS32(tx);
             ci.add(offsets.ClientInput_y).writeS32(ty);
         });
-    } catch (e) {
+    } catch (_) {
         return false;
     }
 }
@@ -732,15 +732,12 @@ export function pushDodgeTarget() {
     if (!_heading) return;
     const now = Date.now();
     const myRadius = _hitbox > 0 ? _hitbox : scanData.myRadius;
-    if (
-        now - _lastDangerTs > TUNE.RELEASE_GRACE_MS &&
-        !_pathsHitMe(
-            _collectLive(scanData.myX, scanData.myY, myRadius, now),
-            scanData.myX,
-            scanData.myY
-        )
-    )
-        return;
+    const danger = _pathsHitMe(
+        _collectLive(scanData.myX, scanData.myY, myRadius, now),
+        scanData.myX,
+        scanData.myY
+    );
+    if (now - _lastDangerTs > TUNE.RELEASE_GRACE_MS && !danger) return;
     _push(now, scanData.myX, scanData.myY);
 }
 
@@ -776,10 +773,18 @@ function _push(now, myX, myY) {
 
 function characterCollisionRadius(data) {
     if (!data || data.isNull()) return 0;
-    if (_radiusMemoData !== null && data.equals(_radiusMemoData)) return _radiusMemoValue;
+    if (
+        _radiusMemoData !== null &&
+        data.equals(_radiusMemoData) &&
+        _radiusMemoValue > 0
+    ) {
+        return _radiusMemoValue;
+    }
     const value = collisionRadius(data) | 0;
-    _radiusMemoData = data;
-    _radiusMemoValue = value;
+    if (value > 0) {
+        _radiusMemoData = data;
+        _radiusMemoValue = value;
+    }
     return value;
 }
 
@@ -789,6 +794,33 @@ function _bodySubtiles(radius) {
 
 function _bodyPad() {
     return Math.floor(tileSizeUnits() / 5);
+}
+
+let _estX = 0;
+let _estY = 0;
+let _estAt = 0;
+let _estSpd = 0;
+
+function _estimateMoveSpeed(x, y, now) {
+    if (!_estAt || now <= _estAt) {
+        _estX = x;
+        _estY = y;
+        _estAt = now;
+        return _estSpd;
+    }
+    const dt = (now - _estAt) / 1000;
+    const dx = x - _estX;
+    const dy = y - _estY;
+    _estX = x;
+    _estY = y;
+    _estAt = now;
+    if (dt < 0.02 || dt > 0.5) return _estSpd;
+    const d2 = dx * dx + dy * dy;
+    if (d2 < 4) return _estSpd;
+    const v = Math.sqrt(d2) / dt;
+    if (v < 50 || v > 3000) return _estSpd;
+    _estSpd = _estSpd > 0 ? Math.round(_estSpd * 0.8 + v * 0.2) : Math.round(v);
+    return _estSpd;
 }
 
 function learnOwnHitbox() {
@@ -818,10 +850,15 @@ export function updateAutododge() {
     if (!isFinite(myX) || !isFinite(myY)) return;
     if (Math.abs(myX) < TUNE.MIN_POS && Math.abs(myY) < TUNE.MIN_POS) return;
 
-    const speed = scanData.mySpeed;
+    let speed = scanData.mySpeed | 0;
     if (!learnOwnHitbox()) {
-        _clearHeading();
-        return;
+        const fb = scanData.myRadius | 0;
+        if (fb > 0) _hitbox = fb;
+        else _hitbox = Math.floor(tileSizeUnits() * 0.4);
+    }
+    if (!(speed > 0)) {
+        const est = _estimateMoveSpeed(myX, myY, now);
+        if (est > 0) speed = est;
     }
     const myRadius = _hitbox;
     if (!(speed > 0)) {
@@ -926,6 +963,8 @@ function _invalidateOwnMetrics() {
     _hitbox = 0;
     _radiusMemoData = null;
     _radiusMemoValue = 0;
+    _estSpd = 0;
+    _estAt = 0;
 }
 
 export function resetAutododge() {
@@ -933,6 +972,8 @@ export function resetAutododge() {
     _hitbox = 0;
     _radiusMemoData = null;
     _radiusMemoValue = 0;
+    _estSpd = 0;
+    _estAt = 0;
     _lastDangerTs = 0;
     _lastSentX = 1e9;
     _lastSentY = 1e9;
@@ -945,6 +986,6 @@ export function setupAutododge() {
     try {
         enableProjectileTracking();
         onDataReload(_invalidateOwnMetrics);
-    } catch (e) {}
+    } catch (_) {}
     _buildRing();
 }

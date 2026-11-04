@@ -4,7 +4,6 @@ import {
     BEAM_TICKS,
     TICKS_PER_SEC,
     dataOf,
-    isEnemyObject,
     rangeScaleCalibrated,
     enableProjectileTracking,
     onDataReload,
@@ -474,10 +473,8 @@ function _aimPointNow() {
     const live = _target ? _ptrAlive(_target.ptr) : null;
     let enemy = live ? _target : _pickTarget(now);
     if (!enemy) {
-        // Game-autoshoot fallback: only trust it when the game's own enemy
-        // predicate agrees, otherwise the shot would go to a teammate.
         const viaGame = _enemyByPtr(_gameTarget);
-        if (viaGame && isEnemyObject(viaGame.body || viaGame.ptr)) enemy = viaGame;
+        if (viaGame) enemy = viaGame;
     }
     if (!enemy) return null;
     return _aimAt(enemy, now);
@@ -485,7 +482,6 @@ function _aimPointNow() {
 
 function _pickTarget(now) {
     const list = scanData.enemies || [];
-    const myTeam = scanData.myTeamId | 0;
     const mx = scanData.myX;
     const my = scanData.myY;
     const speed = _ownProjectileSpeed();
@@ -504,7 +500,10 @@ function _pickTarget(now) {
         if (!e || !e.ptr || e.ptr.isNull()) continue;
         if (e.kind !== "player") continue;
         if (_isSkipped(e.brawlerName)) continue;
-        if ((e.teamId | 0) === myTeam) continue;
+        // scanData.enemies is rebuilt every tick by the scan, which already
+        // classifies objects with the game's own isEnemy. Re-asking isEnemy
+        // here (outside the update context) proved unreliable on v69 and
+        // rejected real enemies as "same-team", so the scan verdict is final.
         if (!_ownPierces && losCheck(mx, my, e.x, e.y, BLOCKS_PROJECTILES) === false) continue;
         const pred = _sample(e.gid, e.x, e.y, e.moveSpeed, e.moveAngle, now) || {
             x: e.x,

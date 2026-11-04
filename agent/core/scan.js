@@ -654,7 +654,7 @@ function _characterSpeed(data) {
     const key = _ptrKey(data);
     if (key) {
         const hit = _charSpeedByData.get(key);
-        if (hit !== void 0) return hit;
+        if (hit !== void 0 && hit > 0) return hit;
     }
     let speed = 0;
     const fns = getFunctions();
@@ -665,7 +665,7 @@ function _characterSpeed(data) {
         }
     } catch (_) {}
     if (!(speed > 0)) speed = _readProjectileField(data, offsets.LogicCharacterData_speed, 1, 6000);
-    if (key) _charSpeedByData.set(key, speed);
+    if (key && speed > 0) _charSpeedByData.set(key, speed);
     return speed;
 }
 
@@ -1347,11 +1347,13 @@ function _updateLiveProjectiles(now) {
             const flown = _traveled(entry, x, y);
             entry.flown = flown;
             entry.seg = _flightSeg(entry, flown);
-            // owner-based self/team filter (v69): resolve the shooter object and ask
-            // the game's own isEnemy. Covers my own shots (owner object == own
-            // character) and teammates' shots even when ownerIndex is -1 (the
-            // packed-decode "self" marker) or when _friendlyIdx has no entry yet.
-            const ownerObj = entry.ownerIndex >= 0 ? _objectAt(entry.ownerIndex) : null;
+            // owner-based self/team filter: resolve the shooter through the
+            // player-index -> character map built by the scan. NEVER index the
+            // object array with ownerIndex - that array is compacted and its
+            // slots are not player indexes (v69: own char was seen at slot 1
+            // with ownerIndex 0, which made enemy shots resolve to selfObj).
+            const ownerObj =
+                entry.ownerIndex >= 0 ? _charsByIndex.get(entry.ownerIndex) || null : null;
             if (ownerObj && scanData.ownCharacter && ownerObj.equals(scanData.ownCharacter))
                 continue;
             if (ownerObj && !_isEnemyOf(ownerObj, scanData.battleModeClient, true)) continue;
@@ -1448,7 +1450,19 @@ export function updateScanner(bm, now) {
         }
         scanData.ownCharacter = own;
         scanData.battleModeClient = bm;
-        scanData.myTeamId = _teamOf(own, bm);
+        // v69: per-object team reads (getTeam chain / +0x40 field) are unreliable
+        // - the game resolves teams via objects[ownerIndex] on a compacted array.
+        // The manager's own team field (+0xe4) is what the game's own isEnemy
+        // predicate compares against, so it is the authoritative "my team".
+        let myTeamFromMgr = -1;
+        try {
+            const mgrForTeam = bm.add(offsets.BattleMode_logicBattleModeClient).readPointer();
+            if (isValidPtr(mgrForTeam))
+                myTeamFromMgr = mgrForTeam
+                    .add(offsets.LogicGameObjectManagerClient_ownTeam)
+                    .readS32() | 0;
+        } catch (_) {}
+        scanData.myTeamId = myTeamFromMgr >= 0 ? myTeamFromMgr : _teamOf(own, bm);
         scanData.myPlayerIndex = _readOwnerIndex(own);
         _friendlyIdx.clear();
         _friendlyIdx.add(scanData.myPlayerIndex);
@@ -1457,7 +1471,8 @@ export function updateScanner(bm, now) {
         scanData.myX = _fieldS32(own, offsets.LogicGameObjectClient_x);
         scanData.myY = _fieldS32(own, offsets.LogicGameObjectClient_y);
         scanData.mySpeed = 0;
-        const ownData = dataOf(own);
+        let ownData = dataFieldOf(own);
+        if (!isValidPtr(ownData)) ownData = dataOf(own);
         if (isValidPtr(ownData)) {
             scanData.myRadius = collisionRadius(ownData) | 0;
             const ownSpeed = _characterSpeed(ownData);
@@ -1502,11 +1517,13 @@ export function updateScanner(bm, now) {
                         if (obj.equals(own)) continue;
                         if (!_isEnemyOf(obj, bm, false)) {
                             const idx = _readOwnerIndex(obj);
-                            if (idx >= 0) _friendlyIdx.add(idx);
+                            if (idx >= 0) {
+                                _friendlyIdx.add(idx);
+                                if (idx !== scanData.myPlayerIndex) _rememberCharacter(idx, obj);
+                            }
                             continue;
                         }
-                        if (obj.add(offsets.LogicCharacterClient_hitpoints).readU32() === 0)
-                            continue;
+                        if (obj.add(offsets.LogicCharacterClient_hitpoints).readU32() === 0) continue;
                         const dataKey = _ptrKey(data);
                         let brawlerName;
                         if (dataKey) {
