@@ -307,9 +307,13 @@ function _sweptEnd(x, y, vx, vy, left) {
 
 function _reachesMe(p, myX, myY, contact, vx, vy, left) {
     const vlen = length(vx, vy);
-    if (p.isIndirect && p.hasTarget) {
+    if (
+        p.isIndirect &&
+        p.hasTarget &&
+        ((p.travelType | 0) === 6 || (p.gravity | 0) > 0)
+    ) {
         const toLand = distance(p.x, p.y, p.targetX, p.targetY);
-        if (left >= 0 && left < toLand) return false;
+        if (left >= 0 && left + 1 < toLand) return false;
         return distance(p.targetX, p.targetY, myX, myY) <= contact;
     }
     if (!(vlen > 1)) return distance(p.x, p.y, myX, myY) <= contact;
@@ -346,6 +350,7 @@ function _collectLive(myX, myY, myRadius, now) {
         if (distanceSquared(p.x, p.y, myX, myY) > zoneSq) continue;
         const tt = p.travelType | 0;
         const indirect = !!p.isIndirect;
+        const lob = tt === 6 || (p.gravity | 0) > 0;
         const boomerang = (p.boomerang | 0) > 0;
         const grapples = !!p.grapples || tt === 10;
         const attaches = tt === 9 || !!p.attachArea;
@@ -358,12 +363,12 @@ function _collectLive(myX, myY, myRadius, now) {
         if (p.attachArea) rad += 30;
         if (p.trail) rad += LogicMath.min(200, p.trailMin || 0) / 2;
 
-        if (indirect && p.hasTarget && !boomerang && !grapples && !attaches) {
+        if (indirect && lob && p.hasTarget && !boomerang && !grapples && !attaches) {
             const lx = p.targetX;
             const ly = p.targetY;
             const dist = distance(p.x, p.y, lx, ly);
             const left = p.seg > 0 ? p.seg : -1;
-            if (left >= 0 && left < dist) continue;
+            if (left >= 0 && left + 1 < dist) continue;
             const flight = p.speed > 0 ? p.speed : 0;
             const t2land = flight > 0 ? dist / flight : 0;
             if (!_heading && t2land > TUNE.ENGAGE_S) continue;
@@ -572,11 +577,13 @@ function _clearanceFor(threats, myX, myY, mvx, mvy) {
         if (spd > 1) maxT = LogicMath.min(maxT, LogicMath.max(0, t.left) / spd);
         let dist;
         if (t.chase) {
-            const away = reach > 1 ? -(mvx * relx + mvy * rely) / reach : 0;
+            const away =
+                reach > 1 ? -(mvx * relx + mvy * rely) / reach : length(mvx, mvy);
             dist = reach + (away - spd) * maxT;
             if (dist < 0) dist = 0;
         } else if (length(t.vx, t.vy) < 1) {
-            const away = reach > 1 ? -(mvx * relx + mvy * rely) / reach : 0;
+            const away =
+                reach > 1 ? -(mvx * relx + mvy * rely) / reach : length(mvx, mvy);
             dist = reach + away * maxT;
         } else {
             const vrx = t.vx - mvx;
