@@ -1458,9 +1458,8 @@ export function updateScanner(bm, now) {
         try {
             const mgrForTeam = bm.add(offsets.BattleMode_logicBattleModeClient).readPointer();
             if (isValidPtr(mgrForTeam))
-                myTeamFromMgr = mgrForTeam
-                    .add(offsets.LogicGameObjectManagerClient_ownTeam)
-                    .readS32() | 0;
+                myTeamFromMgr =
+                    mgrForTeam.add(offsets.LogicGameObjectManagerClient_ownTeam).readS32() | 0;
         } catch (_) {}
         scanData.myTeamId = myTeamFromMgr >= 0 ? myTeamFromMgr : _teamOf(own, bm);
         scanData.myPlayerIndex = _readOwnerIndex(own);
@@ -1523,7 +1522,8 @@ export function updateScanner(bm, now) {
                             }
                             continue;
                         }
-                        if (obj.add(offsets.LogicCharacterClient_hitpoints).readU32() === 0) continue;
+                        if (obj.add(offsets.LogicCharacterClient_hitpoints).readU32() === 0)
+                            continue;
                         const dataKey = _ptrKey(data);
                         let brawlerName;
                         if (dataKey) {

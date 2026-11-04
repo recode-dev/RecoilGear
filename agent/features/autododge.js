@@ -773,11 +773,7 @@ function _push(now, myX, myY) {
 
 function characterCollisionRadius(data) {
     if (!data || data.isNull()) return 0;
-    if (
-        _radiusMemoData !== null &&
-        data.equals(_radiusMemoData) &&
-        _radiusMemoValue > 0
-    ) {
+    if (_radiusMemoData !== null && data.equals(_radiusMemoData) && _radiusMemoValue > 0) {
         return _radiusMemoValue;
     }
     const value = collisionRadius(data) | 0;
