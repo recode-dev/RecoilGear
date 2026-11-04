@@ -1,6 +1,6 @@
 # RecoilGear
 
-Frida agent for **Nulls Brawl v69.252**
+Frida agent for **Nulls Brawl** `v69.252`
 
 ## Build
 
@@ -11,4 +11,4 @@ npx frida-compile agent/index.js -o dist/agent.js -B iife
 
 ## License
 
-**MIT**, see `LICENSE`.
+**MIT**, see `LICENSE`
