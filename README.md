@@ -9,6 +9,6 @@ npm install frida-compile
 npx frida-compile agent/index.js -o dist/agent.js -B iife
 ```
 
-## License
+### License
 
 **MIT**, see `LICENSE`
