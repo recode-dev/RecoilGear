@@ -1556,7 +1556,8 @@ export function updateScanner(bm, now) {
                             }
                             continue;
                         }
-                        if (obj.add(offsets.LogicCharacterClient_hitpoints).readU32() === 0) continue;
+                        if (obj.add(offsets.LogicCharacterClient_hitpoints).readU32() === 0)
+                            continue;
                         const dataKey = _ptrKey(data);
                         let brawlerName;
                         if (dataKey) {

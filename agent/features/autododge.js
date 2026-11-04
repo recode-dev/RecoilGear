@@ -719,12 +719,7 @@ function _roomFor(myX, myY, idx, bodyR) {
     const ver = wallsVersion();
     const qx = (myX / ROOM_Q) | 0;
     const qy = (myY / ROOM_Q) | 0;
-    if (
-        !_roomMemo ||
-        _roomMemoVer !== ver ||
-        _roomMemoX !== qx ||
-        _roomMemoY !== qy
-    ) {
+    if (!_roomMemo || _roomMemoVer !== ver || _roomMemoX !== qx || _roomMemoY !== qy) {
         _roomMemo = new Int16Array(_ring.length);
         for (let i = 0; i < _roomMemo.length; i++) _roomMemo[i] = -32768;
         _roomMemoVer = ver;
