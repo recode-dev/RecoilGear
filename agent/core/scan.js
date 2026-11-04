@@ -25,6 +25,7 @@ var _brawlerNameCache = new Map();
 var _scanCount = 0;
 var _liveProjectiles = new Map();
 var _friendlyIdx = new Set();
+var _teamByIndex = new Map();
 var _projectileHooksInstalled = false;
 var _charRange = new Map();
 var _weaponMeta = new Map();
@@ -256,6 +257,19 @@ function _readOwnerIndex(obj) {
 function _rememberCharacter(index, character) {
     if (index < 0 || !isValidPtr(character)) return;
     _charsByIndex.set(index, character);
+}
+
+function _teamOf(obj) {
+    const idx = _readOwnerIndex(obj);
+    if (idx >= 0) {
+        const t = _teamByIndex.get(idx);
+        if (t !== void 0) return t;
+    }
+    try {
+        return obj.add(offsets.GameObj_team).readU32() | 0;
+    } catch (_) {
+        return 0;
+    }
 }
 
 function _roundDiv(a, b) {
@@ -1359,7 +1373,7 @@ export function updateScanner(bm, now) {
         }
         scanData.ownCharacter = own;
         scanData.battleModeClient = bm;
-        scanData.myTeamId = own.add(offsets.GameObj_team).readU32();
+        scanData.myTeamId = _teamOf(own);
         scanData.myPlayerIndex = _readOwnerIndex(own);
         _friendlyIdx.clear();
         _friendlyIdx.add(scanData.myPlayerIndex);
@@ -1379,6 +1393,27 @@ export function updateScanner(bm, now) {
         const vtableProj = moduleBase.add(offsets.VTABLE_PROJECTILE_DATA);
         const objMgr = bm.add(offsets.BattleModeClient_objectManager).readPointer();
         if (isValidPtr(objMgr)) {
+            _teamByIndex.clear();
+            try {
+                const own = objMgr.add(offsets.PlayerContainer_ownTeam).readS32() | 0;
+                if (own >= 0 && own <= 255) scanData.myTeamId = own;
+            } catch (_) {}
+            try {
+                const pcount = Math.min(
+                    objMgr.add(offsets.ObjectManager_count).readU32(),
+                    64
+                );
+                for (let i = 0; i < pcount; i++) {
+                    const entry = objMgr
+                        .add(offsets.ObjectManager_objectsArray)
+                        .readPointer()
+                        .add(i * 8)
+                        .readPointer();
+                    if (!isValidPtr(entry)) continue;
+                    const t = entry.add(offsets.PlayerContainer_entryTeam).readS32() | 0;
+                    if (t >= 0 && t <= 255) _teamByIndex.set(i, t);
+                }
+            } catch (_) {}
             const objects = objMgr.add(offsets.ObjectManager_objectsArray).readPointer();
             const count = objMgr.add(offsets.ObjectManager_count).readU32();
             if (isValidPtr(objects) && count > 0 && count <= 1200) {
@@ -1403,7 +1438,7 @@ export function updateScanner(bm, now) {
                         if (!isValidPtr(obj)) continue;
                         const data = dataFieldOf(obj);
                         if (!isValidPtr(data)) continue;
-                        const team = obj.add(offsets.GameObj_team).readU32();
+                        const team = _teamOf(obj);
                         if (data.readPointer().equals(vtableProj)) {
                             _captureProjectile(obj, data, now);
                             continue;
@@ -1466,6 +1501,7 @@ export function resetScannerCache() {
     _weaponMeta.clear();
     _liveProjectiles.clear();
     _friendlyIdx.clear();
+    _teamByIndex.clear();
     _charsByIndex.clear();
     _speedByData.clear();
     _charSpeedByData.clear();

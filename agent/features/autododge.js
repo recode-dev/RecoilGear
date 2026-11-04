@@ -307,12 +307,11 @@ function _sweptEnd(x, y, vx, vy, left) {
 
 function _reachesMe(p, myX, myY, contact, vx, vy, left) {
     const vlen = length(vx, vy);
-    if (p.isIndirect && p.hasTarget && ((p.travelType | 0) === 6 || (p.gravity | 0) > 0)) {
-        if (distance(p.targetX, p.targetY, myX, myY) <= contact) {
-            const toLand = distance(p.x, p.y, p.targetX, p.targetY);
-            if (left >= 0 && left + 1 < toLand) return false;
-            return true;
-        }
+    if (p.isIndirect && p.hasTarget) {
+        if (distance(p.targetX, p.targetY, myX, myY) > contact) return false;
+        const toLand = distance(p.x, p.y, p.targetX, p.targetY);
+        if (left >= 0 && left + 1 < toLand) return false;
+        return true;
     }
     if (!(vlen > 1)) return distance(p.x, p.y, myX, myY) <= contact;
     if (left >= 0 && left < distance(p.x, p.y, myX, myY) - contact) return false;
@@ -441,11 +440,17 @@ function _collectLive(myX, myY, myRadius, now) {
                 continue;
         }
         const travel = spd >= 1 ? spd : p.speed > 0 ? p.speed : 0;
-        let left = p.seg > 0 ? p.seg : -1;
+        let left = p.seg > 0 ? p.seg : p.seg0 > 0 ? 0 : -1;
         if (p.constantFly && p.earlyTicks > 0 && travel > 0 && left >= 0)
             left = LogicMath.min(left, (p.earlyTicks * travel) / TICKS_PER_SEC);
         if (left >= 0) left += _bounceBudget(p);
-        if (!blob && left >= 0 && left <= 10) continue;
+        if (
+            !blob &&
+            left >= 0 &&
+            left <= 10 &&
+            distance(p.x, p.y, myX, myY) > hitR
+        )
+            continue;
         if (!_heading && travel > 0) {
             const gap = distance(p.x, p.y, myX, myY) - hitR;
             if (gap / travel > TUNE.ENGAGE_S) continue;

@@ -20,6 +20,9 @@ export const offsets = Object.freeze({
     GameObj_data: 0x10,
     LogicGameObjectClient_ownerIndex: 0x3c,
 
+    PlayerContainer_ownTeam: 0xe4,
+    PlayerContainer_entryTeam: 0x228,
+
     ProjectileClient_data: 0x10,
     ProjectileClient_targetX: 0x1ec,
     ProjectileClient_targetY: 0x1f0,
