@@ -12,7 +12,7 @@ import {
     travelFor,
     weaponRangeUnits
 } from "../core/scan.js";
-import { BLOCKS_PROJECTILES, losCheck, losCheckWide } from "../utils/walls.js";
+import { BLOCKS_PROJECTILES, losCheckWide } from "../utils/walls.js";
 
 const MAXI = 0x7fffffff;
 const GUARD = 0xb504;
