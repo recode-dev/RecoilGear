@@ -486,7 +486,13 @@ function _collectLive(myX, myY, myRadius, now, mySpeed) {
         if (p.constantFly && p.earlyTicks > 0 && travel > 0 && left >= 0)
             left = LogicMath.min(left, (p.earlyTicks * travel) / TICKS_PER_SEC_LOCAL);
         if (left >= 0) left += _bounceBudget(p);
-        if (!blob && !p.segUncertain && left >= 0 && left <= 10 && distance(p.x, p.y, myX, myY) > hitR)
+        if (
+            !blob &&
+            !p.segUncertain &&
+            left >= 0 &&
+            left <= 10 &&
+            distance(p.x, p.y, myX, myY) > hitR
+        )
             continue;
         if (!_heading && travel > 0 && !armedOwners.has(p.ownerIndex)) {
             const gap = distance(p.x, p.y, myX, myY) - hitR;
@@ -1028,7 +1034,7 @@ export function coreTick(world) {
     const touch = _pathsHitMe(hazards, myX, myY);
     const tti = _minTimeToContact(hazards, myX, myY);
     const prep = _escapePrepMs(hazards, myX, myY, speed) / 1000;
-    const inDanger = touch || (tti <= prep);
+    const inDanger = touch || tti <= prep;
     if (inDanger) _lastDangerTs = now;
 
     if (_heading && now < _holdUntil) {
@@ -1043,10 +1049,15 @@ export function coreTick(world) {
     }
 
     if (!inDanger && !_heading) {
-        return { active: false, danger: false, threatCount, ttiMs: tti === Infinity ? -1 : tti * 1000 };
+        return {
+            active: false,
+            danger: false,
+            threatCount,
+            ttiMs: tti === Infinity ? -1 : tti * 1000
+        };
     }
 
-    let stayClear = _minSeparation(hazards, myX, myY, 0, 0, 20);
+    const stayClear = _minSeparation(hazards, myX, myY, 0, 0, 20);
 
     const prevIdx = _headingIdx >= 0 && _headingIdx < _ring.length ? _headingIdx : -1;
     const prevDir = prevIdx >= 0 ? _ring[prevIdx] : null;
@@ -1108,7 +1119,13 @@ export function coreTick(world) {
             return { active: false, danger: inDanger, threatCount };
         }
         const t = _push(now, myX, myY);
-        return { active: !!t, targetX: t ? t.x : undefined, targetY: t ? t.y : undefined, danger: inDanger, threatCount };
+        return {
+            active: !!t,
+            targetX: t ? t.x : undefined,
+            targetY: t ? t.y : undefined,
+            danger: inDanger,
+            threatCount
+        };
     }
 
     let chosenIdx = bestIdx;
@@ -1173,13 +1190,25 @@ export function coreTick(world) {
             return { active: false, danger: inDanger, threatCount };
         }
         const t = _push(now, myX, myY);
-        return { active: !!t, targetX: t ? t.x : undefined, targetY: t ? t.y : undefined, danger: inDanger, threatCount };
+        return {
+            active: !!t,
+            targetX: t ? t.x : undefined,
+            targetY: t ? t.y : undefined,
+            danger: inDanger,
+            threatCount
+        };
     }
     _weakSince = 0;
     if (prevIdx >= 0 && chosenIdx === prevIdx && chosenVec === _ring[chosenIdx]) {
         _holdUntil = now + TUNE.LOCK_MS;
         const t = _push(now, myX, myY);
-        return { active: !!t, targetX: t ? t.x : undefined, targetY: t ? t.y : undefined, danger: inDanger, threatCount };
+        return {
+            active: !!t,
+            targetX: t ? t.x : undefined,
+            targetY: t ? t.y : undefined,
+            danger: inDanger,
+            threatCount
+        };
     }
 
     _headingIdx = chosenIdx;
