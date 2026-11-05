@@ -40,6 +40,16 @@ export function initFunctions(baseIn, imageIn) {
             "void",
             ["pointer", "int", "int", "int"]
         ),
+        LogicGameObjectManagerClient_getOwnPlayerTeam: _nf(
+            "LogicGameObjectManagerClient_getOwnPlayerTeam",
+            "int32",
+            ["pointer"]
+        ),
+        LogicGameObjectManagerClient_findGameObject: _nf(
+            "LogicGameObjectManagerClient_findGameObject",
+            "pointer",
+            ["pointer", "int", "int"]
+        ),
         ClientInput_constructor_int: _nf("ClientInput_constructor_int", "pointer", [
             "pointer",
             "int"
@@ -130,7 +140,6 @@ export function initFunctions(baseIn, imageIn) {
         LogicProjectileData_getTravelType: _nf("LogicProjectileData_getTravelType", "int32", [
             "pointer"
         ]),
-        LogicAccessoryData_getRange: _nf("LogicAccessoryData_getRange", "int32", ["pointer"]),
         LogicProjectileData_getIntValueFromColumn: _nf(
             "LogicProjectileData_getIntValueFromColumn",
             "int32",

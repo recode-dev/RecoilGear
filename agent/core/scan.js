@@ -26,6 +26,7 @@ var _liveProjectiles = new Map();
 var _friendlyIdx = new Set();
 var _objectsArr = null;
 var _objCount = 0;
+var _objMgrPtr = null;
 var _projectileHooksInstalled = false;
 var _charRange = new Map();
 var _weaponMeta = new Map();
@@ -312,6 +313,23 @@ function _teamOf(obj, bm) {
     }
 }
 
+function _ownTeamOf(mgr) {
+    if (!isValidPtr(mgr)) return -1;
+    const fns = getFunctions();
+    if (fns.LogicGameObjectManagerClient_getOwnPlayerTeam) {
+        try {
+            const t = fns.LogicGameObjectManagerClient_getOwnPlayerTeam(mgr) | 0;
+            if (t >= 0) return t;
+        } catch (_) {}
+    }
+    try {
+        const t = mgr.add(offsets.LogicGameObjectManagerClient_ownTeam).readS32() | 0;
+        return t >= 0 ? t : -1;
+    } catch (_) {
+        return -1;
+    }
+}
+
 function _isEnemyOf(obj, bm, unknownAsEnemy) {
     if (!isValidPtr(obj)) return unknownAsEnemy === true;
     const fns = getFunctions();
@@ -325,8 +343,8 @@ function _isEnemyOf(obj, bm, unknownAsEnemy) {
         if (isValidPtr(mode)) {
             const mgr = mode.add(offsets.BattleMode_objectManager).readPointer();
             if (isValidPtr(mgr)) {
-                const myTeam = mgr.add(offsets.LogicGameObjectManagerClient_ownTeam).readS32() | 0;
-                if (fns.LogicGameObjectClient_getTeam) {
+                const myTeam = _ownTeamOf(mgr);
+                if (myTeam >= 0 && fns.LogicGameObjectClient_getTeam) {
                     try {
                         return (fns.LogicGameObjectClient_getTeam(obj, mgr) | 0) !== myTeam;
                     } catch (_) {}
@@ -473,12 +491,6 @@ function _castingRangeTiles(character) {
     const skill = _weaponSkillFor(character);
     if (!skill) return 0;
     const fns = getFunctions();
-    if (fns.LogicAccessoryData_getRange) {
-        try {
-            const tiles = fns.LogicAccessoryData_getRange(skill) | 0;
-            if (tiles >= 1 && tiles <= 64) return tiles;
-        } catch (_) {}
-    }
     if (!fns.LogicSkillData_getCastingRange) return 0;
     try {
         const tiles = fns.LogicSkillData_getCastingRange(skill) | 0;
@@ -1392,9 +1404,41 @@ function _updateLiveProjectiles(now) {
             }
             const flown = _traveled(entry, x, y);
             entry.flown = flown;
+            const moving = entry.hasVelocitySample && now - entry.lastMoveTs < 200;
+            if (moving) {
+                const capLearned = learnedFlightRange(entry.data);
+                if (capLearned > 0 && flown > capLearned + entry.radius + 50)
+                    _learnFlightRange(entry.data, flown + entry.speed * 0.7);
+            }
             entry.seg = _flightSeg(entry, flown);
-            const ownerObj =
+            entry.segUncertain = !!(moving && !(entry.seg > 0) && length(entry.vx, entry.vy) > 100);
+            let ownerObj =
                 entry.ownerIndex >= 0 ? _charsByIndex.get(entry.ownerIndex) || null : null;
+            if (!ownerObj && entry.ownerIndex >= 0 && isValidPtr(_objMgrPtr)) {
+                const fns2 = getFunctions();
+                if (fns2.LogicGameObjectManagerClient_findGameObject) {
+                    try {
+                        const resolved = fns2.LogicGameObjectManagerClient_findGameObject(
+                            _objMgrPtr,
+                            entry.ownerIndex,
+                            -1
+                        );
+                        let bad = true;
+                        if (isValidPtr(resolved) && !resolved.equals(entry.ptr)) {
+                            bad = false;
+                            try {
+                                bad = resolved
+                                    .readPointer()
+                                    .equals(moduleBase.add(offsets.LogicProjectileClient_vtable));
+                            } catch (_) {}
+                        }
+                        if (!bad) {
+                            ownerObj = resolved;
+                            _rememberCharacter(entry.ownerIndex, resolved);
+                        }
+                    } catch (_) {}
+                }
+            }
             if (ownerObj && scanData.ownCharacter && ownerObj.equals(scanData.ownCharacter)) return;
             if (ownerObj && !_isEnemyOf(ownerObj, scanData.battleModeClient, true)) return;
             if (entry.ownerIndex >= 0 && _friendlyIdx.has(entry.ownerIndex)) return;
@@ -1448,6 +1492,7 @@ function _updateLiveProjectiles(now) {
             o.vy = entry.vy;
             o.speed = entry.speed;
             o.seg = entry.seg;
+            o.segUncertain = !!entry.segUncertain;
             o.flown = flown;
             o.hasTarget = !!entry.hasTarget;
             o.targetX = entry.targetX;
@@ -1499,9 +1544,10 @@ export function updateScanner(bm, now) {
         let myTeamFromMgr = -1;
         try {
             const mgrForTeam = bm.add(offsets.BattleMode_objectManager).readPointer();
-            if (isValidPtr(mgrForTeam))
-                myTeamFromMgr =
-                    mgrForTeam.add(offsets.LogicGameObjectManagerClient_ownTeam).readS32() | 0;
+            if (isValidPtr(mgrForTeam)) {
+                _objMgrPtr = mgrForTeam;
+                myTeamFromMgr = _ownTeamOf(mgrForTeam);
+            }
         } catch (_) {}
         scanData.myTeamId = myTeamFromMgr >= 0 ? myTeamFromMgr : _teamOf(own, bm);
         scanData.myPlayerIndex = _readOwnerIndex(own);
@@ -1627,6 +1673,7 @@ export function resetScannerCache() {
     _friendlyIdx.clear();
     _objectsArr = null;
     _objCount = 0;
+    _objMgrPtr = null;
     _charsByIndex.clear();
     _speedByData.clear();
     _charSpeedByData.clear();

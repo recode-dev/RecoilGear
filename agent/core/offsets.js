@@ -155,9 +155,5 @@ export const offsets = Object.freeze({
     LogicData_getIntegerValueAt: 0xbc6dfc,
     CalculateProjectilePath: 0x7b3ae8,
 
-    LogicData_getName: 0x9a4f1c,
-
-    LogicAccessoryData_getRange: 0x978d74,
-
-    LogicHttpRequest_encode: 0xbd5f3c
+    LogicData_getName: 0x9a4f1c
 });
