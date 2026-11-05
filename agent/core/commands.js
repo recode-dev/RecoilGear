@@ -9,6 +9,7 @@ const FALLBACK_TYPE_CONST = 0xdeadbeef;
 const PRIORITY_TABLE_ENTRIES = 0x15;
 const PRIORITY_REJECT = -1;
 const MASK_SIZE = 16;
+const FALLBACK_CONST_SIZE = 8;
 const DATA16_OFFSET = 4;
 const SANITY_MIN_NONZERO = 16;
 const SANITY_MIN_DISTINCT = 16;
@@ -20,6 +21,7 @@ let _innerMask = null;
 let _outerMask = null;
 let _skillTypeTable = null;
 let _priorityTable = null;
+let _fallbackType = FALLBACK_TYPE_CONST;
 let _lastToken = 0;
 
 function _bytesAt(address, size) {
@@ -55,6 +57,10 @@ function _tableSane(table) {
     return nonzero >= SANITY_MIN_NONZERO && seen.size >= SANITY_MIN_DISTINCT;
 }
 
+function _decodeFallbackConst(raw) {
+    return ((raw[6] << 24) | (raw[4] << 16) | (raw[2] << 8) | raw[0]) >>> 0;
+}
+
 function _loadSigning() {
     if (_typeTable) return true;
     const base = getBase();
@@ -76,6 +82,12 @@ function _loadSigning() {
                 base.add(offsets.ClientInput_typePriorityTable),
                 PRIORITY_TABLE_ENTRIES
             );
+        } catch (_) {}
+        try {
+            const decoded = _decodeFallbackConst(
+                _bytesAt(base.add(offsets.ClientInput_typeConstantFallback), FALLBACK_CONST_SIZE)
+            );
+            if (decoded !== 0) _fallbackType = decoded;
         } catch (_) {}
         return true;
     } catch (_) {
@@ -114,7 +126,7 @@ export function signClientInput(input, battle) {
         const key16 = _bytesAt(battle.add(offsets.BattleMode_hashKey), MASK_SIZE);
         const data16 = _bytesAt(input.add(DATA16_OFFSET), MASK_SIZE);
         const type = input.add(offsets.ClientInput_type).readU32() >>> 0;
-        const mapped = type <= MAX_TABLE_TYPE ? _typeTable[type] : FALLBACK_TYPE_CONST;
+        const mapped = type <= MAX_TABLE_TYPE ? _typeTable[type] : _fallbackType;
         const value = inputToken(key16, _innerMask, _outerMask, data16, mapped);
         input.add(offsets.ClientInput_token).writeU32(value);
         _lastToken = value;

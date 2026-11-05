@@ -84,6 +84,7 @@ export const offsets = Object.freeze({
     BattleMode_hashEnabled: 0x70,
     BattleMode_hashKey: 0x60,
     ClientInput_typeConstantTable: 0xe1bd30,
+    ClientInput_typeConstantFallback: 0xe1bc28,
     ClientInput_hashInnerMask: 0xe1bbd0,
     ClientInput_hashOuterMask: 0xe1bbf0,
     SkillCommandTypeTable: 0xe1bf7c,
