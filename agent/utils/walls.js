@@ -56,7 +56,7 @@ class WallGrid {
         flags = 0;
         try {
             const packed = tileType.add(offsets.LogicTileData_blocksMovement).readU16();
-            if (packed & 0xff) flags |= movementBit;
+            if (packed & 0xFF) flags |= movementBit;
             if (packed >> 8) flags |= projectileBit;
         } catch {}
         flagsByType.set(key, flags);

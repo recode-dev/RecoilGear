@@ -1,20 +1,20 @@
 const k = [
-    0x428a2f98, 0x71374491, 0xb5c0fbcf, 0xe9b5dba5, 0x3956c25b, 0x59f111f1, 0x923f82a4, 0xab1c5ed5,
-    0xd807aa98, 0x12835b01, 0x243185be, 0x550c7dc3, 0x72be5d74, 0x80deb1fe, 0x9bdc06a7, 0xc19bf174,
-    0xe49b69c1, 0xefbe4786, 0x0fc19dc6, 0x240ca1cc, 0x2de92c6f, 0x4a7484aa, 0x5cb0a9dc, 0x76f988da,
-    0x983e5152, 0xa831c66d, 0xb00327c8, 0xbf597fc7, 0xc6e00bf3, 0xd5a79147, 0x06ca6351, 0x14292967,
-    0x27b70a85, 0x2e1b2138, 0x4d2c6dfc, 0x53380d13, 0x650a7354, 0x766a0abb, 0x81c2c92e, 0x92722c85,
-    0xa2bfe8a1, 0xa81a664b, 0xc24b8b70, 0xc76c51a3, 0xd192e819, 0xd6990624, 0xf40e3585, 0x106aa070,
-    0x19a4c116, 0x1e376c08, 0x2748774c, 0x34b0bcb5, 0x391c0cb3, 0x4ed8aa4a, 0x5b9cca4f, 0x682e6ff3,
-    0x748f82ee, 0x78a5636f, 0x84c87814, 0x8cc70208, 0x90befffa, 0xa4506ceb, 0xbef9a3f7, 0xc67178f2
+    0x428A2F98, 0x71374491, 0xB5C0FBCF, 0xE9B5DBA5, 0x3956C25B, 0x59F111F1, 0x923F82A4, 0xAB1C5ED5,
+    0xD807AA98, 0x12835B01, 0x243185BE, 0x550C7DC3, 0x72BE5D74, 0x80DEB1FE, 0x9BDC06A7, 0xC19BF174,
+    0xE49B69C1, 0xEFBE4786, 0x0FC19DC6, 0x240CA1CC, 0x2DE92C6F, 0x4A7484AA, 0x5CB0A9DC, 0x76F988DA,
+    0x983E5152, 0xA831C66D, 0xB00327C8, 0xBF597FC7, 0xC6E00BF3, 0xD5A79147, 0x06CA6351, 0x14292967,
+    0x27B70A85, 0x2E1B2138, 0x4D2C6DFC, 0x53380D13, 0x650A7354, 0x766A0ABB, 0x81C2C92E, 0x92722C85,
+    0xA2BFE8A1, 0xA81A664B, 0xC24B8B70, 0xC76C51A3, 0xD192E819, 0xD6990624, 0xF40E3585, 0x106AA070,
+    0x19A4C116, 0x1E376C08, 0x2748774C, 0x34B0BCB5, 0x391C0CB3, 0x4ED8AA4A, 0x5B9CCA4F, 0x682E6FF3,
+    0x748F82EE, 0x78A5636F, 0x84C87814, 0x8CC70208, 0x90BEFFFA, 0xA4506CEB, 0xBEF9A3F7, 0xC67178F2
 ];
 
 const rotr = (x, n) => ((x >>> n) | (x << (32 - n))) >>> 0;
 
 const compress = (buf) => {
     const hv = new Int32Array([
-        0x6a09e667, 0xbb67ae85, 0x3c6ef372, 0xa54ff53a, 0x510e527f, 0x9b05688c, 0x1f83d9ab,
-        0x5be0cd19
+        0x6A09E667, 0xBB67AE85, 0x3C6EF372, 0xA54FF53A, 0x510E527F, 0x9B05688C, 0x1F83D9AB,
+        0x5BE0CD19
     ]);
     const v = new Int32Array(8);
     const w = new Int32Array(64);
@@ -51,10 +51,10 @@ const compress = (buf) => {
     }
     const out = new Uint8Array(32);
     for (let i = 0; i < 8; i++) {
-        out[i * 4] = (hv[i] >>> 24) & 0xff;
-        out[i * 4 + 1] = (hv[i] >>> 16) & 0xff;
-        out[i * 4 + 2] = (hv[i] >>> 8) & 0xff;
-        out[i * 4 + 3] = hv[i] & 0xff;
+        out[i * 4] = (hv[i] >>> 24) & 0xFF;
+        out[i * 4 + 1] = (hv[i] >>> 16) & 0xFF;
+        out[i * 4 + 2] = (hv[i] >>> 8) & 0xFF;
+        out[i * 4 + 3] = hv[i] & 0xFF;
     }
     return out;
 };
@@ -67,14 +67,14 @@ export const sha256 = (bytes) => {
     buf[len] = 0x80;
     const bits = len * 8;
     const hi = Math.floor(bits / 4294967296);
-    buf[total - 8] = (hi >>> 24) & 0xff;
-    buf[total - 7] = (hi >>> 16) & 0xff;
-    buf[total - 6] = (hi >>> 8) & 0xff;
-    buf[total - 5] = hi & 0xff;
-    buf[total - 4] = (bits >>> 24) & 0xff;
-    buf[total - 3] = (bits >>> 16) & 0xff;
-    buf[total - 2] = (bits >>> 8) & 0xff;
-    buf[total - 1] = bits & 0xff;
+    buf[total - 8] = (hi >>> 24) & 0xFF;
+    buf[total - 7] = (hi >>> 16) & 0xFF;
+    buf[total - 6] = (hi >>> 8) & 0xFF;
+    buf[total - 5] = hi & 0xFF;
+    buf[total - 4] = (bits >>> 24) & 0xFF;
+    buf[total - 3] = (bits >>> 16) & 0xFF;
+    buf[total - 2] = (bits >>> 8) & 0xFF;
+    buf[total - 1] = bits & 0xFF;
     return compress(buf);
 };
 
@@ -84,22 +84,22 @@ export const inputToken = (key16, innerMask, outerMask, data16, mapped) => {
     a.fill(0x36, 16, 64);
     for (let i = 0; i < 12; i++) a[64 + i] = data16[4 + i];
     for (let i = 0; i < 4; i++) a[76 + i] = data16[i];
-    a[80] = mapped & 0xff;
-    a[81] = (mapped >>> 8) & 0xff;
-    a[82] = (mapped >>> 16) & 0xff;
-    a[83] = (mapped >>> 24) & 0xff;
+    a[80] = mapped & 0xFF;
+    a[81] = (mapped >>> 8) & 0xFF;
+    a[82] = (mapped >>> 16) & 0xFF;
+    a[83] = (mapped >>> 24) & 0xFF;
     a[84] = 0x80;
     a[126] = 0x02;
-    a[127] = 0xa0;
+    a[127] = 0xA0;
     const inner = compress(a);
     const b = new Uint8Array(128);
     for (let i = 0; i < 16; i++) b[i] = key16[i] ^ outerMask[i];
-    b.fill(0x5c, 16, 64);
+    b.fill(0x5C, 16, 64);
     b.set(inner, 64);
     b[96] = 0x80;
     b[126] = 0x03;
     b[127] = 0x00;
     const digest = compress(b);
-    const value = (digest[0] | ((digest[1] & 0x7f) << 8)) >>> 0;
+    const value = (digest[0] | ((digest[1] & 0x7F) << 8)) >>> 0;
     return value < 2 ? 1 : value;
 };
