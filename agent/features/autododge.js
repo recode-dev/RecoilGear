@@ -224,6 +224,7 @@ const TUNE = {
     MERGE_SAME_VOLLEY: 260,
     MIN_POS: 50,
     CROSS_W: 300,
+    CORRIDOR_W: 75,
     SWITCH_MARGIN: 80,
     REFREEZE_DIST: 260,
     ENGAGE_S: 1.15,
@@ -242,6 +243,10 @@ let _targetX = 0;
 let _targetY = 0;
 let _weakSince = 0;
 let _hitbox = 0;
+let _walkDir = null;
+let _walkAt = 0;
+let _walkPx = 0;
+let _walkPy = 0;
 let _radiusMemoData = null;
 let _radiusMemoValue = 0;
 const BODY_SUBTILE_UNITS = 199;
@@ -367,7 +372,7 @@ function _wallShields(px, py, ex, ey, mx, my, hitR) {
     return pathBlocked(px, py, px + dx * t, py + dy * t, BLOCKS_PROJECTILES);
 }
 
-function _collectLive(myX, myY, myRadius, now) {
+function _collectLive(myX, myY, myRadius, now, mySpeed) {
     const out = [];
     const shots = scanData.projectiles;
     if (!shots || shots.length === 0) return out;
@@ -446,6 +451,23 @@ function _collectLive(myX, myY, myRadius, now) {
             vx = (_scratchA.x / 1000) * p.speed;
             vy = (_scratchA.y / 1000) * p.speed;
             spd = length(vx, vy);
+        } else if (spd < 1 && (p.spawnX || p.spawnY)) {
+            const rx = p.x - p.spawnX;
+            const ry = p.y - p.spawnY;
+            const rsq = rx * rx + ry * ry;
+            if (rsq >= 16) {
+                let est = p.speed > 0 ? p.speed : 0;
+                if (!(est > 0) && p.ageMs > 40) {
+                    const avg = (Math.sqrt(rsq) * 1000) / p.ageMs;
+                    if (avg >= 300 && avg <= 8500) est = Math.round(avg);
+                }
+                if (est > 0) {
+                    const inv = est / Math.sqrt(rsq);
+                    vx = rx * inv;
+                    vy = ry * inv;
+                    spd = est;
+                }
+            }
         }
         const lockPath = !!p.isBeam || !!p.beamCopy;
         const landed = trigger && !(p.seg > 0);
@@ -478,7 +500,16 @@ function _collectLive(myX, myY, myRadius, now) {
             const gap = distance(p.x, p.y, myX, myY) - hitR;
             if (gap / travel > TUNE.ENGAGE_S) continue;
         }
-        if (!_reachesMe(p, myX, myY, hitR, vx, vy, blob ? -1 : left)) continue;
+        if (!_reachesMe(p, myX, myY, hitR, vx, vy, blob ? -1 : left)) {
+            if (blob || chase) continue;
+            const end = _sweptEnd(p.x, p.y, vx, vy, left);
+            if (!end) continue;
+            const miss = _missDistance(p.x, p.y, end.x, end.y, myX, myY);
+            const gap = distance(p.x, p.y, myX, myY);
+            const tti = travel > 0 ? LogicMath.max(0, gap - hitR) / travel : TUNE.HORIZON_S;
+            const widen = LogicMath.min(TUNE.REACH, (mySpeed * tti) | 0);
+            if (miss > hitR + widen) continue;
+        }
         out.push({
             x: p.x,
             y: p.y,
@@ -676,7 +707,8 @@ function _threatPaths(threats) {
             x1: t.x,
             y1: t.y,
             x2: end.x,
-            y2: end.y
+            y2: end.y,
+            rad: t.rad
         });
     }
     return out;
@@ -703,6 +735,31 @@ function _crossesPath(paths, px, py, stepX, stepY) {
         if (segmentHitAlong(px, py, tx, ty, p.x1, p.y1, p.x2, p.y2) >= 0) return true;
     }
     return false;
+}
+
+function _corridorPenalty(paths, px, py, stepX, stepY) {
+    const ex = px + stepX;
+    const ey = py + stepY;
+    let worst = 0;
+    for (let i = 0; i < paths.length; i++) {
+        const p = paths[i];
+        const dx = p.x2 - p.x1;
+        const dy = p.y2 - p.y1;
+        const lenSq = dx * dx + dy * dy;
+        if (lenSq < 1) continue;
+        const ux = dx / lenSq;
+        const uy = dy / lenSq;
+        const rx = ex - p.x1;
+        const ry = ey - p.y1;
+        const along = rx * ux + ry * uy;
+        if (along <= 0) continue;
+        const perp = Math.abs(rx * uy - ry * ux) * Math.sqrt(lenSq);
+        const corridor = p.rad + 140;
+        if (perp >= corridor) continue;
+        const pen = TUNE.CORRIDOR_W * (1 - perp / corridor);
+        if (pen > worst) worst = pen;
+    }
+    return worst;
 }
 
 function _wallRoom(myX, myY, dir, bodyR) {
@@ -786,9 +843,9 @@ function _clearHeading() {
     _weakSince = 0;
 }
 
-function _collectLiveCached(myX, myY, myRadius, now) {
+function _collectLiveCached(myX, myY, myRadius, now, mySpeed) {
     if (_threatCache && _threatCacheAt === scanData.lastUpdate) return _threatCache;
-    _threatCache = _collectLive(myX, myY, myRadius, now);
+    _threatCache = _collectLive(myX, myY, myRadius, now, mySpeed);
     _threatCacheAt = scanData.lastUpdate;
     return _threatCache;
 }
@@ -798,7 +855,7 @@ export function pushDodgeTarget() {
     const now = Date.now();
     const myRadius = _hitbox > 0 ? _hitbox : scanData.myRadius;
     const danger = _pathsHitMe(
-        _collectLiveCached(scanData.myX, scanData.myY, myRadius, now),
+        _collectLiveCached(scanData.myX, scanData.myY, myRadius, now, scanData.mySpeed),
         scanData.myX,
         scanData.myY
     );
@@ -908,6 +965,18 @@ export function updateAutododge() {
     if (!isFinite(myX) || !isFinite(myY)) return;
     if (Math.abs(myX) < TUNE.MIN_POS && Math.abs(myY) < TUNE.MIN_POS) return;
 
+    if (!_walkAt || now - _walkAt >= 150) {
+        const wdx = myX - _walkPx;
+        const wdy = myY - _walkPy;
+        if (wdx * wdx + wdy * wdy >= 64) {
+            const wa = LogicMath.getAngle(wdx, wdy);
+            _walkDir = { x: LogicMath.cos(wa), y: LogicMath.sin(wa) };
+        } else _walkDir = null;
+        _walkPx = myX;
+        _walkPy = myY;
+        _walkAt = now;
+    }
+
     let speed = scanData.mySpeed | 0;
     if (!learnOwnHitbox()) {
         const fb = scanData.myRadius | 0;
@@ -924,7 +993,7 @@ export function updateAutododge() {
         return;
     }
 
-    const hazards = _collectLiveCached(myX, myY, myRadius, now);
+    const hazards = _collectLiveCached(myX, myY, myRadius, now, speed);
     if (hazards.length === 0) {
         if (_heading && now - _lastDangerTs > TUNE.RELEASE_GRACE_MS) _clearHeading();
         return;
@@ -950,6 +1019,7 @@ export function updateAutododge() {
 
     const prevIdx = _headingIdx >= 0 && _headingIdx < _ring.length ? _headingIdx : -1;
     const prevDir = prevIdx >= 0 ? _ring[prevIdx] : null;
+    const refDir = prevDir || _walkDir;
     const n = _ring.length;
     const scores = _scores;
     for (let i = 0; i < n; i++) {
@@ -959,10 +1029,11 @@ export function updateAutododge() {
         const dirSpeed = normalize(_scratchA, speed | 0);
         let s = _clearanceFor(hazards, myX, myY, dirSpeed.x, dirSpeed.y);
         if (_crossesPath(paths, myX, myY, dirSpeed.x, dirSpeed.y)) s -= TUNE.CROSS_W;
-        if (prevDir) {
+        s -= _corridorPenalty(paths, myX, myY, dirSpeed.x, dirSpeed.y);
+        if (refDir) {
             const turn = LogicMath.getAngleBetween(
                 LogicMath.getAngle(d.x, d.y),
-                LogicMath.getAngle(prevDir.x, prevDir.y)
+                LogicMath.getAngle(refDir.x, refDir.y)
             );
             s += (TUNE.MOMENTUM * (180 - turn)) / 180;
         }
@@ -1059,6 +1130,10 @@ function _invalidateOwnMetrics() {
 export function resetAutododge() {
     _clearHeading();
     _hitbox = 0;
+    _walkDir = null;
+    _walkAt = 0;
+    _walkPx = 0;
+    _walkPy = 0;
     _radiusMemoData = null;
     _radiusMemoValue = 0;
     _estSpd = 0;

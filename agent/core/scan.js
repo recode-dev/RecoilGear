@@ -1100,6 +1100,7 @@ function _captureProjectile(projectile, data, now) {
             lastX: x,
             lastY: y,
             lastTs: now,
+            lastMoveTs: now,
             vx: 0,
             vy: 0,
             hasVelocitySample: false,
@@ -1331,33 +1332,36 @@ function _updateLiveProjectiles(now) {
             }
             const x = _fieldS32(entry.ptr, offsets.LogicGameObjectClient_x);
             const y = _fieldS32(entry.ptr, offsets.LogicGameObjectClient_y);
-            const dt = (now - entry.lastTs) / 1000;
             const dx = x - entry.lastX;
             const dy = y - entry.lastY;
-            if (dt > 0.008 && dt < 0.3 && dx * dx + dy * dy >= 16) {
-                const observedVx = dx / dt;
-                const observedVy = dy / dt;
-                if (length(observedVx, observedVy) <= 8500) {
-                    const alpha = entry.hasVelocitySample ? 0.4 : 1;
-                    entry.vx = entry.vx * (1 - alpha) + observedVx * alpha;
-                    entry.vy = entry.vy * (1 - alpha) + observedVy * alpha;
-                    entry.hasVelocitySample = true;
-                    const measured = length(entry.vx, entry.vy);
-                    if (measured >= 300 && measured <= 8500) {
-                        entry.speed = measured;
-                        if (entry.ownerIndex === scanData.myPlayerIndex) {
-                            const dataPtr = entry.data;
-                            if (isValidPtr(dataPtr)) {
-                                const key = dataPtr.toString();
-                                const acc = _speedByData.get(key) || { sum: 0, count: 0 };
-                                acc.sum += measured;
-                                acc.count++;
-                                _speedByData.set(key, acc);
-                                scanData.measuredSpeed = Math.round(acc.sum / acc.count);
+            if (dx !== 0 || dy !== 0) {
+                const dt = (now - entry.lastMoveTs) / 1000;
+                if (!entry.spawnPending && dt > 0.008 && dt < 0.3 && dx * dx + dy * dy >= 16) {
+                    const observedVx = dx / dt;
+                    const observedVy = dy / dt;
+                    if (length(observedVx, observedVy) <= 8500) {
+                        const alpha = entry.hasVelocitySample ? 0.4 : 1;
+                        entry.vx = entry.vx * (1 - alpha) + observedVx * alpha;
+                        entry.vy = entry.vy * (1 - alpha) + observedVy * alpha;
+                        entry.hasVelocitySample = true;
+                        const measured = length(entry.vx, entry.vy);
+                        if (measured >= 300 && measured <= 8500) {
+                            entry.speed = measured;
+                            if (entry.ownerIndex === scanData.myPlayerIndex) {
+                                const dataPtr = entry.data;
+                                if (isValidPtr(dataPtr)) {
+                                    const key = dataPtr.toString();
+                                    const acc = _speedByData.get(key) || { sum: 0, count: 0 };
+                                    acc.sum += measured;
+                                    acc.count++;
+                                    _speedByData.set(key, acc);
+                                    scanData.measuredSpeed = Math.round(acc.sum / acc.count);
+                                }
                             }
                         }
                     }
                 }
+                entry.lastMoveTs = now;
             }
             entry.lastX = x;
             entry.lastY = y;
@@ -1395,7 +1399,7 @@ function _updateLiveProjectiles(now) {
             if (ownerObj && !_isEnemyOf(ownerObj, scanData.battleModeClient, true)) return;
             if (entry.ownerIndex >= 0 && _friendlyIdx.has(entry.ownerIndex)) return;
             if (entry.ownerIndex === scanData.myPlayerIndex) return;
-            if (!(entry.seg > 0) && !entry.hasTarget) return;
+            if (!(entry.seg > 0) && !entry.hasTarget && !entry.hasVelocitySample) return;
             let o = entry.out;
             if (!o) {
                 o = {};
