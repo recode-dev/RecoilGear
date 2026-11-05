@@ -159,4 +159,3 @@ export const offsets = Object.freeze({
 
     LogicHttpRequest_encode: 0xbd5f3c
 });
-

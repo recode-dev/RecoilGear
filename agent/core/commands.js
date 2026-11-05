@@ -59,10 +59,7 @@ function _loadSigning() {
     try {
         _innerMask = _bytesAt(base.add(offsets.ClientInput_hashInnerMask), MASK_SIZE);
         _outerMask = _bytesAt(base.add(offsets.ClientInput_hashOuterMask), MASK_SIZE);
-        _typeTable = _readU32Table(
-            base.add(offsets.ClientInput_typeConstantTable),
-            TABLE_ENTRIES
-        );
+        _typeTable = _readU32Table(base.add(offsets.ClientInput_typeConstantTable), TABLE_ENTRIES);
         if (!_tableSane(_typeTable)) {
             _typeTable = null;
             return false;
