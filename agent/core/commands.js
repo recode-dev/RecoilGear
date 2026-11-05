@@ -1,5 +1,6 @@
 import { offsets } from "./offsets.js";
 import { getFunctions } from "./functions.js";
+import { signAgentInput } from "../utils/crypto.js";
 
 const CMD_BUF_SIZE = 72;
 const _zeroBuf = new Uint8Array(CMD_BUF_SIZE).buffer;
@@ -20,6 +21,11 @@ export function sendCommand(cmdType, fillFn) {
         fns.ClientInput_constructor_int(ci, cmdType | 0);
         if (fillFn) fillFn(ci, battle);
         fns.ClientInputManager_addInput(mgr, ci);
+        signAgentInput(
+            cmdType,
+            ci.add(offsets.ClientInput_x).readS32() | 0,
+            ci.add(offsets.ClientInput_y).readS32() | 0
+        );
         return true;
     } catch (_) {
         return false;
