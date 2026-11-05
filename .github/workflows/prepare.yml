@@ -64,8 +64,8 @@ jobs:
           npm install --no-fund --no-audit --legacy-peer-deps \
             "prettier@${PRETTIER_VERSION}" \
             "eslint@${ESLINT_VERSION}" \
-            "eslint-plugin-unicorn@^60" \
-            "eslint-plugin-sonarjs@^3" \
+            "eslint-plugin-unicorn@^62" \
+            "eslint-plugin-sonarjs@^4" \
             "eslint-plugin-import-x@^4" \
             "eslint-plugin-unused-imports@^4"
 
