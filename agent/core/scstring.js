@@ -1,6 +1,6 @@
-const DEFAULT_MAX_LENGTH = 256;
+const defaultMaxLength = 256;
 
-export function readScString(value, maxLength = DEFAULT_MAX_LENGTH) {
+export const readScString = (value, maxLength = defaultMaxLength) => {
     try {
         if (!value || value.isNull()) return null;
         const text = value.readCString(maxLength);
@@ -10,4 +10,4 @@ export function readScString(value, maxLength = DEFAULT_MAX_LENGTH) {
     } catch (_) {
         return null;
     }
-}
+};

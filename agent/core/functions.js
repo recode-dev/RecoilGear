@@ -1,189 +1,238 @@
 import { offsets } from "./offsets.js";
 
-var base = null;
-var image = null;
-var _n = null;
+export const isValidPtr = (value) => !!value && !value.isNull();
 
-export function isValidPtr(value) {
-    return value && !value.isNull();
-}
-
-export function ptrFromU32(lo, hi) {
+export const ptrFromU32 = (lo, hi) => {
     if (!lo && !hi) return ptr(0);
     return ptr(
-        "0x" + (hi >>> 0).toString(16).padStart(8, "0") + (lo >>> 0).toString(16).padStart(8, "0")
+        `0x${(hi >>> 0).toString(16).padStart(8, "0")}${(lo >>> 0).toString(16).padStart(8, "0")}`
     );
+};
+
+class FunctionTable {
+    #base = null;
+    #image = null;
+    #table = null;
+
+    #nf(name, ret, args) {
+        const off = offsets[name];
+        if (typeof off !== "number" || off <= 0)
+            throw new Error(`functions: missing offset ${name}`);
+        return new NativeFunction(this.#base.add(off), ret, args);
+    }
+
+    init(baseIn, imageIn) {
+        if (this.#table) return this.#table;
+        this.#base = baseIn;
+        this.#image = imageIn || null;
+        this.#table = Object.freeze({
+            BattleMode_getInstance: this.#nf("BattleMode_getInstance", "pointer", []),
+            LogicGameObjectClient_getX: this.#nf("LogicGameObjectClient_getX", "int32", [
+                "pointer"
+            ]),
+            LogicGameObjectClient_getY: this.#nf("LogicGameObjectClient_getY", "int32", [
+                "pointer"
+            ]),
+            LogicBattleModeClient_getOwnCharacter: this.#nf(
+                "LogicBattleModeClient_getOwnCharacter",
+                "pointer",
+                ["pointer"]
+            ),
+            LogicBattleModeClient_setClientPredictionMoveTo: this.#nf(
+                "LogicBattleModeClient_setClientPredictionMoveTo",
+                "void",
+                ["pointer", "int", "int", "int"]
+            ),
+            LogicGameObjectManagerClient_getOwnPlayerTeam: this.#nf(
+                "LogicGameObjectManagerClient_getOwnPlayerTeam",
+                "int32",
+                ["pointer"]
+            ),
+            LogicGameObjectManagerClient_findGameObject: this.#nf(
+                "LogicGameObjectManagerClient_findGameObject",
+                "pointer",
+                ["pointer", "int", "int"]
+            ),
+            ClientInput_constructor_int: this.#nf("ClientInput_constructor_int", "pointer", [
+                "pointer",
+                "int"
+            ]),
+            ClientInputManager_addInput: this.#nf("ClientInputManager_addInput", "void", [
+                "pointer",
+                "pointer"
+            ]),
+            LogicGameObjectClient_getData: this.#nf("LogicGameObjectClient_getData", "pointer", [
+                "pointer"
+            ]),
+            LogicGameObjectClient_getTeam: this.#nf("LogicGameObjectClient_getTeam", "int32", [
+                "pointer",
+                "pointer"
+            ]),
+            LogicGamePlayUtil_isEnemy: this.#nf("LogicGamePlayUtil_isEnemy", "int32", ["pointer"]),
+            LogicTileMap_tileToLogic: this.#nf("LogicTileMap_tileToLogic", "int32", ["int32"]),
+            LogicGamePlayUtil_getClosestPathfinderCollision: this.#nf(
+                "LogicGamePlayUtil_getClosestPathfinderCollision",
+                "uint32",
+                [
+                    "int32",
+                    "int32",
+                    "int32",
+                    "int32",
+                    "int32",
+                    "pointer",
+                    "pointer",
+                    "uint32",
+                    "uint8"
+                ]
+            ),
+            LogicCharacterData_getSpeed: this.#nf("LogicCharacterData_getSpeed", "int32", [
+                "pointer"
+            ]),
+            LogicCharacterData_getCollisionRadius: this.#nf(
+                "LogicCharacterData_getCollisionRadius",
+                "uint32",
+                ["pointer"]
+            ),
+            LogicBattleModeClient_getTileMap: this.#nf(
+                "LogicBattleModeClient_getTileMap",
+                "pointer",
+                ["pointer"]
+            ),
+            LogicCharacterClient_getWeaponSkill: this.#nf(
+                "LogicCharacterClient_getWeaponSkill",
+                "pointer",
+                ["pointer"]
+            ),
+            LogicSkillData_getCastingRange: this.#nf(
+                "LogicSkillData_getCastingRangeTiles",
+                "int32",
+                ["pointer"]
+            ),
+            LogicSkillData_getProjectileData: this.#nf(
+                "LogicSkillData_getProjectileData",
+                "pointer",
+                ["pointer", "int"]
+            ),
+            LogicData_getName: this.#nf("LogicData_getName", "pointer", ["pointer"]),
+            LogicCharacterClient_getMoveAngle: this.#nf(
+                "LogicCharacterClient_getMoveAngle",
+                "int32",
+                ["pointer"]
+            ),
+            LogicProjectileData_getPreExplosionTimeMs: this.#nf(
+                "LogicProjectileData_getPreExplosionTimeMs",
+                "int32",
+                ["pointer"]
+            ),
+            LogicProjectileClient_getTravelTicks: this.#nf(
+                "LogicProjectileClient_getTravelTicks",
+                "int32",
+                ["pointer", "int32", "int32"]
+            ),
+            LogicProjectileData_getUniqueProperty: this.#nf(
+                "LogicProjectileData_getUniqueProperty",
+                "int32",
+                ["pointer"]
+            ),
+            LogicProjectileClient_isBeam: this.#nf("LogicProjectileData_isBeam", "uint32", [
+                "pointer"
+            ]),
+            LogicSkillData_getSpread: this.#nf("LogicSkillData_getSpread", "int32", ["pointer"]),
+            LogicSkillData_getNumBulletsInOneAttack: this.#nf(
+                "LogicSkillData_getNumBulletsInOneAttack",
+                "int32",
+                ["pointer"]
+            ),
+            LogicSkillData_getMsBetweenAttacks: this.#nf(
+                "LogicSkillData_getMsBetweenAttacks",
+                "int32",
+                ["pointer"]
+            ),
+            LogicProjectileClient_getTargetX: this.#nf(
+                "LogicProjectileClient_getTargetX",
+                "int32",
+                ["pointer"]
+            ),
+            LogicProjectileClient_getTargetY: this.#nf(
+                "LogicProjectileClient_getTargetY",
+                "int32",
+                ["pointer"]
+            ),
+            LogicProjectileData_piercesEnvironment: this.#nf(
+                "LogicProjectileData_piercesEnvironment",
+                "uint32",
+                ["pointer"]
+            ),
+            LogicProjectileData_isHomingMissile: this.#nf(
+                "LogicProjectileData_isHomingMissile",
+                "uint32",
+                ["pointer"]
+            ),
+            LogicProjectileData_isBouncing: this.#nf("LogicProjectileData_isBouncing", "uint32", [
+                "pointer"
+            ]),
+            LogicProjectileData_getSpeed: this.#nf("LogicProjectileData_getSpeed", "int32", [
+                "pointer"
+            ]),
+            LogicProjectileData_getRadius: this.#nf("LogicProjectileData_getRadius", "int32", [
+                "pointer"
+            ]),
+            LogicProjectileData_getTravelType: this.#nf(
+                "LogicProjectileData_getTravelType",
+                "int32",
+                ["pointer"]
+            ),
+            LogicProjectileData_getIntValueFromColumn: this.#nf(
+                "LogicProjectileData_getIntValueFromColumn",
+                "int32",
+                ["pointer", "int"]
+            ),
+            LogicProjectileData_getBoolValueFromColumn: this.#nf(
+                "LogicProjectileData_getBoolValueFromColumn",
+                "uint32",
+                ["pointer", "int"]
+            ),
+            LogicProjectileData_getBoolValueFromColumn2: this.#nf(
+                "LogicProjectileData_getBoolValueFromColumn2",
+                "uint32",
+                ["pointer", "int"]
+            ),
+            LogicCharacterData_getProjectileStartRadius: this.#nf(
+                "LogicCharacterData_getProjectileStartRadius",
+                "int32",
+                ["pointer"]
+            ),
+            LogicData_getBooleanValueAt: this.#nf("LogicData_getBooleanValueAt", "uint32", [
+                "pointer",
+                "int"
+            ]),
+            LogicData_getIntegerValueAt: this.#nf("LogicData_getIntegerValueAt", "int32", [
+                "pointer",
+                "int"
+            ]),
+            operator_new: this.#nf("operator_new", "pointer", ["size_t"])
+        });
+        return this.#table;
+    }
+
+    get table() {
+        if (!this.#table) throw new Error("FunctionTable not initialized: call init(base) first");
+        return this.#table;
+    }
+
+    get base() {
+        if (!this.#base) throw new Error("FunctionTable not initialized: call init(base) first");
+        return this.#base;
+    }
+
+    get image() {
+        return this.#image;
+    }
 }
 
-function _nf(name, ret, args) {
-    const off = offsets[name];
-    if (typeof off !== "number" || off <= 0) throw new Error("functions: missing offset " + name);
-    return new NativeFunction(base.add(off), ret, args);
-}
+const functions = new FunctionTable();
 
-export function initFunctions(baseIn, imageIn) {
-    if (_n) return _n;
-    base = baseIn;
-    image = imageIn || null;
-
-    _n = {
-        BattleMode_getInstance: _nf("BattleMode_getInstance", "pointer", []),
-        LogicGameObjectClient_getX: _nf("LogicGameObjectClient_getX", "int32", ["pointer"]),
-        LogicGameObjectClient_getY: _nf("LogicGameObjectClient_getY", "int32", ["pointer"]),
-        LogicBattleModeClient_getOwnCharacter: _nf(
-            "LogicBattleModeClient_getOwnCharacter",
-            "pointer",
-            ["pointer"]
-        ),
-        LogicBattleModeClient_setClientPredictionMoveTo: _nf(
-            "LogicBattleModeClient_setClientPredictionMoveTo",
-            "void",
-            ["pointer", "int", "int", "int"]
-        ),
-        LogicGameObjectManagerClient_getOwnPlayerTeam: _nf(
-            "LogicGameObjectManagerClient_getOwnPlayerTeam",
-            "int32",
-            ["pointer"]
-        ),
-        LogicGameObjectManagerClient_findGameObject: _nf(
-            "LogicGameObjectManagerClient_findGameObject",
-            "pointer",
-            ["pointer", "int", "int"]
-        ),
-        ClientInput_constructor_int: _nf("ClientInput_constructor_int", "pointer", [
-            "pointer",
-            "int"
-        ]),
-        ClientInputManager_addInput: _nf("ClientInputManager_addInput", "void", [
-            "pointer",
-            "pointer"
-        ]),
-        LogicGameObjectClient_getData: _nf("LogicGameObjectClient_getData", "pointer", ["pointer"]),
-        LogicGameObjectClient_getTeam: _nf("LogicGameObjectClient_getTeam", "int32", [
-            "pointer",
-            "pointer"
-        ]),
-        LogicGamePlayUtil_isEnemy: _nf("LogicGamePlayUtil_isEnemy", "int32", ["pointer"]),
-        LogicTileMap_tileToLogic: _nf("LogicTileMap_tileToLogic", "int32", ["int32"]),
-        LogicGamePlayUtil_getClosestPathfinderCollision: _nf(
-            "LogicGamePlayUtil_getClosestPathfinderCollision",
-            "uint32",
-            ["int32", "int32", "int32", "int32", "int32", "pointer", "pointer", "uint32", "uint8"]
-        ),
-        LogicCharacterData_getSpeed: _nf("LogicCharacterData_getSpeed", "int32", ["pointer"]),
-        LogicCharacterData_getCollisionRadius: _nf(
-            "LogicCharacterData_getCollisionRadius",
-            "uint32",
-            ["pointer"]
-        ),
-        LogicBattleModeClient_getTileMap: _nf("LogicBattleModeClient_getTileMap", "pointer", [
-            "pointer"
-        ]),
-        LogicCharacterClient_getWeaponSkill: _nf("LogicCharacterClient_getWeaponSkill", "pointer", [
-            "pointer"
-        ]),
-        LogicSkillData_getCastingRange: _nf("LogicSkillData_getCastingRangeTiles", "int32", [
-            "pointer"
-        ]),
-        LogicSkillData_getProjectileData: _nf("LogicSkillData_getProjectileData", "pointer", [
-            "pointer",
-            "int"
-        ]),
-        LogicData_getName: _nf("LogicData_getName", "pointer", ["pointer"]),
-        LogicCharacterClient_getMoveAngle: _nf("LogicCharacterClient_getMoveAngle", "int32", [
-            "pointer"
-        ]),
-        LogicProjectileData_getPreExplosionTimeMs: _nf(
-            "LogicProjectileData_getPreExplosionTimeMs",
-            "int32",
-            ["pointer"]
-        ),
-        LogicProjectileClient_getTravelTicks: _nf("LogicProjectileClient_getTravelTicks", "int32", [
-            "pointer",
-            "int32",
-            "int32"
-        ]),
-        LogicProjectileData_getUniqueProperty: _nf(
-            "LogicProjectileData_getUniqueProperty",
-            "int32",
-            ["pointer"]
-        ),
-        LogicProjectileClient_isBeam: _nf("LogicProjectileData_isBeam", "uint32", ["pointer"]),
-        LogicSkillData_getSpread: _nf("LogicSkillData_getSpread", "int32", ["pointer"]),
-        LogicSkillData_getNumBulletsInOneAttack: _nf(
-            "LogicSkillData_getNumBulletsInOneAttack",
-            "int32",
-            ["pointer"]
-        ),
-        LogicSkillData_getMsBetweenAttacks: _nf("LogicSkillData_getMsBetweenAttacks", "int32", [
-            "pointer"
-        ]),
-        LogicProjectileClient_getTargetX: _nf("LogicProjectileClient_getTargetX", "int32", [
-            "pointer"
-        ]),
-        LogicProjectileClient_getTargetY: _nf("LogicProjectileClient_getTargetY", "int32", [
-            "pointer"
-        ]),
-        LogicProjectileData_piercesEnvironment: _nf(
-            "LogicProjectileData_piercesEnvironment",
-            "uint32",
-            ["pointer"]
-        ),
-        LogicProjectileData_isHomingMissile: _nf("LogicProjectileData_isHomingMissile", "uint32", [
-            "pointer"
-        ]),
-        LogicProjectileData_isBouncing: _nf("LogicProjectileData_isBouncing", "uint32", [
-            "pointer"
-        ]),
-        LogicProjectileData_getSpeed: _nf("LogicProjectileData_getSpeed", "int32", ["pointer"]),
-        LogicProjectileData_getRadius: _nf("LogicProjectileData_getRadius", "int32", ["pointer"]),
-        LogicProjectileData_getTravelType: _nf("LogicProjectileData_getTravelType", "int32", [
-            "pointer"
-        ]),
-        LogicProjectileData_getIntValueFromColumn: _nf(
-            "LogicProjectileData_getIntValueFromColumn",
-            "int32",
-            ["pointer", "int"]
-        ),
-        LogicProjectileData_getBoolValueFromColumn: _nf(
-            "LogicProjectileData_getBoolValueFromColumn",
-            "uint32",
-            ["pointer", "int"]
-        ),
-        LogicProjectileData_getBoolValueFromColumn2: _nf(
-            "LogicProjectileData_getBoolValueFromColumn2",
-            "uint32",
-            ["pointer", "int"]
-        ),
-        LogicCharacterData_getProjectileStartRadius: _nf(
-            "LogicCharacterData_getProjectileStartRadius",
-            "int32",
-            ["pointer"]
-        ),
-        LogicData_getBooleanValueAt: _nf("LogicData_getBooleanValueAt", "uint32", [
-            "pointer",
-            "int"
-        ]),
-        LogicData_getIntegerValueAt: _nf("LogicData_getIntegerValueAt", "int32", [
-            "pointer",
-            "int"
-        ]),
-        operator_new: _nf("operator_new", "pointer", ["ulong"])
-    };
-    Object.freeze(_n);
-    return _n;
-}
-
-export function getFunctions() {
-    if (!_n) throw new Error("Functions not initialized! Call initFunctions(base) first.");
-    return _n;
-}
-
-export function getImage() {
-    return image;
-}
-
-export function getBase() {
-    if (!base) throw new Error("Functions not initialized! Call initFunctions(base) first.");
-    return base;
-}
+export const initFunctions = (baseIn, imageIn) => functions.init(baseIn, imageIn);
+export const getFunctions = () => functions.table;
+export const getBase = () => functions.base;
+export const getImage = () => functions.image;
