@@ -8,12 +8,7 @@ import { notifyBattleModeChanged, watchTileChanges, maybeRefreshWallCache } from
 
 import { setupLicense } from "./utils/license.js";
 
-import {
-    pushDodgeTarget,
-    resetAutododge,
-    setupAutododge,
-    updateAutododge
-} from "./features/autododge.js";
+import { resetAutododge, setupAutododge, updateAutododge } from "./features/autododge.js";
 
 import { resetAutoaim, setupAutoaim, updateAutoaim } from "./features/autoaim.js";
 
@@ -48,9 +43,6 @@ function tick(bm) {
     } catch (_) {}
     try {
         maybeRefreshWallCache(bm, now);
-    } catch (_) {}
-    try {
-        pushDodgeTarget();
     } catch (_) {}
     try {
         updateAutoaim();

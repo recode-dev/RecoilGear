@@ -1297,16 +1297,19 @@ function _learnFlightRange(data, flown) {
 }
 
 function _flightSeg(entry, flown) {
+    // Remaining REAL flight distance. A bullet does not stop at its aim
+    // point: it flies until its range ends, so the cap is the largest known
+    // flight budget (learned deaths / client lifeTicks), never seg0. seg0 is
+    // only a fallback while nothing better is known.
     const learned = learnedFlightRange(entry.data);
     let cap = learned > 0 ? learned + entry.radius : 0;
-    let seg = entry.seg0;
-    if (!(cap > 0) && entry.lifeTicks > 0 && entry.speed > 0) {
+    if (entry.lifeTicks > 0 && entry.speed > 0) {
         const lifeCap = (entry.lifeTicks * entry.speed) / TICKS_PER_SEC;
-        if (lifeCap > flown) cap = lifeCap;
+        if (lifeCap > cap) cap = lifeCap;
     }
-    if (cap > 0 && (!(seg > 0) || seg > cap)) seg = cap;
-    if (!(seg > 0)) return 0;
-    const remain = seg - flown;
+    if (!(cap > 0) && entry.seg0 > 0) cap = entry.seg0;
+    if (!(cap > 0)) return 0;
+    const remain = cap - flown;
     return remain > 0 ? remain : 0;
 }
 
