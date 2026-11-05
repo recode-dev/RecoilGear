@@ -58,13 +58,20 @@ jobs:
 
       - name: tools
         run: |
-          npm install --global --no-fund --no-audit \
+          mkdir -p "${RUNNER_TEMP}/tools"
+          cd "${RUNNER_TEMP}/tools"
+          npm init -y > /dev/null
+          npm install --no-fund --no-audit --legacy-peer-deps \
             "prettier@${PRETTIER_VERSION}" \
-            "eslint@${ESLINT_VERSION}"
+            "eslint@${ESLINT_VERSION}" \
+            "eslint-plugin-unicorn@^60" \
+            "eslint-plugin-sonarjs@^3" \
+            "eslint-plugin-import-x@^4" \
+            "eslint-plugin-unused-imports@^4"
 
       - name: config
         run: |
-          cat > "${RUNNER_TEMP}/prettier.json" <<'PRETTIER'
+          cat > "${RUNNER_TEMP}/tools/prettier.json" <<'PRETTIER'
           {
               "printWidth": 100,
               "tabWidth": 4,
@@ -77,37 +84,52 @@ jobs:
               "endOfLine": "lf"
           }
           PRETTIER
-          cat > "${RUNNER_TEMP}/eslint.config.mjs" <<'ESLINT'
+          cat > "${RUNNER_TEMP}/tools/eslint.config.mjs" <<'ESLINT'
+          import unicorn from "eslint-plugin-unicorn";
+          import sonarjs from "eslint-plugin-sonarjs";
+          import importX from "eslint-plugin-import-x";
+          import unusedImports from "eslint-plugin-unused-imports";
+
+          const globals = {
+              ptr: "readonly",
+              NULL: "readonly",
+              Memory: "readonly",
+              NativeFunction: "readonly",
+              NativeCallback: "readonly",
+              NativePointer: "readonly",
+              Module: "readonly",
+              Process: "readonly",
+              Interceptor: "readonly",
+              File: "readonly",
+              Script: "readonly",
+              Thread: "readonly",
+              send: "readonly",
+              recv: "readonly",
+              rpc: "readonly",
+              setTimeout: "readonly",
+              clearTimeout: "readonly",
+              setInterval: "readonly",
+              clearInterval: "readonly"
+          };
+
           export default [
               {
                   files: ["**/*.js"],
                   languageOptions: {
                       ecmaVersion: 2022,
                       sourceType: "module",
-                      globals: {
-                          ptr: "readonly",
-                          NULL: "readonly",
-                          Memory: "readonly",
-                          NativeFunction: "readonly",
-                          NativeCallback: "readonly",
-                          NativePointer: "readonly",
-                          Module: "readonly",
-                          Process: "readonly",
-                          Interceptor: "readonly",
-                          File: "readonly",
-                          Script: "readonly",
-                          Thread: "readonly",
-                          send: "readonly",
-                          recv: "readonly",
-                          rpc: "readonly",
-                          setTimeout: "readonly",
-                          clearTimeout: "readonly",
-                          setInterval: "readonly",
-                          clearInterval: "readonly"
-                      }
+                      globals
                   },
                   linterOptions: { reportUnusedDisableDirectives: "error" },
+                  plugins: {
+                      unicorn,
+                      sonarjs,
+                      "import-x": importX,
+                      "unused-imports": unusedImports
+                  },
                   rules: {
+                      ...unicorn.configs.recommended.rules,
+
                       "no-unused-vars": ["error", { args: "none", caughtErrors: "none", varsIgnorePattern: "^_" }],
                       "no-undef": "error",
                       "no-redeclare": "error",
@@ -128,7 +150,47 @@ jobs:
                       "no-implied-eval": "error",
                       "no-new-func": "error",
                       "no-debugger": "error",
-                      "prefer-const": "error"
+                      "prefer-const": "error",
+
+                      "complexity": ["error", 15],
+                      "max-depth": ["error", 4],
+                      "max-params": ["error", 5],
+                      "max-nested-callbacks": ["error", 3],
+                      "no-else-return": "error",
+                      "no-lonely-if": "error",
+                      "no-nested-ternary": "error",
+                      "no-unneeded-ternary": "error",
+                      "prefer-template": "error",
+                      "no-useless-concat": "error",
+                      "radix": "error",
+                      "yoda": "error",
+                      "no-undef-init": "error",
+
+                      "import-x/order": ["error", {
+                          "newlines-between": "always",
+                          "alphabetize": { order: "asc", caseInsensitive: true }
+                      }],
+                      "import-x/no-duplicates": "error",
+
+                      "unused-imports/no-unused-imports": "error",
+
+                      "sonarjs/cognitive-complexity": ["error", 15],
+                      "sonarjs/no-identical-expressions": "error",
+
+                      "unicorn/prevent-abbreviations": "off",
+                      "unicorn/no-null": "off",
+                      "unicorn/prefer-module": "off",
+                      "unicorn/no-array-callback-reference": "off",
+                      "unicorn/filename-case": "off",
+                      "unicorn/prefer-top-level-await": "off",
+                      "unicorn/no-await-expression-member": "off",
+                      "unicorn/prefer-ternary": "off",
+                      "unicorn/numeric-separators-style": "off",
+                      "unicorn/explicit-length-check": "off",
+                      "unicorn/no-array-for-each": "off",
+                      "unicorn/prefer-number-properties": "off",
+                      "unicorn/no-useless-undefined": "off",
+                      "unicorn/prefer-string-replace-all": "off"
                   }
               }
           ];
@@ -145,11 +207,15 @@ jobs:
 
       - name: prettier
         run: |
-          prettier --config "${RUNNER_TEMP}/prettier.json" --write "agent/**/*.js"
+          "${RUNNER_TEMP}/tools/node_modules/.bin/prettier" \
+            --config "${RUNNER_TEMP}/tools/prettier.json" \
+            --write "agent/**/*.js"
 
       - name: eslint fix
         run: |
-          eslint --config "${RUNNER_TEMP}/eslint.config.mjs" --fix agent || true
+          "${RUNNER_TEMP}/tools/node_modules/.bin/eslint" \
+            --config "${RUNNER_TEMP}/tools/eslint.config.mjs" \
+            --fix agent || true
 
       - name: commit and push
         run: |
@@ -195,13 +261,20 @@ jobs:
 
       - name: tools
         run: |
-          npm install --global --no-fund --no-audit \
+          mkdir -p "${RUNNER_TEMP}/tools"
+          cd "${RUNNER_TEMP}/tools"
+          npm init -y > /dev/null
+          npm install --no-fund --no-audit --legacy-peer-deps \
             "prettier@${PRETTIER_VERSION}" \
-            "eslint@${ESLINT_VERSION}"
+            "eslint@${ESLINT_VERSION}" \
+            "eslint-plugin-unicorn@^60" \
+            "eslint-plugin-sonarjs@^3" \
+            "eslint-plugin-import-x@^4" \
+            "eslint-plugin-unused-imports@^4"
 
       - name: config
         run: |
-          cat > "${RUNNER_TEMP}/prettier.json" <<'PRETTIER'
+          cat > "${RUNNER_TEMP}/tools/prettier.json" <<'PRETTIER'
           {
               "printWidth": 100,
               "tabWidth": 4,
@@ -214,37 +287,52 @@ jobs:
               "endOfLine": "lf"
           }
           PRETTIER
-          cat > "${RUNNER_TEMP}/eslint.config.mjs" <<'ESLINT'
+          cat > "${RUNNER_TEMP}/tools/eslint.config.mjs" <<'ESLINT'
+          import unicorn from "eslint-plugin-unicorn";
+          import sonarjs from "eslint-plugin-sonarjs";
+          import importX from "eslint-plugin-import-x";
+          import unusedImports from "eslint-plugin-unused-imports";
+
+          const globals = {
+              ptr: "readonly",
+              NULL: "readonly",
+              Memory: "readonly",
+              NativeFunction: "readonly",
+              NativeCallback: "readonly",
+              NativePointer: "readonly",
+              Module: "readonly",
+              Process: "readonly",
+              Interceptor: "readonly",
+              File: "readonly",
+              Script: "readonly",
+              Thread: "readonly",
+              send: "readonly",
+              recv: "readonly",
+              rpc: "readonly",
+              setTimeout: "readonly",
+              clearTimeout: "readonly",
+              setInterval: "readonly",
+              clearInterval: "readonly"
+          };
+
           export default [
               {
                   files: ["**/*.js"],
                   languageOptions: {
                       ecmaVersion: 2022,
                       sourceType: "module",
-                      globals: {
-                          ptr: "readonly",
-                          NULL: "readonly",
-                          Memory: "readonly",
-                          NativeFunction: "readonly",
-                          NativeCallback: "readonly",
-                          NativePointer: "readonly",
-                          Module: "readonly",
-                          Process: "readonly",
-                          Interceptor: "readonly",
-                          File: "readonly",
-                          Script: "readonly",
-                          Thread: "readonly",
-                          send: "readonly",
-                          recv: "readonly",
-                          rpc: "readonly",
-                          setTimeout: "readonly",
-                          clearTimeout: "readonly",
-                          setInterval: "readonly",
-                          clearInterval: "readonly"
-                      }
+                      globals
                   },
                   linterOptions: { reportUnusedDisableDirectives: "error" },
+                  plugins: {
+                      unicorn,
+                      sonarjs,
+                      "import-x": importX,
+                      "unused-imports": unusedImports
+                  },
                   rules: {
+                      ...unicorn.configs.recommended.rules,
+
                       "no-unused-vars": ["error", { args: "none", caughtErrors: "none", varsIgnorePattern: "^_" }],
                       "no-undef": "error",
                       "no-redeclare": "error",
@@ -265,7 +353,47 @@ jobs:
                       "no-implied-eval": "error",
                       "no-new-func": "error",
                       "no-debugger": "error",
-                      "prefer-const": "error"
+                      "prefer-const": "error",
+
+                      "complexity": ["error", 15],
+                      "max-depth": ["error", 4],
+                      "max-params": ["error", 5],
+                      "max-nested-callbacks": ["error", 3],
+                      "no-else-return": "error",
+                      "no-lonely-if": "error",
+                      "no-nested-ternary": "error",
+                      "no-unneeded-ternary": "error",
+                      "prefer-template": "error",
+                      "no-useless-concat": "error",
+                      "radix": "error",
+                      "yoda": "error",
+                      "no-undef-init": "error",
+
+                      "import-x/order": ["error", {
+                          "newlines-between": "always",
+                          "alphabetize": { order: "asc", caseInsensitive: true }
+                      }],
+                      "import-x/no-duplicates": "error",
+
+                      "unused-imports/no-unused-imports": "error",
+
+                      "sonarjs/cognitive-complexity": ["error", 15],
+                      "sonarjs/no-identical-expressions": "error",
+
+                      "unicorn/prevent-abbreviations": "off",
+                      "unicorn/no-null": "off",
+                      "unicorn/prefer-module": "off",
+                      "unicorn/no-array-callback-reference": "off",
+                      "unicorn/filename-case": "off",
+                      "unicorn/prefer-top-level-await": "off",
+                      "unicorn/no-await-expression-member": "off",
+                      "unicorn/prefer-ternary": "off",
+                      "unicorn/numeric-separators-style": "off",
+                      "unicorn/explicit-length-check": "off",
+                      "unicorn/no-array-for-each": "off",
+                      "unicorn/prefer-number-properties": "off",
+                      "unicorn/no-useless-undefined": "off",
+                      "unicorn/prefer-string-replace-all": "off"
                   }
               }
           ];
@@ -293,11 +421,15 @@ jobs:
 
       - name: lint
         run: |
-          eslint --config "${RUNNER_TEMP}/eslint.config.mjs" --max-warnings 0 agent
+          "${RUNNER_TEMP}/tools/node_modules/.bin/eslint" \
+            --config "${RUNNER_TEMP}/tools/eslint.config.mjs" \
+            --max-warnings 0 agent
 
       - name: format
         run: |
-          prettier --config "${RUNNER_TEMP}/prettier.json" --check "agent/**/*.js"
+          "${RUNNER_TEMP}/tools/node_modules/.bin/prettier" \
+            --config "${RUNNER_TEMP}/tools/prettier.json" \
+            --check "agent/**/*.js"
 
       - name: manifest
         run: |
@@ -327,7 +459,7 @@ jobs:
             echo "| --- | --- |"
             echo "| commit | \`$(git rev-parse --short HEAD)\` |"
             echo "| node | \`$(node --version)\` |"
-            echo "| prettier | \`$(prettier --version)\` |"
-            echo "| eslint | \`$(eslint --version)\` |"
+            echo "| prettier | \`$("${RUNNER_TEMP}/tools/node_modules/.bin/prettier" --version)\` |"
+            echo "| eslint | \`$("${RUNNER_TEMP}/tools/node_modules/.bin/eslint" --version)\` |"
             echo "| files | $(find agent -type f -name '*.js' | wc -l) |"
           } >> "$summary"
