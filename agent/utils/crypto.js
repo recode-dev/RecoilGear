@@ -9,66 +9,11 @@ const _k = [
     0x748f82ee, 0x78a5636f, 0x84c87814, 0x8cc70208, 0x90befffa, 0xa4506ceb, 0xbef9a3f7, 0xc67178f2
 ];
 
-const _hex = "0123456789abcdef";
-
-const SIGNER = "recode-dev";
-const SIGN_KEY = "recode-dev";
-
-let _seq = 0;
-let _last = null;
-
 function _rotr(x, n) {
     return ((x >>> n) | (x << (32 - n))) >>> 0;
 }
 
-function _utf8(str) {
-    const out = new Uint8Array(str.length * 4);
-    let n = 0;
-    for (let i = 0; i < str.length; i++) {
-        let c = str.charCodeAt(i);
-        if (c >= 0xd800 && c <= 0xdbff && i + 1 < str.length) {
-            const d = str.charCodeAt(i + 1);
-            if (d >= 0xdc00 && d <= 0xdfff) {
-                c = 0x10000 + ((c - 0xd800) << 10) + (d - 0xdc00);
-                i++;
-            }
-        }
-        if (c < 0x80) {
-            out[n++] = c;
-        } else if (c < 0x800) {
-            out[n++] = 0xc0 | (c >> 6);
-            out[n++] = 0x80 | (c & 63);
-        } else if (c < 0x10000) {
-            out[n++] = 0xe0 | (c >> 12);
-            out[n++] = 0x80 | ((c >> 6) & 63);
-            out[n++] = 0x80 | (c & 63);
-        } else {
-            out[n++] = 0xf0 | (c >> 18);
-            out[n++] = 0x80 | ((c >> 12) & 63);
-            out[n++] = 0x80 | ((c >> 6) & 63);
-            out[n++] = 0x80 | (c & 63);
-        }
-    }
-    return out.subarray(0, n);
-}
-
-function _sha256(data) {
-    const len = data.length;
-    const total = ((len + 9 + 63) >> 6) << 6;
-    const buf = new Uint8Array(total);
-    buf.set(data);
-    buf[len] = 0x80;
-    const bits = len * 8;
-    const hi = Math.floor(bits / 4294967296);
-    buf[total - 8] = (hi >>> 24) & 0xff;
-    buf[total - 7] = (hi >>> 16) & 0xff;
-    buf[total - 6] = (hi >>> 8) & 0xff;
-    buf[total - 5] = hi & 0xff;
-    buf[total - 4] = (bits >>> 24) & 0xff;
-    buf[total - 3] = (bits >>> 16) & 0xff;
-    buf[total - 2] = (bits >>> 8) & 0xff;
-    buf[total - 1] = bits & 0xff;
-
+function _compress(buf) {
     let h0 = 0x6a09e667;
     let h1 = 0xbb67ae85;
     let h2 = 0x3c6ef372;
@@ -79,7 +24,7 @@ function _sha256(data) {
     let h7 = 0x5be0cd19;
 
     const w = new Int32Array(64);
-    for (let off = 0; off < total; off += 64) {
+    for (let off = 0; off < buf.length; off += 64) {
         for (let i = 0; i < 16; i++) {
             const j = off + (i << 2);
             w[i] = (buf[j] << 24) | (buf[j + 1] << 16) | (buf[j + 2] << 8) | buf[j + 3];
@@ -161,54 +106,49 @@ function _sha256(data) {
     return out;
 }
 
-function _hmac(keyBytes, msgBytes) {
-    let key = keyBytes;
-    if (key.length > 64) key = _sha256(key);
-    const ipad = new Uint8Array(64 + msgBytes.length);
-    const opad = new Uint8Array(96);
-    ipad.set(key);
-    opad.set(key);
-    for (let i = 0; i < 64; i++) {
-        ipad[i] ^= 0x36;
-        opad[i] ^= 0x5c;
-    }
-    ipad.set(msgBytes, 64);
-    opad.set(_sha256(ipad), 64);
-    return _sha256(opad);
+export function sha256(bytes) {
+    const len = bytes.length;
+    const total = ((len + 9 + 63) >> 6) << 6;
+    const buf = new Uint8Array(total);
+    buf.set(bytes);
+    buf[len] = 0x80;
+    const bits = len * 8;
+    const hi = Math.floor(bits / 4294967296);
+    buf[total - 8] = (hi >>> 24) & 0xff;
+    buf[total - 7] = (hi >>> 16) & 0xff;
+    buf[total - 6] = (hi >>> 8) & 0xff;
+    buf[total - 5] = hi & 0xff;
+    buf[total - 4] = (bits >>> 24) & 0xff;
+    buf[total - 3] = (bits >>> 16) & 0xff;
+    buf[total - 2] = (bits >>> 8) & 0xff;
+    buf[total - 1] = bits & 0xff;
+    return _compress(buf);
 }
 
-function _toHex(bytes) {
-    let s = "";
-    for (let i = 0; i < bytes.length; i++) {
-        s += _hex[bytes[i] >> 4] + _hex[bytes[i] & 15];
-    }
-    return s;
-}
+export function inputToken(key16, innerMask, outerMask, data16, mapped) {
+    const a = new Uint8Array(128);
+    for (let i = 0; i < 16; i++) a[i] = key16[i] ^ innerMask[i];
+    a.fill(0x36, 16, 64);
+    for (let i = 0; i < 12; i++) a[64 + i] = data16[4 + i];
+    for (let i = 0; i < 4; i++) a[76 + i] = data16[i];
+    a[80] = mapped & 0xff;
+    a[81] = (mapped >>> 8) & 0xff;
+    a[82] = (mapped >>> 16) & 0xff;
+    a[83] = (mapped >>> 24) & 0xff;
+    a[87] = 0x80;
+    a[126] = 0x02;
+    a[127] = 0xa0;
+    const inner = _compress(a);
 
-export function hmacSha256Hex(key, msg) {
-    return _toHex(_hmac(_utf8(key), _utf8(msg)));
-}
+    const b = new Uint8Array(128);
+    for (let i = 0; i < 16; i++) b[i] = key16[i] ^ outerMask[i];
+    b.fill(0x5c, 16, 64);
+    b.set(inner, 64);
+    b[99] = 0x80;
+    b[126] = 0x03;
+    b[127] = 0x00;
+    const digest = _compress(b);
 
-export function signAgentInput(cmdType, x, y) {
-    _seq++;
-    const t = cmdType | 0;
-    const ix = x | 0;
-    const iy = y | 0;
-    const msg = SIGNER + "|input|" + t + "|" + ix + "|" + iy + "|" + _seq;
-    const sig = hmacSha256Hex(SIGN_KEY, msg);
-    _last = { seq: _seq, type: t, x: ix, y: iy, msg: msg, sig: sig, at: Date.now() };
-    return sig;
-}
-
-export function lastAgentInputSignature() {
-    if (!_last) return null;
-    return {
-        seq: _last.seq,
-        type: _last.type,
-        x: _last.x,
-        y: _last.y,
-        msg: _last.msg,
-        sig: _last.sig,
-        at: _last.at
-    };
+    const value = (digest[0] | ((digest[1] & 0x7f) << 8)) >>> 0;
+    return value < 2 ? 1 : value;
 }
