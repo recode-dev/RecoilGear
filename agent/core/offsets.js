@@ -87,6 +87,7 @@ export const offsets = Object.freeze({
     ClientInput_hashInnerMask: 0xe1bbd0,
     ClientInput_hashOuterMask: 0xe1bbf0,
     SkillCommandTypeTable: 0xe1bf7c,
+    ClientInput_typePriorityTable: 0xe1d9a8,
 
     LogicProjectileData_vtable: 0xff3b18,
     LogicProjectileClient_vtable: 0xff57b0,

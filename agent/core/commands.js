@@ -6,6 +6,8 @@ const CMD_BUF_SIZE = 72;
 const MAX_TABLE_TYPE = 0x16;
 const TABLE_ENTRIES = 0x17;
 const FALLBACK_TYPE_CONST = 0xdeadbeef;
+const PRIORITY_TABLE_ENTRIES = 0x15;
+const PRIORITY_REJECT = -1;
 const MASK_SIZE = 16;
 const DATA16_OFFSET = 4;
 const SANITY_MIN_NONZERO = 16;
@@ -17,6 +19,7 @@ let _typeTable = null;
 let _innerMask = null;
 let _outerMask = null;
 let _skillTypeTable = null;
+let _priorityTable = null;
 let _lastToken = 0;
 
 function _bytesAt(address, size) {
@@ -68,6 +71,12 @@ function _loadSigning() {
             const table = _readU32Table(base.add(offsets.SkillCommandTypeTable), TABLE_ENTRIES);
             if (_tableSane(table)) _skillTypeTable = table;
         } catch (_) {}
+        try {
+            _priorityTable = _readU32Table(
+                base.add(offsets.ClientInput_typePriorityTable),
+                PRIORITY_TABLE_ENTRIES
+            );
+        } catch (_) {}
         return true;
     } catch (_) {
         _typeTable = null;
@@ -87,6 +96,13 @@ export function skillCommandType(index) {
     const i = index | 0;
     if (i < 0 || i >= _skillTypeTable.length) return 0;
     return _skillTypeTable[i];
+}
+
+export function clientInputTypePriority(type) {
+    const t = type | 0;
+    if (t < 0 || t >= PRIORITY_TABLE_ENTRIES) return PRIORITY_REJECT;
+    if (!_priorityTable) return 0;
+    return _priorityTable[t] | 0;
 }
 
 export function signClientInput(input, battle) {
