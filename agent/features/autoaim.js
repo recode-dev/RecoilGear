@@ -14,8 +14,6 @@ import {
 } from "../core/scan.js";
 import { losCheckWide, projectileBit } from "../utils/walls.js";
 
-const maxi = 0x7fffffff;
-const guard = 0xb504;
 const speedRefreshMs = 500;
 const speedFailRetryMs = 250;
 const histCap = 16;
@@ -33,27 +31,13 @@ const tickS = 1 / ticksPerSec;
 const steerLeadFactor = 0.75;
 const lineupBonus = 220;
 
-const sqrtI = (v) => {
-    if (v <= 0) return 0;
-    if (v >= maxi) return 46340;
-    return Math.floor(Math.sqrt(v));
-};
+const length = (x, y) => Math.floor(Math.sqrt(x * x + y * y));
 
-const length = (x, y) => {
-    if (x > guard || x < -guard || y > guard || y < -guard) return 46340;
-    const s = x * x + y * y;
-    return s < 0 ? 46340 : sqrtI(s);
-};
-
-const lengthSquared = (x, y) => {
-    if (x > guard || x < -guard || y > guard || y < -guard) return maxi;
-    const s = x * x + y * y;
-    return s < 0 ? maxi : s;
-};
+const lengthSquared = (x, y) => x * x + y * y;
 
 const distance = (x1, y1, x2, y2) => length(x2 - x1, y2 - y1);
 
-class Autoaim {
+class AutoAim {
     #target = null;
     #gameTarget = null;
     #track = new Map();
@@ -661,8 +645,8 @@ class Autoaim {
     }
 }
 
-const autoaim = new Autoaim();
+const autoAim = new AutoAim();
 
-export const setupAutoaim = () => autoaim.setup();
-export const updateAutoaim = () => autoaim.update();
-export const resetAutoaim = () => autoaim.reset();
+export const setupAutoAim = () => autoAim.setup();
+export const updateAutoAim = () => autoAim.update();
+export const resetAutoAim = () => autoAim.reset();

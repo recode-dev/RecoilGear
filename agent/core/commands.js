@@ -5,9 +5,7 @@ import { inputToken } from "../utils/crypto.js";
 const cmdBufSize = 72;
 const maxTableType = 0x16;
 const tableEntries = 0x17;
-const fallbackTypeConst = 0xdeadbeef;
 const priorityTableEntries = 0x15;
-const priorityReject = -1;
 const maskSize = 16;
 const fallbackConstSize = 8;
 const data16Offset = 4;
@@ -21,7 +19,7 @@ class CommandSigner {
     #outerMask = null;
     #skillTypeTable = null;
     #priorityTable = null;
-    #fallbackType = fallbackTypeConst;
+    #fallbackType = 0xdeadbeef;
     #lastToken = 0;
 
     #bytesAt(address, size) {
@@ -121,7 +119,7 @@ class CommandSigner {
 
     clientInputTypePriority(type) {
         const t = type | 0;
-        if (t < 0 || t >= priorityTableEntries) return priorityReject;
+        if (t < 0 || t >= priorityTableEntries) return -1;
         if (!this.#priorityTable) return 0;
         return this.#priorityTable[t] | 0;
     }

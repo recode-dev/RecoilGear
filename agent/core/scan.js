@@ -3,7 +3,6 @@ import { offsets } from "./offsets.js";
 import { readScString } from "./scstring.js";
 import { tileSizeUnits } from "../utils/walls.js";
 
-const guard = 0xb504;
 export const tileUnits = 100;
 export const ticksPerSec = 20;
 const tickMs = 1000 / ticksPerSec;
@@ -16,12 +15,7 @@ const dataTtlMs = 3000;
 const angleTtlMs = 120;
 const ringCap = 24;
 
-const length = (x, y) => {
-    if (x > guard || x < -guard || y > guard || y < -guard) return 46340;
-    const s = x * x + y * y;
-    if (s < 0) return 46340;
-    return Math.floor(Math.sqrt(s));
-};
+const length = (x, y) => Math.floor(Math.sqrt(x * x + y * y));
 
 class Scanner {
     #brawlerNameCache = new Map();

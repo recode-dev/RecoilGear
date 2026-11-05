@@ -3,8 +3,8 @@ import { offsets } from "./core/offsets.js";
 import { initScanner, resetScannerCache, updateScanner } from "./core/scan.js";
 import { notifyBattleModeChanged, watchTileChanges, maybeRefreshWallCache } from "./utils/walls.js";
 import { setupLicense } from "./utils/license.js";
-import { resetAutododge, setupAutododge, updateAutododge } from "./features/autododge.js";
-import { resetAutoaim, setupAutoaim, updateAutoaim } from "./features/autoaim.js";
+import { resetAutoDodge, setupAutoDodge, updateAutoDodge } from "./features/autododge.js";
+import { resetAutoAim, setupAutoAim, updateAutoAim } from "./features/autoaim.js";
 
 const retryIntervalMs = 500;
 const retryMaxAttempts = 40;
@@ -31,8 +31,8 @@ class RecoilGearAgent {
         if (!this.#lastBattle || !this.#lastBattle.equals(bm)) {
             this.#lastBattle = bm;
             resetScannerCache();
-            resetAutododge();
-            resetAutoaim();
+            resetAutoDodge();
+            resetAutoAim();
             notifyBattleModeChanged(bm);
         }
         const now = Date.now();
@@ -43,10 +43,10 @@ class RecoilGearAgent {
             maybeRefreshWallCache(bm, now);
         } catch (_) {}
         try {
-            updateAutoaim();
+            updateAutoAim();
         } catch (_) {}
         try {
-            updateAutododge();
+            updateAutoDodge();
         } catch (_) {}
     }
 
@@ -57,8 +57,8 @@ class RecoilGearAgent {
         } catch (_) {}
         initScanner(mod.base);
         watchTileChanges(mod.base);
-        setupAutododge();
-        setupAutoaim();
+        setupAutoDodge();
+        setupAutoAim();
         const self = this;
         try {
             Interceptor.attach(mod.base.add(offsets.LogicBattleModeClient_update), {

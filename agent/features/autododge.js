@@ -8,15 +8,7 @@ import {
     onDataReload,
     scanData
 } from "../core/scan.js";
-import {
-    firstWallHit,
-    isBlockedWide,
-    movementBit,
-    pathBlocked,
-    projectileBit,
-    tileSizeUnits,
-    wallsVersion
-} from "../utils/walls.js";
+import { firstWallHit, isBlockedWide, movementBit } from "../utils/walls.js";
 
 const moveInputType = 2;
 const deg2rad = Math.PI / 180;
@@ -590,36 +582,8 @@ class AutoDodge {
     #radiusMemoValue = 0;
     #last = { active: false };
     #stopSent = false;
-    #transport = null;
-    #wallsApi = {
-        firstWallHit,
-        isBlockedWide,
-        pathBlocked,
-        tileSizeUnits,
-        wallsVersion,
-        movementBit,
-        projectileBit
-    };
+    #wallsApi = { firstWallHit, isBlockedWide, movementBit };
     #core = new DodgeCore();
-
-    setTransport(t) {
-        this.#transport = t;
-    }
-
-    setWalls(api) {
-        if (api) this.#wallsApi = api;
-    }
-
-    probe() {
-        return {
-            active: !!this.#last.active,
-            targetX: this.#last.targetX,
-            targetY: this.#last.targetY,
-            headingDeg: this.#last.headingDeg,
-            started: !!this.#last.started,
-            stopped: !!this.#last.stopped
-        };
-    }
 
     #characterCollisionRadius(data) {
         if (!data || data.isNull()) return 0;
@@ -654,11 +618,6 @@ class AutoDodge {
     }
 
     #issueMove(x, y) {
-        if (this.#transport) {
-            this.#transport.predict(x, y);
-            this.#transport.input(x, y);
-            return true;
-        }
         try {
             const logic = scanData.battleModeClient;
             if (!logic || logic.isNull()) return false;
@@ -675,10 +634,6 @@ class AutoDodge {
     }
 
     #issueStop() {
-        if (this.#transport) {
-            this.#transport.stop(scanData.myX, scanData.myY);
-            return true;
-        }
         try {
             const logic = scanData.battleModeClient;
             if (!logic || logic.isNull()) return false;
@@ -705,8 +660,7 @@ class AutoDodge {
             speed: scanData.mySpeed | 0,
             radius: this.#hitbox | 0,
             projectiles: scanData.projectiles,
-            walls: this.#wallsApi,
-            stamp: scanData.lastUpdate
+            walls: this.#wallsApi
         });
         this.#last = d;
         if (d.active) {
@@ -744,9 +698,6 @@ class AutoDodge {
 
 const autoDodge = new AutoDodge();
 
-export const updateAutododge = () => autoDodge.update();
-export const resetAutododge = () => autoDodge.reset();
-export const setupAutododge = () => autoDodge.setup();
-export const __setDodgeTransport = (t) => autoDodge.setTransport(t);
-export const __setDodgeWalls = (api) => autoDodge.setWalls(api);
-export const __dodgeProbe = () => autoDodge.probe();
+export const updateAutoDodge = () => autoDodge.update();
+export const resetAutoDodge = () => autoDodge.reset();
+export const setupAutoDodge = () => autoDodge.setup();
