@@ -1,7 +1,8 @@
+import { tileSizeUnits } from "../utils/walls.js";
+
 import { getFunctions, isValidPtr, ptrFromU32 } from "./functions.js";
 import { offsets } from "./offsets.js";
 import { readScString } from "./scstring.js";
-import { tileSizeUnits } from "../utils/walls.js";
 
 export const tileUnits = 100;
 export const ticksPerSec = 20;
@@ -15,7 +16,7 @@ const dataTtlMs = 3000;
 const angleTtlMs = 120;
 const ringCap = 24;
 
-const length = (x, y) => Math.floor(Math.sqrt(x * x + y * y));
+const length = (x, y) => Math.floor(Math.hypot(x, y));
 
 class Scanner {
     #brawlerNameCache = new Map();
@@ -50,9 +51,10 @@ class Scanner {
     #inputAt = 0;
     #inputX = 0;
     #inputY = 0;
-    #ringKeys = new Array(ringCap).fill(0);
-    #ringVals = new Array(ringCap).fill(null);
+    #ringKeys = Array.from({ length: ringCap }).fill(0);
+    #ringVals = Array.from({ length: ringCap }).fill(null);
     #ringHead = 0;
+    #metaBudget = 0;
     #outArr = [];
     #moduleBase = null;
     state = {
@@ -74,7 +76,7 @@ class Scanner {
     #ptrKey(value) {
         try {
             return value.toString();
-        } catch (_) {
+        } catch {
             return null;
         }
     }
@@ -83,15 +85,15 @@ class Scanner {
         if (!isValidPtr(obj)) return ptr(0);
         try {
             return obj.add(offsets.LogicGameObjectClient_data).readPointer();
-        } catch (_) {
+        } catch {
             return ptr(0);
         }
     }
 
     #fieldS32(obj, off) {
         try {
-            return obj.add(off).readS32() | 0;
-        } catch (_) {
+            return Math.trunc(obj.add(off).readS32());
+        } catch {
             return 0;
         }
     }
@@ -138,6 +140,34 @@ class Scanner {
         return null;
     }
 
+    #learnMoveAngle(obj) {
+        try {
+            if (!isValidPtr(obj)) return;
+            const key = this.#ringLookup(obj);
+            if (key !== null) return;
+            const deg = Math.trunc(obj.add(offsets.LogicCharacterClient_moveAngle).readS32());
+            if (deg < -720 || deg > 720) return;
+            const slotKey = this.#ptrKey(obj);
+            if (!slotKey) return;
+            const raw = obj.toInt32();
+            const slot = this.#ringHead;
+            this.#ringHead = (this.#ringHead + 1) % ringCap;
+            this.#ringKeys[slot] = raw;
+            this.#ringVals[slot] = slotKey;
+            if (this.#angleCache.size > cacheMax) this.#angleCache.clear();
+            this.#angleCache.set(slotKey, {
+                angle: (deg * Math.PI) / 180,
+                ts: Date.now()
+            });
+        } catch {}
+    }
+
+    #learnInput(ci) {
+        this.#inputX = Math.trunc(ci.add(offsets.ClientInput_x).readS32());
+        this.#inputY = Math.trunc(ci.add(offsets.ClientInput_y).readS32());
+        this.#inputAt = Date.now();
+    }
+
     #moveAngleOf(obj) {
         if (!isValidPtr(obj)) return 0;
         const key = this.#ptrKey(obj);
@@ -166,7 +196,10 @@ class Scanner {
     #installCoreHooks(base) {
         if (this.#coreHooksInstalled || !base) return;
         this.#coreHooksInstalled = true;
-        const self = this;
+        const ringMemo = (obj, val) => this.#ringMemo(obj, val);
+        const ringLookup = (obj) => this.#ringLookup(obj);
+        const learnAngle = (obj) => this.#learnMoveAngle(obj);
+        const learnInput = (ci) => this.#learnInput(ci);
         try {
             Interceptor.attach(base.add(offsets.LogicGameObjectClient_getData), {
                 onEnter(args) {
@@ -175,63 +208,42 @@ class Scanner {
                 onLeave(retval) {
                     try {
                         if (retval.isNull()) return;
-                        if (self.#ringLookup(this.obj) !== null) return;
-                        self.#ringMemo(this.obj, retval);
-                    } catch (_) {}
+                        if (ringLookup(this.obj) !== null) return;
+                        ringMemo(this.obj, retval);
+                    } catch {}
                 }
             });
-        } catch (_) {}
+        } catch {}
         try {
             Interceptor.attach(base.add(offsets.LogicCharacterClient_getMoveAngle), {
                 onEnter(args) {
                     this.obj = args[0];
                 },
                 onLeave() {
-                    try {
-                        if (!isValidPtr(this.obj)) return;
-                        const key = self.#ringLookup(this.obj);
-                        if (key !== null) return;
-                        const deg =
-                            this.obj.add(offsets.LogicCharacterClient_moveAngle).readS32() | 0;
-                        if (deg < -720 || deg > 720) return;
-                        const slotKey = self.#ptrKey(this.obj);
-                        if (!slotKey) return;
-                        const raw = this.obj.toInt32();
-                        const slot = self.#ringHead;
-                        self.#ringHead = (self.#ringHead + 1) % ringCap;
-                        self.#ringKeys[slot] = raw;
-                        self.#ringVals[slot] = slotKey;
-                        if (self.#angleCache.size > cacheMax) self.#angleCache.clear();
-                        self.#angleCache.set(slotKey, {
-                            angle: (deg * Math.PI) / 180,
-                            ts: Date.now()
-                        });
-                    } catch (_) {}
+                    learnAngle(this.obj);
                 }
             });
-        } catch (_) {}
+        } catch {}
         try {
             Interceptor.attach(base.add(offsets.LogicBattleModeClient_setClientPredictionMoveTo), {
                 onEnter: (args) => {
-                    self.#moveAppliedAt = Date.now();
-                    self.#moveAppliedX = args[1].toInt32();
-                    self.#moveAppliedY = args[2].toInt32();
+                    this.#moveAppliedAt = Date.now();
+                    this.#moveAppliedX = args[1].toInt32();
+                    this.#moveAppliedY = args[2].toInt32();
                 }
             });
-        } catch (_) {}
+        } catch {}
         try {
             Interceptor.attach(base.add(offsets.ClientInputManager_addInput), {
-                onEnter(args) {
+                onEnter: (args) => {
                     try {
                         const ci = args[1];
                         if (!isValidPtr(ci)) return;
-                        self.#inputX = ci.add(offsets.ClientInput_x).readS32() | 0;
-                        self.#inputY = ci.add(offsets.ClientInput_y).readS32() | 0;
-                        self.#inputAt = Date.now();
-                    } catch (_) {}
+                        learnInput(ci);
+                    } catch {}
                 }
             });
-        } catch (_) {}
+        } catch {}
     }
 
     #readDataName(data) {
@@ -241,8 +253,8 @@ class Scanner {
         try {
             const name = readScString(fns.LogicData_getName(data), 128);
             if (!name) return null;
-            return (name.indexOf("hero_icon_") === 0 ? name.substring(10) : name).toUpperCase();
-        } catch (_) {}
+            return (name.indexOf("hero_icon_") === 0 ? name.slice(10) : name).toUpperCase();
+        } catch {}
         return null;
     }
 
@@ -254,21 +266,21 @@ class Scanner {
         const fns = getFunctions();
         if (fns.LogicCharacterClient_getMoveAngle) {
             try {
-                const deg = fns.LogicCharacterClient_getMoveAngle(obj) | 0;
+                const deg = Math.trunc(fns.LogicCharacterClient_getMoveAngle(obj));
                 if (this.#validAngleDeg(deg)) return (deg * Math.PI) / 180;
-            } catch (_) {}
+            } catch {}
         }
         try {
-            const deg = obj.add(offsets.LogicCharacterClient_moveAngle).readS32() | 0;
+            const deg = Math.trunc(obj.add(offsets.LogicCharacterClient_moveAngle).readS32());
             if (this.#validAngleDeg(deg)) return (deg * Math.PI) / 180;
-        } catch (_) {}
+        } catch {}
         return 0;
     }
 
     #readOwnerIndex(obj) {
         try {
             return obj.add(offsets.LogicGameObjectClient_ownerIndex).readS32();
-        } catch (_) {
+        } catch {
             return -1;
         }
     }
@@ -284,15 +296,15 @@ class Scanner {
             try {
                 const mgr = bm.add(offsets.BattleMode_objectManager).readPointer();
                 if (isValidPtr(mgr)) {
-                    const t = fns.LogicGameObjectClient_getTeam(obj, mgr) | 0;
+                    const t = Math.trunc(fns.LogicGameObjectClient_getTeam(obj, mgr));
                     if (t !== -1) return t;
                 }
-            } catch (_) {}
+            } catch {}
         }
         try {
-            const t = obj.add(offsets.LogicGameObjectClient_team).readU32() | 0;
+            const t = Math.trunc(obj.add(offsets.LogicGameObjectClient_team).readU32());
             return t === -1 ? -1 : t;
-        } catch (_) {
+        } catch {
             return -1;
         }
     }
@@ -302,15 +314,34 @@ class Scanner {
         const fns = getFunctions();
         if (fns.LogicGameObjectManagerClient_getOwnPlayerTeam) {
             try {
-                const t = fns.LogicGameObjectManagerClient_getOwnPlayerTeam(mgr) | 0;
+                const t = Math.trunc(fns.LogicGameObjectManagerClient_getOwnPlayerTeam(mgr));
                 if (t >= 0) return t;
-            } catch (_) {}
+            } catch {}
         }
         try {
-            const t = mgr.add(offsets.LogicGameObjectManagerClient_ownTeam).readS32() | 0;
+            const t = Math.trunc(mgr.add(offsets.LogicGameObjectManagerClient_ownTeam).readS32());
             return t >= 0 ? t : -1;
-        } catch (_) {
+        } catch {
             return -1;
+        }
+    }
+
+    #enemyByTeams(obj, bm) {
+        try {
+            const mode = isValidPtr(bm) ? bm : this.state.battleModeClient;
+            if (!isValidPtr(mode)) return null;
+            const mgr = mode.add(offsets.BattleMode_objectManager).readPointer();
+            if (!isValidPtr(mgr)) return null;
+            const myTeam = this.#ownTeamOf(mgr);
+            const fns = getFunctions();
+            if (myTeam < 0 || !fns.LogicGameObjectClient_getTeam) return null;
+            try {
+                return Math.trunc(fns.LogicGameObjectClient_getTeam(obj, mgr)) !== myTeam;
+            } catch {
+                return null;
+            }
+        } catch {
+            return null;
         }
     }
 
@@ -320,22 +351,10 @@ class Scanner {
         if (fns.LogicGamePlayUtil_isEnemy) {
             try {
                 return fns.LogicGamePlayUtil_isEnemy(obj) !== 0;
-            } catch (_) {}
+            } catch {}
         }
-        try {
-            const mode = isValidPtr(bm) ? bm : this.state.battleModeClient;
-            if (isValidPtr(mode)) {
-                const mgr = mode.add(offsets.BattleMode_objectManager).readPointer();
-                if (isValidPtr(mgr)) {
-                    const myTeam = this.#ownTeamOf(mgr);
-                    if (myTeam >= 0 && fns.LogicGameObjectClient_getTeam) {
-                        try {
-                            return (fns.LogicGameObjectClient_getTeam(obj, mgr) | 0) !== myTeam;
-                        } catch (_) {}
-                    }
-                }
-            }
-        } catch (_) {}
+        const byTeams = this.#enemyByTeams(obj, bm);
+        if (byTeams !== null) return byTeams;
         return unknownAsEnemy === true;
     }
 
@@ -359,14 +378,12 @@ class Scanner {
         return Math.round((ticks * speed) / ticksPerSec);
     }
 
-    #learnTravel(key, a1, a2, ticks) {
-        if (!key || !(ticks >= 0)) return;
-        if (ticks >= beamTicks) {
-            if (!this.#learnedTravel.has(key))
-                this.#learnedTravel.set(key, { ticks: beamTicks, range: 0, speed: 0, beam: true });
-            return;
-        }
-        if (ticks <= 0) return;
+    #learnBeamTravel(key) {
+        if (this.#learnedTravel.has(key)) return;
+        this.#learnedTravel.set(key, { ticks: beamTicks, range: 0, speed: 0, beam: true });
+    }
+
+    #learnPairTravel(key, a1, a2, ticks) {
         const pairs = a1 <= a2 ? [a1, a2, a2, a1] : [a2, a1, a1, a2];
         for (let i = 0; i < 4; i += 2) {
             const range = pairs[i];
@@ -378,6 +395,13 @@ class Scanner {
             this.#learnedTravel.set(key, { ticks, range, speed, beam: false });
             return;
         }
+    }
+
+    #learnTravel(key, a1, a2, ticks) {
+        if (!key || !(ticks >= 0)) return;
+        if (ticks >= beamTicks) return this.#learnBeamTravel(key);
+        if (ticks <= 0) return;
+        this.#learnPairTravel(key, a1, a2, ticks);
     }
 
     #learnedFor(projectile, data) {
@@ -403,12 +427,12 @@ class Scanner {
         if (!fn) return 0;
         this.#insideTravelCall = true;
         try {
-            const ticks = fn(data, rangeUnits, speed) | 0;
+            const ticks = Math.trunc(fn(data, rangeUnits, speed));
             if (ticks <= 0 || ticks > beamTicks) return 0;
             if (ticks >= beamTicks) return ticks;
             if (Math.abs(this.travelTicks(rangeUnits, speed, false) - ticks) > 1) return 0;
             return ticks;
-        } catch (_) {
+        } catch {
             return 0;
         } finally {
             this.#insideTravelCall = false;
@@ -422,7 +446,7 @@ class Scanner {
         try {
             const skill = fns.LogicCharacterClient_getWeaponSkill(character);
             if (isValidPtr(skill)) return skill;
-        } catch (_) {}
+        } catch {}
         return null;
     }
 
@@ -433,8 +457,7 @@ class Scanner {
         const tile = tileSizeUnits();
         const candidates = [tile, Math.floor(tile / 3), tileUnits];
         let best = 0;
-        for (let i = 0; i < candidates.length; i++) {
-            const c = candidates[i];
+        for (const c of candidates) {
             if (!(c > 0)) continue;
             const ratio = per / c;
             if (ratio < 0.95 || ratio > 2) continue;
@@ -461,9 +484,9 @@ class Scanner {
         const fns = getFunctions();
         if (!fns.LogicSkillData_getCastingRange) return 0;
         try {
-            const tiles = fns.LogicSkillData_getCastingRange(skill) | 0;
+            const tiles = Math.trunc(fns.LogicSkillData_getCastingRange(skill));
             if (tiles >= 1 && tiles <= 64) return tiles;
-        } catch (_) {}
+        } catch {}
         return 0;
     }
 
@@ -507,10 +530,10 @@ class Scanner {
 
     #readProjectileField(data, off, min, max) {
         try {
-            const v = data.add(off).readS32() | 0;
+            const v = Math.trunc(data.add(off).readS32());
             if (v < min || v > max) return 0;
             return v;
-        } catch (_) {
+        } catch {
             return 0;
         }
     }
@@ -519,7 +542,7 @@ class Scanner {
         try {
             const row = data.add(offsets.LogicProjectileData_reader).readPointer();
             return isValidPtr(row) ? row : null;
-        } catch (_) {
+        } catch {
             return null;
         }
     }
@@ -528,114 +551,114 @@ class Scanner {
         const fns = getFunctions();
         if (fns.LogicProjectileData_getIntValueFromColumn) {
             try {
-                return fns.LogicProjectileData_getIntValueFromColumn(data, col) | 0;
-            } catch (_) {}
+                return Math.trunc(fns.LogicProjectileData_getIntValueFromColumn(data, col));
+            } catch {}
         }
         const row = this.#dataRow(data);
         if (!row) return 0;
         if (fns.LogicData_getIntegerValueAt) {
             try {
-                return fns.LogicData_getIntegerValueAt(row, col) | 0;
-            } catch (_) {}
+                return Math.trunc(fns.LogicData_getIntegerValueAt(row, col));
+            } catch {}
         }
         return 0;
+    }
+
+    #boolViaFn(fn, data, col) {
+        if (!fn) return null;
+        try {
+            return fn(data, col) ? 1 : 0;
+        } catch {
+            return null;
+        }
     }
 
     #columnBool(data, col) {
         const fns = getFunctions();
-        if (fns.LogicProjectileData_getBoolValueFromColumn) {
-            try {
-                return fns.LogicProjectileData_getBoolValueFromColumn(data, col) ? 1 : 0;
-            } catch (_) {}
+        let v = this.#boolViaFn(fns.LogicProjectileData_getBoolValueFromColumn, data, col);
+        if (v === null)
+            v = this.#boolViaFn(fns.LogicProjectileData_getBoolValueFromColumn2, data, col);
+        if (v === null) {
+            const row = this.#dataRow(data);
+            if (row) v = this.#boolViaFn(fns.LogicData_getBooleanValueAt, row, col);
         }
-        if (fns.LogicProjectileData_getBoolValueFromColumn2) {
-            try {
-                return fns.LogicProjectileData_getBoolValueFromColumn2(data, col) ? 1 : 0;
-            } catch (_) {}
-        }
-        const row = this.#dataRow(data);
-        if (row && fns.LogicData_getBooleanValueAt) {
-            try {
-                return fns.LogicData_getBooleanValueAt(row, col) ? 1 : 0;
-            } catch (_) {}
-        }
-        return 0;
+        return v === null ? 0 : v;
     }
 
-    #probeColumn(kind, read, data, value) {
-        if (this.#probeBudget <= 0) return;
-        let st = this.#colCands.get(kind);
-        if (!st) {
-            let budget = 2;
-            st = { cols: null, next: 0, rounds: 1 };
-            while (budget > 0 && this.#probeBudget > 0 && st.next < columnSpan) {
-                this.#probeBudget--;
-                budget--;
-                if (read.call(this, data, st.next) === value) {
-                    if (!st.cols) st.cols = new Set();
-                    st.cols.add(st.next);
-                }
-                st.next++;
-            }
-            if (st.next >= columnSpan && !st.cols) {
-                this.#columnCache.set(kind, -1);
-                this.#colCands.set(kind, { cols: null, next: columnSpan, rounds: 99 });
-                return;
-            }
-            this.#colCands.set(kind, st);
-            if (st.cols && st.cols.size === 1 && st.next >= columnSpan)
-                this.#columnCache.set(kind, st.cols.values().next().value);
-            return;
-        }
-        if (!st.cols || st.next >= columnSpan) return;
+    #probeStep(read, data, st, value) {
         let budget = 2;
         while (budget > 0 && this.#probeBudget > 0 && st.next < columnSpan) {
             this.#probeBudget--;
             budget--;
-            if (read.call(this, data, st.next) === value) st.cols.add(st.next);
+            if (read.call(this, data, st.next) === value) {
+                if (!st.cols) st.cols = new Set();
+                st.cols.add(st.next);
+            }
             st.next++;
         }
+    }
+
+    #probeColumn(kind, read, data, value) {
+        if (this.#probeBudget <= 0) return;
+        const st = this.#colCands.get(kind);
+        if (!st) return this.#probeStart(kind, read, data, value);
+        if (!st.cols || st.next >= columnSpan) return;
+        this.#probeStep(read, data, st, value);
         if (st.next >= columnSpan) {
             if (st.cols.size === 1) this.#columnCache.set(kind, st.cols.values().next().value);
             else if (st.cols.size === 0) this.#columnCache.set(kind, -1);
             else if (st.rounds < 10) {
                 st.rounds++;
                 st.next = 0;
-                return;
             } else this.#columnCache.set(kind, -1);
         }
     }
 
-    #readProjectileInt(data, off, kind, min, max, getter) {
-        let value = 0;
-        if (getter) {
-            try {
-                const v = getter(data) | 0;
-                if (v >= min && v <= max) value = v;
-            } catch (_) {}
+    #probeStart(kind, read, data, value) {
+        const st = { cols: null, next: 0, rounds: 1 };
+        this.#probeStep(read, data, st, value);
+        if (st.next >= columnSpan && !st.cols) {
+            this.#columnCache.set(kind, -1);
+            this.#colCands.set(kind, { cols: null, next: columnSpan, rounds: 99 });
+            return;
         }
-        if (!(value > 0)) value = this.#readProjectileField(data, off, min, max);
+        this.#colCands.set(kind, st);
+        if (st.cols && st.cols.size === 1 && st.next >= columnSpan)
+            this.#columnCache.set(kind, st.cols.values().next().value);
+    }
+
+    #scanColumnsFor(data, spec) {
+        for (let col = 0; col < columnSpan; col++) {
+            const v = Math.trunc(this.#columnInt(data, col));
+            if (v >= spec.min && v <= spec.max) {
+                this.#columnCache.set(spec.kind, col);
+                return v;
+            }
+        }
+        this.#columnCache.set(spec.kind, -1);
+        return 0;
+    }
+
+    #readProjectileInt(data, spec) {
+        let value = 0;
+        if (spec.getter) {
+            try {
+                const v = Math.trunc(spec.getter(data));
+                if (v >= spec.min && v <= spec.max) value = v;
+            } catch {}
+        }
+        if (!(value > 0)) value = this.#readProjectileField(data, spec.off, spec.min, spec.max);
         if (value > 0) {
-            if (this.#columnCache.get(kind) === undefined)
-                this.#probeColumn(kind, this.#columnInt, data, value);
+            if (this.#columnCache.get(spec.kind) === undefined)
+                this.#probeColumn(spec.kind, this.#columnInt, data, value);
             return value;
         }
-        const known = this.#columnCache.get(kind);
+        const known = this.#columnCache.get(spec.kind);
         if (known > 0) {
-            const v = this.#columnInt(data, known) | 0;
-            if (v >= min && v <= max) return v;
-            return 0;
+            const v = Math.trunc(this.#columnInt(data, known));
+            return v >= spec.min && v <= spec.max ? v : 0;
         }
-        if (known === undefined) {
-            for (let col = 0; col < columnSpan; col++) {
-                const v = this.#columnInt(data, col) | 0;
-                if (v >= min && v <= max) {
-                    this.#columnCache.set(kind, col);
-                    return v;
-                }
-            }
-            this.#columnCache.set(kind, -1);
-        }
+        if (known === undefined) return this.#scanColumnsFor(data, spec);
         return 0;
     }
 
@@ -643,7 +666,7 @@ class Scanner {
         let field = -1;
         try {
             field = data.add(off).readU8() & 1;
-        } catch (_) {}
+        } catch {}
         if (field >= 0) {
             if (this.#columnCache.get(kind) === undefined)
                 this.#probeColumn(kind, this.#columnBool, data, field);
@@ -655,27 +678,23 @@ class Scanner {
     }
 
     #readProjectileRadius(data) {
-        const fns = getFunctions();
-        return this.#readProjectileInt(
-            data,
-            offsets.LogicProjectileData_radius,
-            "radius",
-            1,
-            2000,
-            fns.LogicProjectileData_getRadius
-        );
+        return this.#readProjectileInt(data, {
+            kind: "radius",
+            off: offsets.LogicProjectileData_radius,
+            min: 1,
+            max: 2000,
+            getter: getFunctions().LogicProjectileData_getRadius
+        });
     }
 
     #readProjectileSpeed(data) {
-        const fns = getFunctions();
-        return this.#readProjectileInt(
-            data,
-            offsets.LogicProjectileData_speed,
-            "speed",
-            1,
-            20000,
-            fns.LogicProjectileData_getSpeed
-        );
+        return this.#readProjectileInt(data, {
+            kind: "speed",
+            off: offsets.LogicProjectileData_speed,
+            min: 1,
+            max: 20000,
+            getter: getFunctions().LogicProjectileData_getSpeed
+        });
     }
 
     #characterSpeed(data) {
@@ -689,10 +708,10 @@ class Scanner {
         const fns = getFunctions();
         try {
             if (fns.LogicCharacterData_getSpeed) {
-                const v = fns.LogicCharacterData_getSpeed(data) | 0;
+                const v = Math.trunc(fns.LogicCharacterData_getSpeed(data));
                 if (v > 0) speed = v;
             }
-        } catch (_) {}
+        } catch {}
         if (!(speed > 0))
             speed = this.#readProjectileField(data, offsets.LogicCharacterData_speed, 1, 6000);
         if (key && speed > 0) this.#charSpeedByData.set(key, speed);
@@ -702,13 +721,15 @@ class Scanner {
     collisionRadius(data) {
         if (!isValidPtr(data)) return 0;
         try {
-            const direct = data.add(offsets.LogicCharacterData_collisionRadius).readS32() | 0;
+            const direct = Math.trunc(
+                data.add(offsets.LogicCharacterData_collisionRadius).readS32()
+            );
             if (direct > 0) return direct;
-        } catch (_) {}
+        } catch {}
         try {
             const getRadius = getFunctions().LogicCharacterData_getCollisionRadius;
-            if (getRadius) return getRadius(data) | 0;
-        } catch (_) {}
+            if (getRadius) return Math.trunc(getRadius(data));
+        } catch {}
         return 0;
     }
 
@@ -718,13 +739,13 @@ class Scanner {
         let piercesChars = 0;
         try {
             passes = data.add(offsets.LogicProjectileData_passesEnvironment).readU8() & 1;
-        } catch (_) {}
+        } catch {}
         try {
             pierces = data.add(offsets.LogicProjectileData_piercesEnvironmentField).readU8() & 1;
-        } catch (_) {}
+        } catch {}
         try {
             piercesChars = data.add(offsets.LogicProjectileData_piercesCharacters).readU8() & 1;
-        } catch (_) {}
+        } catch {}
         return { passes, pierces, piercesChars };
     }
 
@@ -736,10 +757,10 @@ class Scanner {
                     this.#probeColumn(kind, this.#columnInt, data, v);
                 return v;
             }
-        } catch (_) {}
+        } catch {}
         const known = this.#columnCache.get(kind);
         if (known > 0) {
-            const v = this.#columnInt(data, known) | 0;
+            const v = Math.trunc(this.#columnInt(data, known));
             if (v >= min && v <= max) return v;
         }
         return 0;
@@ -760,10 +781,10 @@ class Scanner {
         if (!fn) return 0;
         try {
             if (fn(data)) return 1;
-        } catch (_) {}
+        } catch {}
         try {
             if (fn(projectile)) return 1;
-        } catch (_) {}
+        } catch {}
         return 0;
     }
 
@@ -771,7 +792,7 @@ class Scanner {
         try {
             const v = obj.add(off).readU32();
             if (v <= max) return v;
-        } catch (_) {}
+        } catch {}
         return -1;
     }
 
@@ -783,6 +804,113 @@ class Scanner {
         return 0;
     }
 
+    #steerSpecs(data) {
+        return {
+            ignore: this.#readProjectileInt(data, {
+                kind: "steerIgnore",
+                off: offsets.LogicProjectileData_steerIgnoreTicks,
+                min: 1,
+                max: 400,
+                getter: null
+            }),
+            life: this.#readProjectileInt(data, {
+                kind: "steerLife",
+                off: offsets.LogicProjectileData_steerLifeTime,
+                min: 1,
+                max: 20000,
+                getter: null
+            })
+        };
+    }
+
+    #bounceSpecs(data) {
+        return {
+            add: this.#readProjectileInt(data, {
+                kind: "bounceAdd",
+                off: offsets.LogicProjectileData_distanceAddFromBounce,
+                min: 1,
+                max: 3000,
+                getter: null
+            }),
+            max: this.#readProjectileInt(data, {
+                kind: "bounceMax",
+                off: offsets.LogicProjectileData_maxDistanceAddBounces,
+                min: 1,
+                max: 20000,
+                getter: null
+            }),
+            keep: this.#readBounceKeep(data),
+            rehit: this.#readProjectileBool(
+                data,
+                offsets.LogicProjectileData_canHitAgainAfterBounce,
+                "rehit"
+            )
+        };
+    }
+
+    #resolveTicks(projectile, data, rangeUnits, speed, beam) {
+        let isBeam = !!beam;
+        const learned = this.#learnedFor(projectile, data);
+        let ticks = 0;
+        if (learned && learned.ticks > 0) {
+            ticks = learned.ticks;
+            if (learned.beam) isBeam = true;
+        }
+        if (!(ticks > 0)) ticks = this.#callTravelTicks(data, rangeUnits, speed);
+        if (!(ticks > 0)) ticks = this.travelTicks(rangeUnits, speed, isBeam);
+        if (ticks >= beamTicks) isBeam = true;
+        return { ticks, isBeam };
+    }
+
+    #lifeSpecs(ticks, isBeam, rangeUnits, speed) {
+        if (isBeam || ticks >= beamTicks)
+            return { lifeMs: Infinity, travel: Math.max(rangeUnits, 0) };
+        if (ticks > 0) return { lifeMs: ticks * tickMs, travel: this.travelDistance(ticks, speed) };
+        return { lifeMs: 0, travel: 0 };
+    }
+
+    #typeIdOf(data) {
+        const fns = getFunctions();
+        if (fns.LogicProjectileData_getUniqueProperty) {
+            try {
+                const t = Math.trunc(fns.LogicProjectileData_getUniqueProperty(data));
+                if (t >= 0 && t <= 20) return t;
+            } catch {}
+        }
+        return this.#readClientU32(data, offsets.LogicProjectileData_uniqueProperty, 20);
+    }
+
+    #preExplosionMs(data, preMs) {
+        const fn = getFunctions().LogicProjectileData_getPreExplosionTimeMs;
+        if (!fn || preMs > 0) return preMs;
+        try {
+            const v = Math.trunc(fn(data));
+            if (v > 0 && v <= 60000) return v;
+        } catch {}
+        return preMs;
+    }
+
+    #flagFallback(fn, data, projectile, field) {
+        if (field) return field;
+        return this.#flagFrom(fn, data, projectile);
+    }
+
+    #steerStrengthOf(data) {
+        try {
+            const v = data.add(offsets.LogicProjectileData_steerStrength).readFloat();
+            if (v > 0 && v <= 1000) return v;
+        } catch {}
+        return 0;
+    }
+
+    #beamCopyOf(projectile) {
+        try {
+            return projectile.add(offsets.LogicProjectileClient_isBeamCopy).readU8() & 1;
+        } catch {
+            return 0;
+        }
+    }
+
     #readProjectileMeta(projectile, data, speed, rangeUnits, beam) {
         const fns = getFunctions();
         let preMs = this.#readProjectileField(
@@ -791,9 +919,6 @@ class Scanner {
             1,
             60000
         );
-        let typeId = -1;
-        let steer = 0;
-        let isBeam = !!beam;
         let homing = this.#readProjectileBool(
             data,
             offsets.LogicProjectileData_isHomingMissileField,
@@ -804,118 +929,67 @@ class Scanner {
             offsets.LogicProjectileData_isBouncingField,
             "bouncing"
         );
-        const steerIgnoreTicks = this.#readProjectileInt(
+        preMs = this.#preExplosionMs(data, preMs);
+        homing = this.#flagFallback(
+            fns.LogicProjectileData_isHomingMissile,
             data,
-            offsets.LogicProjectileData_steerIgnoreTicks,
-            "steerIgnore",
-            1,
-            400,
-            null
+            projectile,
+            homing
         );
-        const steerLifeRaw = this.#readProjectileInt(
+        bouncing = this.#flagFallback(
+            fns.LogicProjectileData_isBouncing,
             data,
-            offsets.LogicProjectileData_steerLifeTime,
-            "steerLife",
-            1,
-            20000,
-            null
+            projectile,
+            bouncing
         );
-        const bounceAdd = this.#readProjectileInt(
-            data,
-            offsets.LogicProjectileData_distanceAddFromBounce,
-            "bounceAdd",
-            1,
-            3000,
-            null
-        );
-        const bounceMax = this.#readProjectileInt(
-            data,
-            offsets.LogicProjectileData_maxDistanceAddBounces,
-            "bounceMax",
-            1,
-            20000,
-            null
-        );
-        const bounceKeep = this.#readBounceKeep(data);
-        const rehit = this.#readProjectileBool(
-            data,
-            offsets.LogicProjectileData_canHitAgainAfterBounce,
-            "rehit"
-        );
-        if (fns.LogicProjectileData_getPreExplosionTimeMs && !(preMs > 0)) {
-            try {
-                const v = fns.LogicProjectileData_getPreExplosionTimeMs(data) | 0;
-                if (v > 0 && v <= 60000) preMs = v;
-            } catch (_) {}
-        }
-        if (!homing)
-            homing = this.#flagFrom(fns.LogicProjectileData_isHomingMissile, data, projectile);
-        if (!bouncing)
-            bouncing = this.#flagFrom(fns.LogicProjectileData_isBouncing, data, projectile);
-        const learned = this.#learnedFor(projectile, data);
-        let ticks = 0;
-        if (learned && learned.ticks > 0) {
-            ticks = learned.ticks;
-            if (learned.beam) isBeam = true;
-        }
-        if (!(ticks > 0)) ticks = this.#callTravelTicks(data, rangeUnits, speed);
-        if (!(ticks > 0)) ticks = this.travelTicks(rangeUnits, speed, isBeam);
-        if (ticks >= beamTicks) isBeam = true;
-        let lifeMs = 0;
-        let travel = 0;
-        if (isBeam || ticks >= beamTicks) {
-            lifeMs = Infinity;
-            travel = rangeUnits > 0 ? rangeUnits : 0;
-        } else if (ticks > 0) {
-            lifeMs = ticks * tickMs;
-            travel = this.travelDistance(ticks, speed);
-        }
-        if (fns.LogicProjectileData_getUniqueProperty) {
-            try {
-                const t = fns.LogicProjectileData_getUniqueProperty(data) | 0;
-                if (t >= 0 && t <= 20) typeId = t;
-            } catch (_) {}
-        }
-        if (typeId < 0) {
-            const t = this.#readClientU32(data, offsets.LogicProjectileData_uniqueProperty, 20);
-            if (t >= 0) typeId = t;
-        }
-        try {
-            const v = data.add(offsets.LogicProjectileData_steerStrength).readFloat();
-            if (v > 0 && v <= 1000) steer = v;
-        } catch (_) {}
+        const steerSpecs = this.#steerSpecs(data);
+        const bounceSpecs = this.#bounceSpecs(data);
+        const resolved = this.#resolveTicks(projectile, data, rangeUnits, speed, beam);
+        const life = this.#lifeSpecs(resolved.ticks, resolved.isBeam, rangeUnits, speed);
         const travelType = this.#readClientU32(
             projectile,
             offsets.LogicProjectileClient_travelType,
             16
         );
-        let beamCopy = 0;
-        try {
-            beamCopy = projectile.add(offsets.LogicProjectileClient_isBeamCopy).readU8() & 1;
-        } catch (_) {}
-        if (beamCopy) isBeam = true;
-        const steerIgnoreMs = steerIgnoreTicks > 0 ? steerIgnoreTicks * tickMs : 0;
-        const steerLifeMs =
-            steerLifeRaw > 0 ? (steerLifeRaw > 400 ? steerLifeRaw : steerLifeRaw * tickMs) : 0;
+        const beamCopy = this.#beamCopyOf(projectile);
+        let steerLifeMs = 0;
+        if (steerSpecs.life > 0)
+            steerLifeMs = steerSpecs.life > 400 ? steerSpecs.life : steerSpecs.life * tickMs;
         return {
             preMs,
-            lifeMs,
-            ticks,
-            travel,
-            typeId,
+            lifeMs: life.lifeMs,
+            ticks: resolved.ticks,
+            travel: life.travel,
+            typeId: this.#typeIdOf(data),
             travelType,
-            isBeam,
+            isBeam: resolved.isBeam || !!beamCopy,
             beamCopy: !!beamCopy,
             homing: !!homing,
             bouncing: !!bouncing,
-            steer,
-            steerIgnoreMs,
+            steer: this.#steerStrengthOf(data),
+            steerIgnoreMs: steerSpecs.ignore > 0 ? steerSpecs.ignore * tickMs : 0,
             steerLifeMs,
-            bounceAdd,
-            bounceMax,
-            bounceKeep,
-            rehit: !!rehit
+            bounceAdd: bounceSpecs.add,
+            bounceMax: bounceSpecs.max,
+            bounceKeep: bounceSpecs.keep,
+            rehit: !!bounceSpecs.rehit
         };
+    }
+
+    #skillStats(owner, fns) {
+        const out = { spread: 0, bullets: 0, msBetween: 0 };
+        try {
+            const skill = fns.LogicCharacterClient_getWeaponSkill(owner);
+            if (!isValidPtr(skill)) return out;
+            out.bullets = fns.LogicSkillData_getNumBulletsInOneAttack
+                ? Math.trunc(fns.LogicSkillData_getNumBulletsInOneAttack(skill))
+                : 0;
+            out.msBetween = fns.LogicSkillData_getMsBetweenAttacks
+                ? Math.trunc(fns.LogicSkillData_getMsBetweenAttacks(skill))
+                : 0;
+            out.spread = Math.trunc(fns.LogicSkillData_getSpread(skill));
+        } catch {}
+        return out;
     }
 
     #weaponForOwner(ownerIndex) {
@@ -926,21 +1000,10 @@ class Scanner {
         const fns = getFunctions();
         const out = { spread: 0, bullets: 0, msBetween: 0 };
         if (fns.LogicCharacterClient_getWeaponSkill && fns.LogicSkillData_getSpread) {
-            try {
-                const skill = fns.LogicCharacterClient_getWeaponSkill(owner);
-                if (isValidPtr(skill)) {
-                    const bullets = fns.LogicSkillData_getNumBulletsInOneAttack
-                        ? fns.LogicSkillData_getNumBulletsInOneAttack(skill) | 0
-                        : 0;
-                    const between = fns.LogicSkillData_getMsBetweenAttacks
-                        ? fns.LogicSkillData_getMsBetweenAttacks(skill) | 0
-                        : 0;
-                    const spread = fns.LogicSkillData_getSpread(skill) | 0;
-                    if (bullets >= 1 && bullets <= 40) out.bullets = bullets;
-                    if (between >= 0 && between <= 3000) out.msBetween = between;
-                    if (spread > 0 && spread <= 120) out.spread = spread;
-                }
-            } catch (_) {}
+            const stats = this.#skillStats(owner, fns);
+            if (stats.bullets >= 1 && stats.bullets <= 40) out.bullets = stats.bullets;
+            if (stats.msBetween >= 0 && stats.msBetween <= 3000) out.msBetween = stats.msBetween;
+            if (stats.spread > 0 && stats.spread <= 120) out.spread = stats.spread;
         }
         this.#weaponMeta.set(ownerIndex, out);
         return out;
@@ -957,23 +1020,23 @@ class Scanner {
         const fns = getFunctions();
         try {
             const hit = this.#validTarget(
-                projectile.add(offsets.LogicProjectileClient_targetX).readS32() | 0,
-                projectile.add(offsets.LogicProjectileClient_targetY).readS32() | 0,
+                Math.trunc(projectile.add(offsets.LogicProjectileClient_targetX).readS32()),
+                Math.trunc(projectile.add(offsets.LogicProjectileClient_targetY).readS32()),
                 x,
                 y
             );
             if (hit) return hit;
-        } catch (_) {}
+        } catch {}
         if (fns.LogicProjectileClient_getTargetX && fns.LogicProjectileClient_getTargetY) {
             try {
                 const hit = this.#validTarget(
-                    fns.LogicProjectileClient_getTargetX(projectile) | 0,
-                    fns.LogicProjectileClient_getTargetY(projectile) | 0,
+                    Math.trunc(fns.LogicProjectileClient_getTargetX(projectile)),
+                    Math.trunc(fns.LogicProjectileClient_getTargetY(projectile)),
                     x,
                     y
                 );
                 if (hit) return hit;
-            } catch (_) {}
+            } catch {}
         }
         return null;
     }
@@ -982,7 +1045,7 @@ class Scanner {
         try {
             const v = obj.add(off).readPointer();
             return isValidPtr(v) ? v : null;
-        } catch (_) {
+        } catch {
             return null;
         }
     }
@@ -990,27 +1053,51 @@ class Scanner {
     #dataU8(data, off) {
         try {
             return data.add(off).readU8() & 1;
-        } catch (_) {
+        } catch {
             return 0;
         }
     }
 
     #dataS32(data, off, min, max) {
         try {
-            const v = data.add(off).readS32() | 0;
+            const v = Math.trunc(data.add(off).readS32());
             return v >= min && v <= max ? v : 0;
-        } catch (_) {
+        } catch {
             return 0;
         }
     }
 
     #clientS32(obj, off, min, max) {
         try {
-            const v = obj.add(off).readS32() | 0;
+            const v = Math.trunc(obj.add(off).readS32());
             return v >= min && v <= max ? v : 0;
-        } catch (_) {
+        } catch {
             return 0;
         }
+    }
+
+    #travelTypeFromFn(data) {
+        const fn = getFunctions().LogicProjectileData_getTravelType;
+        if (!fn) return 0;
+        try {
+            const v = Math.trunc(fn(data));
+            if (v > 0 && v <= 20) return v;
+        } catch {}
+        return 0;
+    }
+
+    #travelTypeOf(data, projectile) {
+        let travelType = this.#dataS32(data, offsets.LogicProjectileData_travelType, 0, 20);
+        if (!travelType) {
+            const raw = this.#readClientU32(
+                projectile,
+                offsets.LogicProjectileClient_travelType,
+                20
+            );
+            travelType = Math.max(raw, 0);
+        }
+        if (!travelType) travelType = this.#travelTypeFromFn(data);
+        return travelType;
     }
 
     #captureProjectile(projectile, data, now) {
@@ -1027,135 +1114,106 @@ class Scanner {
                 existing.ownerIndex = this.#readOwnerIndex(projectile);
                 return;
             }
-            let radius = this.#readProjectileRadius(data);
-            if (!(radius > 0)) radius = defaultProjectileRadius;
-            const x = this.#fieldS32(projectile, offsets.LogicGameObjectClient_x);
-            const y = this.#fieldS32(projectile, offsets.LogicGameObjectClient_y);
-            const spawnReady = x !== 0 || y !== 0;
-            const target = this.#readProjectileTarget(projectile, data, x, y);
-            const flags = this.#readProjectileFlags(data);
-            let isIndirect = this.#dataU8(data, offsets.LogicProjectileData_indirect);
-            let travelType = this.#dataS32(data, offsets.LogicProjectileData_travelType, 0, 20);
-            if (!travelType) {
-                const raw = this.#readClientU32(
-                    projectile,
-                    offsets.LogicProjectileClient_travelType,
-                    20
-                );
-                travelType = raw > 0 ? raw : 0;
-            }
-            if (!travelType) {
-                const fn = getFunctions().LogicProjectileData_getTravelType;
-                if (fn) {
-                    try {
-                        const v = fn(data) | 0;
-                        if (v > 0 && v <= 20) travelType = v;
-                    } catch (_) {}
-                }
-            }
-            const dynamicRange = this.#dataU8(data, offsets.LogicProjectileData_allowDynamicRange);
-            if (travelType === 6 || dynamicRange) isIndirect = 1;
-            let beam = 0;
-            try {
-                beam = data.add(offsets.LogicProjectileData_isBeamField).readU8() & 1;
-            } catch (_) {}
-            const ownerIndex = this.#readOwnerIndex(projectile);
-            const targetObj = this.#readPtrField(
+            this.#liveProjectiles.set(key, this.#newProjectileEntry(projectile, data, now));
+        } catch {}
+    }
+
+    #newProjectileEntry(projectile, data, now) {
+        let radius = this.#readProjectileRadius(data);
+        if (!(radius > 0)) radius = defaultProjectileRadius;
+        const x = this.#fieldS32(projectile, offsets.LogicGameObjectClient_x);
+        const y = this.#fieldS32(projectile, offsets.LogicGameObjectClient_y);
+        const spawnReady = x !== 0 || y !== 0;
+        const target = this.#readProjectileTarget(projectile, data, x, y);
+        const flags = this.#readProjectileFlags(data);
+        let isIndirect = this.#dataU8(data, offsets.LogicProjectileData_indirect);
+        const travelType = this.#travelTypeOf(data, projectile);
+        const dynamicRange = this.#dataU8(data, offsets.LogicProjectileData_allowDynamicRange);
+        if (travelType === 6 || dynamicRange) isIndirect = 1;
+        let beam = 0;
+        try {
+            beam = data.add(offsets.LogicProjectileData_isBeamField).readU8() & 1;
+        } catch {}
+        const targetObj = this.#readPtrField(
+            projectile,
+            offsets.LogicProjectileClient_targetObject
+        );
+        return {
+            gid: this.#ptrKey(projectile),
+            ptr: projectile,
+            data,
+            ownerIndex: this.#readOwnerIndex(projectile),
+            radius,
+            speed: this.#readProjectileSpeed(data),
+            x,
+            y,
+            spawnX: spawnReady ? x : 0,
+            spawnY: spawnReady ? y : 0,
+            spawnPending: !spawnReady,
+            targetX: target ? target.x : 0,
+            targetY: target ? target.y : 0,
+            hasTarget: !!target || !!targetObj,
+            seg0: target && spawnReady ? length(target.x - x, target.y - y) : 0,
+            passesEnv: flags.passes,
+            piercesEnv: flags.pierces,
+            piercesChars: flags.piercesChars,
+            isIndirect: !!isIndirect,
+            isBeam: !!beam,
+            beamCopy: false,
+            ageMs: 0,
+            spawnTs: now,
+            lastX: x,
+            lastY: y,
+            lastTs: now,
+            lastMoveTs: now,
+            vx: 0,
+            vy: 0,
+            hasVelocitySample: false,
+            meta: null,
+            travelType,
+            dynamicRange,
+            ignoreChars: this.#dataU8(data, offsets.LogicProjectileData_ignoreCharacterCollisions),
+            ignoreEnv: this.#dataU8(data, offsets.LogicProjectileData_ignoreEnvironmentCollisions),
+            grapples: this.#dataU8(data, offsets.LogicProjectileData_grapplesEnemy),
+            boomerang: this.#dataS32(data, offsets.LogicProjectileData_boomerang, 1, 8),
+            chains: this.#dataU8(data, offsets.LogicProjectileData_chainsToEnemies),
+            stunMs: this.#clientS32(projectile, offsets.LogicProjectileClient_stunMs, 1, 60000),
+            silenceMs: this.#clientS32(
                 projectile,
-                offsets.LogicProjectileClient_targetObject
-            );
-            const entry = {
-                gid: key,
-                ptr: projectile,
+                offsets.LogicProjectileClient_effectMs,
+                1,
+                60000
+            ),
+            triggerMs: this.#dataS32(
                 data,
-                ownerIndex,
-                radius,
-                speed: this.#readProjectileSpeed(data),
-                x,
-                y,
-                spawnX: spawnReady ? x : 0,
-                spawnY: spawnReady ? y : 0,
-                spawnPending: !spawnReady,
-                targetX: target ? target.x : 0,
-                targetY: target ? target.y : 0,
-                hasTarget: !!target || !!targetObj,
-                seg0: target && spawnReady ? length(target.x - x, target.y - y) : 0,
-                passesEnv: flags.passes,
-                piercesEnv: flags.pierces,
-                piercesChars: flags.piercesChars,
-                isIndirect: !!isIndirect,
-                isBeam: !!beam,
-                beamCopy: false,
-                ageMs: 0,
-                spawnTs: now,
-                lastX: x,
-                lastY: y,
-                lastTs: now,
-                lastMoveTs: now,
-                vx: 0,
-                vy: 0,
-                hasVelocitySample: false,
-                meta: null,
-                travelType,
-                dynamicRange,
-                ignoreChars: this.#dataU8(
-                    data,
-                    offsets.LogicProjectileData_ignoreCharacterCollisions
-                ),
-                ignoreEnv: this.#dataU8(
-                    data,
-                    offsets.LogicProjectileData_ignoreEnvironmentCollisions
-                ),
-                grapples: this.#dataU8(data, offsets.LogicProjectileData_grapplesEnemy),
-                boomerang: this.#dataS32(data, offsets.LogicProjectileData_boomerang, 1, 8),
-                chains: this.#dataU8(data, offsets.LogicProjectileData_chainsToEnemies),
-                stunMs: this.#clientS32(projectile, offsets.LogicProjectileClient_stunMs, 1, 60000),
-                silenceMs: this.#clientS32(
-                    projectile,
-                    offsets.LogicProjectileClient_effectMs,
-                    1,
-                    60000
-                ),
-                triggerMs: this.#dataS32(
-                    data,
-                    offsets.LogicProjectileData_triggerWithDelayMs,
-                    1,
-                    60000
-                ),
-                constantFly: this.#dataU8(data, offsets.LogicProjectileData_constantFlyTime),
-                earlyTicks: this.#dataS32(data, offsets.LogicProjectileData_numEarlyTicks, 1, 400),
-                homeDistance: this.#dataS32(
-                    data,
-                    offsets.LogicProjectileData_homingDistance,
-                    1,
-                    30000
-                ),
-                gravity: this.#dataS32(data, offsets.LogicProjectileData_gravity, 1, 20000),
-                shotByHero: this.#dataU8(data, offsets.LogicProjectileData_isShotByHero),
-                visualized: this.#dataU8(data, offsets.LogicProjectileData_visualizeEndPoint),
-                attachArea: this.#dataU8(
-                    data,
-                    offsets.LogicProjectileData_attachAreaEffectToTarget
-                ),
-                trail: this.#dataU8(data, offsets.LogicProjectileData_spawnAreaEffectTrail),
-                trailMin: this.#dataS32(
-                    data,
-                    offsets.LogicProjectileData_areaEffectTrailMinDistance,
-                    1,
-                    20000
-                ),
-                lifeTicks: this.#clientS32(
-                    projectile,
-                    offsets.LogicProjectileClient_lifeTicks,
-                    1,
-                    100000
-                ),
-                clientRadius: 0,
-                seekX: 0,
-                seekY: 0
-            };
-            this.#liveProjectiles.set(key, entry);
-        } catch (_) {}
+                offsets.LogicProjectileData_triggerWithDelayMs,
+                1,
+                60000
+            ),
+            constantFly: this.#dataU8(data, offsets.LogicProjectileData_constantFlyTime),
+            earlyTicks: this.#dataS32(data, offsets.LogicProjectileData_numEarlyTicks, 1, 400),
+            homeDistance: this.#dataS32(data, offsets.LogicProjectileData_homingDistance, 1, 30000),
+            gravity: this.#dataS32(data, offsets.LogicProjectileData_gravity, 1, 20000),
+            shotByHero: this.#dataU8(data, offsets.LogicProjectileData_isShotByHero),
+            visualized: this.#dataU8(data, offsets.LogicProjectileData_visualizeEndPoint),
+            attachArea: this.#dataU8(data, offsets.LogicProjectileData_attachAreaEffectToTarget),
+            trail: this.#dataU8(data, offsets.LogicProjectileData_spawnAreaEffectTrail),
+            trailMin: this.#dataS32(
+                data,
+                offsets.LogicProjectileData_areaEffectTrailMinDistance,
+                1,
+                20000
+            ),
+            lifeTicks: this.#clientS32(
+                projectile,
+                offsets.LogicProjectileClient_lifeTicks,
+                1,
+                100000
+            ),
+            clientRadius: 0,
+            seekX: 0,
+            seekY: 0
+        };
     }
 
     #removeProjectile(projectile) {
@@ -1174,7 +1232,8 @@ class Scanner {
 
     #installTravelTicksHook(base) {
         try {
-            const self = this;
+            const insideCall = () => this.#insideTravelCall;
+            const learn = (key, a1, a2, ticks) => this.#learnTravel(key, a1, a2, ticks);
             Interceptor.attach(base.add(offsets.LogicProjectileClient_getTravelTicks), {
                 onEnter(args) {
                     this.key = args[0].toString();
@@ -1182,22 +1241,21 @@ class Scanner {
                     this.a2 = args[2].toUInt32();
                 },
                 onLeave(retval) {
-                    if (self.#insideTravelCall) return;
-                    self.#learnTravel(this.key, this.a1, this.a2, retval.toInt32());
+                    if (insideCall()) return;
+                    learn(this.key, this.a1, this.a2, retval.toInt32());
                 }
             });
-        } catch (_) {}
+        } catch {}
     }
 
     #installProjectilePathHook(base) {
         try {
-            const self = this;
             Interceptor.attach(base.add(offsets.CalculateProjectilePath), {
                 onEnter: () => {
-                    self.state.pathRanAt = Date.now();
+                    this.state.pathRanAt = Date.now();
                 }
             });
-        } catch (_) {}
+        } catch {}
     }
 
     onDataReload(callback) {
@@ -1221,14 +1279,21 @@ class Scanner {
         for (const callback of this.#reloadCallbacks) {
             try {
                 callback();
-            } catch (_) {}
+            } catch {}
         }
     }
 
     #installDataReloadHooks(base) {
         if (this.#dataHooksInstalled) return;
         this.#dataHooksInstalled = true;
-        const self = this;
+        const notify = () => this.#notifyDataReload();
+        const remember = (character) => {
+            const index = this.#readOwnerIndex(character);
+            if (index < 0) return;
+            this.#charRange.delete(index);
+            this.#rangeBonus.delete(index);
+            this.#rememberCharacter(index, character);
+        };
         const names = [
             "LogicProjectileData_createReferences",
             "LogicSkillData_createReferences",
@@ -1239,9 +1304,9 @@ class Scanner {
             if (typeof off !== "number" || off <= 0) continue;
             try {
                 Interceptor.attach(base.add(off), {
-                    onLeave: () => self.#notifyDataReload()
+                    onLeave: () => notify()
                 });
-            } catch (_) {}
+            } catch {}
         }
         try {
             Interceptor.attach(base.add(offsets.LogicCharacterClient_decode), {
@@ -1249,20 +1314,17 @@ class Scanner {
                     this.character = args[0];
                 },
                 onLeave() {
-                    const index = self.#readOwnerIndex(this.character);
-                    if (index < 0) return;
-                    self.#charRange.delete(index);
-                    self.#rangeBonus.delete(index);
-                    self.#rememberCharacter(index, this.character);
+                    remember(this.character);
                 }
             });
-        } catch (_) {}
+        } catch {}
     }
 
     #installProjectileHooks(base) {
         if (this.#projectileHooksInstalled) return;
         this.#projectileHooksInstalled = true;
-        const self = this;
+        const capture = (projectile) => this.#captureProjectile(projectile, null, Date.now());
+        const remove = (projectile) => this.#removeProjectile(projectile);
         try {
             Interceptor.attach(base.add(offsets.LogicProjectileClient_ctor), {
                 onEnter(args) {
@@ -1270,28 +1332,28 @@ class Scanner {
                 },
                 onLeave() {
                     try {
-                        self.#captureProjectile(this.projectile, null, Date.now());
-                    } catch (_) {}
+                        capture(this.projectile);
+                    } catch {}
                 }
             });
-        } catch (_) {}
+        } catch {}
         try {
             Interceptor.attach(base.add(offsets.LogicProjectileClient_destruct), {
-                onEnter(args) {
-                    self.#removeProjectile(args[0]);
+                onEnter: (args) => {
+                    remove(args[0]);
                 }
             });
-        } catch (_) {}
+        } catch {}
         try {
             Interceptor.attach(base.add(offsets.LogicProjectileClient_decode), {
                 onEnter(args) {
                     this.projectile = args[0];
                 },
                 onLeave() {
-                    self.#captureProjectile(this.projectile, null, Date.now());
+                    capture(this.projectile);
                 }
             });
-        } catch (_) {}
+        } catch {}
         this.#installTravelTicksHook(base);
         this.#installProjectilePathHook(base);
         this.#installDataReloadHooks(base);
@@ -1300,7 +1362,7 @@ class Scanner {
     learnedFlightRange(data) {
         if (!isValidPtr(data)) return 0;
         const v = this.#flightRange.get(data.toString()) || 0;
-        return v > 0 ? v : 0;
+        return Math.max(v, 0);
     }
 
     #learnFlightRange(data, flown) {
@@ -1320,7 +1382,7 @@ class Scanner {
         if (!(cap > 0) && entry.seg0 > 0) cap = entry.seg0;
         if (!(cap > 0)) return 0;
         const remain = cap - flown;
-        return remain > 0 ? remain : 0;
+        return Math.max(remain, 0);
     }
 
     #applyMeta(entry, meta) {
@@ -1345,212 +1407,238 @@ class Scanner {
         entry.typeId = meta.typeId;
     }
 
+    #blendVelocity(entry, dx, dy, dt) {
+        const observedVx = dx / dt;
+        const observedVy = dy / dt;
+        if (length(observedVx, observedVy) > 8500) return;
+        const alpha = entry.hasVelocitySample ? 0.4 : 1;
+        entry.vx = entry.vx * (1 - alpha) + observedVx * alpha;
+        entry.vy = entry.vy * (1 - alpha) + observedVy * alpha;
+        entry.hasVelocitySample = true;
+        const measured = length(entry.vx, entry.vy);
+        if (measured >= 300 && measured <= 8500) this.#learnOwnSpeed(entry, measured);
+    }
+
+    #learnOwnSpeed(entry, measured) {
+        if (entry.ownerIndex !== this.state.myPlayerIndex) return;
+        const dataPtr = entry.data;
+        if (!isValidPtr(dataPtr)) return;
+        const key = dataPtr.toString();
+        const acc = this.#speedByData.get(key) || { sum: 0, count: 0 };
+        acc.sum += measured;
+        acc.count++;
+        this.#speedByData.set(key, acc);
+        this.state.measuredSpeed = Math.round(acc.sum / acc.count);
+    }
+
+    #sampleEntryMotion(entry, x, y, now) {
+        const dx = x - entry.lastX;
+        const dy = y - entry.lastY;
+        if (dx === 0 && dy === 0) return;
+        const dt = (now - entry.lastMoveTs) / 1000;
+        if (!entry.spawnPending && dt > 0.008 && dt < 0.3 && dx * dx + dy * dy >= 16)
+            this.#blendVelocity(entry, dx, dy, dt);
+        entry.lastMoveTs = now;
+    }
+
+    #updateEntryTarget(entry, x, y) {
+        const target = this.#readProjectileTarget(entry.ptr, entry.data, x, y);
+        if (!target) return;
+        entry.targetX = target.x;
+        entry.targetY = target.y;
+        entry.hasTarget = true;
+        if (!(entry.seg0 > 0) && !entry.spawnPending)
+            entry.seg0 = length(target.x - entry.spawnX, target.y - entry.spawnY);
+    }
+
+    #learnCapOvershoot(entry, flown, now) {
+        if (!(entry.hasVelocitySample && now - entry.lastMoveTs < 200)) return;
+        const capLearned = this.learnedFlightRange(entry.data);
+        if (capLearned > 0 && flown > capLearned + entry.radius + 50)
+            this.#learnFlightRange(entry.data, flown + entry.speed * 0.7);
+    }
+
+    #badOwner(resolved, entry) {
+        if (!isValidPtr(resolved) || resolved.equals(entry.ptr)) return true;
+        try {
+            return resolved
+                .readPointer()
+                .equals(this.#moduleBase.add(offsets.LogicProjectileClient_vtable));
+        } catch {
+            return false;
+        }
+    }
+
+    #findOwnerObject(entry) {
+        if (!isValidPtr(this.#objMgrPtr)) return null;
+        const fns = getFunctions();
+        if (!fns.LogicGameObjectManagerClient_findGameObject) return null;
+        try {
+            const resolved = fns.LogicGameObjectManagerClient_findGameObject(
+                this.#objMgrPtr,
+                entry.ownerIndex,
+                -1
+            );
+            if (this.#badOwner(resolved, entry)) return null;
+            this.#rememberCharacter(entry.ownerIndex, resolved);
+            return resolved;
+        } catch {
+            return null;
+        }
+    }
+
+    #resolveOwner(entry) {
+        if (entry.ownerIndex < 0) return null;
+        const known = this.#charsByIndex.get(entry.ownerIndex);
+        if (isValidPtr(known)) return known;
+        return this.#findOwnerObject(entry);
+    }
+
+    #entryVisible(entry, ownerObj) {
+        if (ownerObj && this.state.ownCharacter && ownerObj.equals(this.state.ownCharacter))
+            return false;
+        if (ownerObj && !this.#isEnemyOf(ownerObj, this.state.battleModeClient, true)) return false;
+        if (entry.ownerIndex >= 0 && this.#friendlyIdx.has(entry.ownerIndex)) return false;
+        if (entry.ownerIndex === this.state.myPlayerIndex) return false;
+        return entry.seg > 0 || entry.hasTarget || entry.hasVelocitySample;
+    }
+
+    #staticOutputFields(entry, o) {
+        o.travelType = entry.travelType || 0;
+        o.dynamicRange = entry.dynamicRange || 0;
+        o.ignoreChars = entry.ignoreChars || 0;
+        o.ignoreEnv = entry.ignoreEnv || 0;
+        o.grapples = entry.grapples || 0;
+        o.boomerang = entry.boomerang || 0;
+        o.chains = entry.chains || 0;
+        o.stunMs = entry.stunMs || 0;
+        o.silenceMs = entry.silenceMs || 0;
+        o.triggerMs = entry.triggerMs || 0;
+        o.constantFly = entry.constantFly || 0;
+    }
+
+    #effectOutputFields(entry, o) {
+        o.earlyTicks = entry.earlyTicks || 0;
+        o.homeDistance = entry.homeDistance || 0;
+        o.gravity = entry.gravity || 0;
+        o.shotByHero = entry.shotByHero || 0;
+        o.levelBorder = entry.levelBorder || 0;
+        o.visualized = entry.visualized || 0;
+        o.attachArea = entry.attachArea || 0;
+        o.trail = entry.trail || 0;
+        o.trailMin = entry.trailMin || 0;
+        o.lifeTicks = entry.lifeTicks || 0;
+        o.clientRadius = entry.clientRadius || 0;
+    }
+
+    #newOutput(entry, gid) {
+        const o = {};
+        entry.out = o;
+        o.gid = gid;
+        o.radius = entry.radius;
+        o.passesEnv = !!entry.passesEnv;
+        o.piercesEnv = !!entry.piercesEnv;
+        o.piercesChars = !!entry.piercesChars;
+        o.isIndirect = !!entry.isIndirect;
+        o.isBeam = !!entry.isBeam;
+        o.beamCopy = !!entry.beamCopy;
+        this.#staticOutputFields(entry, o);
+        this.#effectOutputFields(entry, o);
+        const w = this.#weaponForOwner(entry.ownerIndex);
+        o.volleyMs = this.#volleyMs(w);
+        o.volleyBullets = (w && w.bullets) || 0;
+        o.volleySpread = (w && w.spread) || 0;
+        return o;
+    }
+
+    #refreshOutput(entry, o, x, y, flown) {
+        o.x = x;
+        o.y = y;
+        o.spawnX = entry.spawnX;
+        o.spawnY = entry.spawnY;
+        o.seg0 = entry.seg0;
+        o.vx = entry.vx;
+        o.vy = entry.vy;
+        o.speed = entry.speed;
+        o.seg = entry.seg;
+        o.segUncertain = !!entry.segUncertain;
+        o.flown = flown;
+        o.hasTarget = !!entry.hasTarget;
+        o.targetX = entry.targetX;
+        o.targetY = entry.targetY;
+        o.ageMs = entry.ageMs;
+        o.preMs = entry.preMs || 0;
+        o.lifeMs = entry.lifeMs || 0;
+        o.ticks = entry.ticks || 0;
+        o.travelDistance = entry.travelDistance || 0;
+        o.typeId = entry.typeId;
+        o.homing = !!entry.homing;
+        o.seekX = entry.seekX || 0;
+        o.seekY = entry.seekY || 0;
+        o.bouncing = !!entry.bouncing;
+        o.steer = entry.steer || 0;
+        o.steerIgnoreMs = entry.steerIgnoreMs || 0;
+        o.steerLifeMs = entry.steerLifeMs || 0;
+        o.bounceAdd = entry.bounceAdd || 0;
+        o.bounceMax = entry.bounceMax || 0;
+        o.bounceKeep = entry.bounceKeep || 0;
+        o.rehit = !!entry.rehit;
+        o.ownerIndex = entry.ownerIndex;
+    }
+
+    #refreshEntry(entry, gid, now, output) {
+        const x = this.#fieldS32(entry.ptr, offsets.LogicGameObjectClient_x);
+        const y = this.#fieldS32(entry.ptr, offsets.LogicGameObjectClient_y);
+        this.#sampleEntryMotion(entry, x, y, now);
+        entry.lastX = x;
+        entry.lastY = y;
+        entry.lastTs = now;
+        entry.x = x;
+        entry.y = y;
+        entry.ownerIndex = this.#readOwnerIndex(entry.ptr);
+        if (entry.spawnPending && (x !== 0 || y !== 0)) {
+            entry.spawnX = x;
+            entry.spawnY = y;
+            entry.spawnPending = false;
+        }
+        entry.ageMs = Math.max(0, now - (entry.spawnTs || now));
+        this.#updateEntryTarget(entry, x, y);
+        if (!entry.meta && this.#metaBudget > 0) {
+            this.#metaBudget--;
+            this.#applyMeta(
+                entry,
+                this.#readProjectileMeta(entry.ptr, entry.data, entry.speed, 0, entry.isBeam)
+            );
+        }
+        const flown = this.#traveled(entry, x, y);
+        entry.flown = flown;
+        this.#learnCapOvershoot(entry, flown, now);
+        entry.seg = this.#flightSeg(entry, flown);
+        entry.segUncertain = !!(
+            entry.hasVelocitySample &&
+            now - entry.lastMoveTs < 200 &&
+            !(entry.seg > 0) &&
+            length(entry.vx, entry.vy) > 100
+        );
+        if (!this.#entryVisible(entry, this.#resolveOwner(entry))) return;
+        const o = entry.out || this.#newOutput(entry, gid);
+        this.#refreshOutput(entry, o, x, y, flown);
+        output.push(o);
+    }
+
     #updateLiveProjectiles(now) {
         const output = this.#outArr;
         output.length = 0;
-        let metaBudget = this.#probeBudget > 0 ? 4 : 0;
-        const self = this;
+        this.#metaBudget = this.#probeBudget > 0 ? 4 : 0;
         this.#liveProjectiles.forEach((entry, gid) => {
             try {
                 if (now - (entry.spawnTs || now) > staleMs) {
-                    self.#liveProjectiles.delete(gid);
+                    this.#liveProjectiles.delete(gid);
                     return;
                 }
-                const x = self.#fieldS32(entry.ptr, offsets.LogicGameObjectClient_x);
-                const y = self.#fieldS32(entry.ptr, offsets.LogicGameObjectClient_y);
-                const dx = x - entry.lastX;
-                const dy = y - entry.lastY;
-                if (dx !== 0 || dy !== 0) {
-                    const dt = (now - entry.lastMoveTs) / 1000;
-                    if (!entry.spawnPending && dt > 0.008 && dt < 0.3 && dx * dx + dy * dy >= 16) {
-                        const observedVx = dx / dt;
-                        const observedVy = dy / dt;
-                        if (length(observedVx, observedVy) <= 8500) {
-                            const alpha = entry.hasVelocitySample ? 0.4 : 1;
-                            entry.vx = entry.vx * (1 - alpha) + observedVx * alpha;
-                            entry.vy = entry.vy * (1 - alpha) + observedVy * alpha;
-                            entry.hasVelocitySample = true;
-                            const measured = length(entry.vx, entry.vy);
-                            if (measured >= 300 && measured <= 8500) {
-                                entry.speed = measured;
-                                if (entry.ownerIndex === self.state.myPlayerIndex) {
-                                    const dataPtr = entry.data;
-                                    if (isValidPtr(dataPtr)) {
-                                        const key = dataPtr.toString();
-                                        const acc = self.#speedByData.get(key) || {
-                                            sum: 0,
-                                            count: 0
-                                        };
-                                        acc.sum += measured;
-                                        acc.count++;
-                                        self.#speedByData.set(key, acc);
-                                        self.state.measuredSpeed = Math.round(acc.sum / acc.count);
-                                    }
-                                }
-                            }
-                        }
-                    }
-                    entry.lastMoveTs = now;
-                }
-                entry.lastX = x;
-                entry.lastY = y;
-                entry.lastTs = now;
-                entry.x = x;
-                entry.y = y;
-                entry.ownerIndex = self.#readOwnerIndex(entry.ptr);
-                if (entry.spawnPending && (x !== 0 || y !== 0)) {
-                    entry.spawnX = x;
-                    entry.spawnY = y;
-                    entry.spawnPending = false;
-                }
-                entry.ageMs = Math.max(0, now - (entry.spawnTs || now));
-                const target = self.#readProjectileTarget(entry.ptr, entry.data, x, y);
-                if (target) {
-                    entry.targetX = target.x;
-                    entry.targetY = target.y;
-                    entry.hasTarget = true;
-                    if (!(entry.seg0 > 0) && !entry.spawnPending)
-                        entry.seg0 = length(target.x - entry.spawnX, target.y - entry.spawnY);
-                }
-                if (!entry.meta && metaBudget > 0) {
-                    metaBudget--;
-                    self.#applyMeta(
-                        entry,
-                        self.#readProjectileMeta(
-                            entry.ptr,
-                            entry.data,
-                            entry.speed,
-                            0,
-                            entry.isBeam
-                        )
-                    );
-                }
-                const flown = self.#traveled(entry, x, y);
-                entry.flown = flown;
-                const moving = entry.hasVelocitySample && now - entry.lastMoveTs < 200;
-                if (moving) {
-                    const capLearned = self.learnedFlightRange(entry.data);
-                    if (capLearned > 0 && flown > capLearned + entry.radius + 50)
-                        self.#learnFlightRange(entry.data, flown + entry.speed * 0.7);
-                }
-                entry.seg = self.#flightSeg(entry, flown);
-                entry.segUncertain = !!(
-                    moving &&
-                    !(entry.seg > 0) &&
-                    length(entry.vx, entry.vy) > 100
-                );
-                let ownerObj =
-                    entry.ownerIndex >= 0 ? self.#charsByIndex.get(entry.ownerIndex) || null : null;
-                if (!ownerObj && entry.ownerIndex >= 0 && isValidPtr(self.#objMgrPtr)) {
-                    const fns2 = getFunctions();
-                    if (fns2.LogicGameObjectManagerClient_findGameObject) {
-                        try {
-                            const resolved = fns2.LogicGameObjectManagerClient_findGameObject(
-                                self.#objMgrPtr,
-                                entry.ownerIndex,
-                                -1
-                            );
-                            let bad = true;
-                            if (isValidPtr(resolved) && !resolved.equals(entry.ptr)) {
-                                bad = false;
-                                try {
-                                    bad = resolved
-                                        .readPointer()
-                                        .equals(
-                                            self.#moduleBase.add(
-                                                offsets.LogicProjectileClient_vtable
-                                            )
-                                        );
-                                } catch (_) {}
-                            }
-                            if (!bad) {
-                                ownerObj = resolved;
-                                self.#rememberCharacter(entry.ownerIndex, resolved);
-                            }
-                        } catch (_) {}
-                    }
-                }
-                if (ownerObj && self.state.ownCharacter && ownerObj.equals(self.state.ownCharacter))
-                    return;
-                if (ownerObj && !self.#isEnemyOf(ownerObj, self.state.battleModeClient, true))
-                    return;
-                if (entry.ownerIndex >= 0 && self.#friendlyIdx.has(entry.ownerIndex)) return;
-                if (entry.ownerIndex === self.state.myPlayerIndex) return;
-                if (!(entry.seg > 0) && !entry.hasTarget && !entry.hasVelocitySample) return;
-                let o = entry.out;
-                if (!o) {
-                    o = {};
-                    entry.out = o;
-                    o.gid = gid;
-                    o.radius = entry.radius;
-                    o.passesEnv = !!entry.passesEnv;
-                    o.piercesEnv = !!entry.piercesEnv;
-                    o.piercesChars = !!entry.piercesChars;
-                    o.isIndirect = !!entry.isIndirect;
-                    o.isBeam = !!entry.isBeam;
-                    o.beamCopy = !!entry.beamCopy;
-                    o.travelType = entry.travelType || 0;
-                    o.dynamicRange = entry.dynamicRange || 0;
-                    o.ignoreChars = entry.ignoreChars || 0;
-                    o.ignoreEnv = entry.ignoreEnv || 0;
-                    o.grapples = entry.grapples || 0;
-                    o.boomerang = entry.boomerang || 0;
-                    o.chains = entry.chains || 0;
-                    o.stunMs = entry.stunMs || 0;
-                    o.silenceMs = entry.silenceMs || 0;
-                    o.triggerMs = entry.triggerMs || 0;
-                    o.constantFly = entry.constantFly || 0;
-                    o.earlyTicks = entry.earlyTicks || 0;
-                    o.homeDistance = entry.homeDistance || 0;
-                    o.gravity = entry.gravity || 0;
-                    o.shotByHero = entry.shotByHero || 0;
-                    o.levelBorder = entry.levelBorder || 0;
-                    o.visualized = entry.visualized || 0;
-                    o.attachArea = entry.attachArea || 0;
-                    o.trail = entry.trail || 0;
-                    o.trailMin = entry.trailMin || 0;
-                    o.lifeTicks = entry.lifeTicks || 0;
-                    o.clientRadius = entry.clientRadius || 0;
-                    const w = self.#weaponForOwner(entry.ownerIndex);
-                    o.volleyMs = self.#volleyMs(w);
-                    o.volleyBullets = (w && w.bullets) || 0;
-                    o.volleySpread = (w && w.spread) || 0;
-                }
-                o.x = x;
-                o.y = y;
-                o.spawnX = entry.spawnX;
-                o.spawnY = entry.spawnY;
-                o.seg0 = entry.seg0;
-                o.vx = entry.vx;
-                o.vy = entry.vy;
-                o.speed = entry.speed;
-                o.seg = entry.seg;
-                o.segUncertain = !!entry.segUncertain;
-                o.flown = flown;
-                o.hasTarget = !!entry.hasTarget;
-                o.targetX = entry.targetX;
-                o.targetY = entry.targetY;
-                o.ageMs = entry.ageMs;
-                o.preMs = entry.preMs || 0;
-                o.lifeMs = entry.lifeMs || 0;
-                o.ticks = entry.ticks || 0;
-                o.travelDistance = entry.travelDistance || 0;
-                o.typeId = entry.typeId;
-                o.homing = !!entry.homing;
-                o.seekX = entry.seekX || 0;
-                o.seekY = entry.seekY || 0;
-                o.bouncing = !!entry.bouncing;
-                o.steer = entry.steer || 0;
-                o.steerIgnoreMs = entry.steerIgnoreMs || 0;
-                o.steerLifeMs = entry.steerLifeMs || 0;
-                o.bounceAdd = entry.bounceAdd || 0;
-                o.bounceMax = entry.bounceMax || 0;
-                o.bounceKeep = entry.bounceKeep || 0;
-                o.rehit = !!entry.rehit;
-                o.ownerIndex = entry.ownerIndex;
-                output.push(o);
-            } catch (_) {
-                self.#liveProjectiles.delete(gid);
+                this.#refreshEntry(entry, gid, now, output);
+            } catch {
+                this.#liveProjectiles.delete(gid);
             }
         });
         return output;
@@ -1560,12 +1648,137 @@ class Scanner {
         return length(x - entry.spawnX, y - entry.spawnY);
     }
 
+    #scanOwn(own, bm) {
+        let myTeamFromMgr = -1;
+        try {
+            const mgrForTeam = bm.add(offsets.BattleMode_objectManager).readPointer();
+            if (isValidPtr(mgrForTeam)) {
+                this.#objMgrPtr = mgrForTeam;
+                myTeamFromMgr = this.#ownTeamOf(mgrForTeam);
+            }
+        } catch {}
+        this.state.myTeamId = myTeamFromMgr >= 0 ? myTeamFromMgr : this.#teamOf(own, bm);
+        this.state.myPlayerIndex = this.#readOwnerIndex(own);
+        this.#friendlyIdx.clear();
+        this.#friendlyIdx.add(this.state.myPlayerIndex);
+        this.#charsByIndex.clear();
+        this.#rememberCharacter(this.state.myPlayerIndex, own);
+        this.state.myX = this.#fieldS32(own, offsets.LogicGameObjectClient_x);
+        this.state.myY = this.#fieldS32(own, offsets.LogicGameObjectClient_y);
+        this.state.mySpeed = 0;
+        let ownData = this.dataFieldOf(own);
+        if (!isValidPtr(ownData)) ownData = this.dataOf(own);
+        if (!isValidPtr(ownData)) return;
+        this.state.myRadius = Math.trunc(this.collisionRadius(ownData));
+        const ownSpeed = this.#characterSpeed(ownData);
+        if (ownSpeed >= 300 && ownSpeed <= 3000) this.state.mySpeed = ownSpeed;
+    }
+
+    #objectAt(objects, batchView, i, stride) {
+        if (batchView) {
+            const off = i * stride;
+            const lo = batchView.getUint32(off, true);
+            const hi = batchView.getUint32(off + 4, true);
+            if (lo === 0 && hi === 0) return null;
+            return ptrFromU32(lo, hi);
+        }
+        return objects.add(i * stride).readPointer();
+    }
+
+    #isProjectileObj(obj, data) {
+        const vtableProj = this.#moduleBase.add(offsets.LogicProjectileData_vtable);
+        const vtableProjClient = this.#moduleBase.add(offsets.LogicProjectileClient_vtable);
+        let objVt = null;
+        try {
+            objVt = obj.readPointer();
+        } catch {}
+        return !!(objVt && objVt.equals(vtableProjClient)) || data.readPointer().equals(vtableProj);
+    }
+
+    #brawlerNameOf(data) {
+        const dataKey = this.#ptrKey(data);
+        if (!dataKey) return this.#readDataName(data);
+        const cached = this.#brawlerNameCache.get(dataKey);
+        if (cached !== undefined) return cached;
+        const name = this.#readDataName(data);
+        this.#brawlerNameCache.set(dataKey, name);
+        return name;
+    }
+
+    #classifyObject(obj, own, bm, now) {
+        const data = this.dataFieldOf(obj);
+        if (!isValidPtr(data)) return null;
+        if (this.#isProjectileObj(obj, data)) {
+            this.#captureProjectile(obj, data, now);
+            return null;
+        }
+        if (obj.equals(own)) return null;
+        if (!this.#isEnemyOf(obj, bm, false)) {
+            const idx = this.#readOwnerIndex(obj);
+            if (idx >= 0) {
+                this.#friendlyIdx.add(idx);
+                if (idx !== this.state.myPlayerIndex) this.#rememberCharacter(idx, obj);
+            }
+            return null;
+        }
+        if (obj.add(offsets.LogicCharacterClient_hitpoints).readU32() === 0) return null;
+        const brawlerName = this.#brawlerNameOf(data);
+        const radius = Math.trunc(this.collisionRadius(data));
+        if (!brawlerName && radius <= 0) return null;
+        const playerIndex = this.#readOwnerIndex(obj);
+        if (brawlerName) this.#rememberCharacter(playerIndex, obj);
+        return {
+            gid: this.#ptrKey(obj),
+            ptr: obj,
+            x: this.#fieldS32(obj, offsets.LogicGameObjectClient_x),
+            y: this.#fieldS32(obj, offsets.LogicGameObjectClient_y),
+            brawlerName,
+            body: obj,
+            teamId: this.#teamOf(obj, bm),
+            moveSpeed: this.#characterSpeed(data),
+            moveAngle: this.#moveAngleOf(obj),
+            radius,
+            kind: brawlerName ? "player" : "spawnable"
+        };
+    }
+
+    #scanObjectBatch(objects, count, own, bm, now) {
+        const enemies = [];
+        const stride = offsets.LogicGameObjectManagerClient_ptrStride;
+        let batchView = null;
+        try {
+            const buf = objects.readByteArray(count * stride);
+            if (buf) batchView = new DataView(buf);
+        } catch {}
+        for (let i = 0; i < count; i++) {
+            try {
+                const obj = this.#objectAt(objects, batchView, i, stride);
+                if (!obj || !isValidPtr(obj)) continue;
+                const enemy = this.#classifyObject(obj, own, bm, now);
+                if (enemy) enemies.push(enemy);
+            } catch {}
+        }
+        return enemies;
+    }
+
+    #scanEnemies(own, bm, now) {
+        this.#probeBudget = 8;
+        const objMgr = bm.add(offsets.BattleMode_objectManager).readPointer();
+        if (!isValidPtr(objMgr)) return [];
+        const objects = objMgr.add(offsets.LogicGameObjectManagerClient_objects).readPointer();
+        const count = objMgr.add(offsets.LogicGameObjectManagerClient_count).readU32();
+        this.#objectsArr = isValidPtr(objects) ? objects : null;
+        const ok = isValidPtr(objects) && count > 0 && count <= 1200;
+        this.#objCount = ok ? count : 0;
+        if (!ok) return [];
+        return this.#scanObjectBatch(objects, count, own, bm, now);
+    }
+
     update(bm, now) {
         if (!this.#moduleBase) return;
         if (now === undefined) now = Date.now();
-        const functions = getFunctions();
         try {
-            const own = functions.LogicBattleModeClient_getOwnCharacter(bm);
+            const own = getFunctions().LogicBattleModeClient_getOwnCharacter(bm);
             if (!isValidPtr(own)) {
                 this.state.ownCharacter = null;
                 this.state.battleModeClient = null;
@@ -1574,120 +1787,8 @@ class Scanner {
             }
             this.state.ownCharacter = own;
             this.state.battleModeClient = bm;
-            let myTeamFromMgr = -1;
-            try {
-                const mgrForTeam = bm.add(offsets.BattleMode_objectManager).readPointer();
-                if (isValidPtr(mgrForTeam)) {
-                    this.#objMgrPtr = mgrForTeam;
-                    myTeamFromMgr = this.#ownTeamOf(mgrForTeam);
-                }
-            } catch (_) {}
-            this.state.myTeamId = myTeamFromMgr >= 0 ? myTeamFromMgr : this.#teamOf(own, bm);
-            this.state.myPlayerIndex = this.#readOwnerIndex(own);
-            this.#friendlyIdx.clear();
-            this.#friendlyIdx.add(this.state.myPlayerIndex);
-            this.#charsByIndex.clear();
-            this.#rememberCharacter(this.state.myPlayerIndex, own);
-            this.state.myX = this.#fieldS32(own, offsets.LogicGameObjectClient_x);
-            this.state.myY = this.#fieldS32(own, offsets.LogicGameObjectClient_y);
-            this.state.mySpeed = 0;
-            let ownData = this.dataFieldOf(own);
-            if (!isValidPtr(ownData)) ownData = this.dataOf(own);
-            if (isValidPtr(ownData)) {
-                this.state.myRadius = this.collisionRadius(ownData) | 0;
-                const ownSpeed = this.#characterSpeed(ownData);
-                if (ownSpeed >= 300 && ownSpeed <= 3000) this.state.mySpeed = ownSpeed;
-            }
-            this.#probeBudget = 8;
-            const enemies = [];
-            const vtableProj = this.#moduleBase.add(offsets.LogicProjectileData_vtable);
-            const vtableProjClient = this.#moduleBase.add(offsets.LogicProjectileClient_vtable);
-            const objMgr = bm.add(offsets.BattleMode_objectManager).readPointer();
-            if (isValidPtr(objMgr)) {
-                const objects = objMgr
-                    .add(offsets.LogicGameObjectManagerClient_objects)
-                    .readPointer();
-                const count = objMgr.add(offsets.LogicGameObjectManagerClient_count).readU32();
-                this.#objectsArr = isValidPtr(objects) ? objects : null;
-                this.#objCount = isValidPtr(objects) && count > 0 && count <= 1200 ? count : 0;
-                if (isValidPtr(objects) && count > 0 && count <= 1200) {
-                    const stride = offsets.LogicGameObjectManagerClient_ptrStride;
-                    let batchView = null;
-                    try {
-                        const buf = objects.readByteArray(count * stride);
-                        if (buf) batchView = new DataView(buf);
-                    } catch (_) {}
-                    for (let i = 0; i < count; i++) {
-                        try {
-                            let obj;
-                            if (batchView) {
-                                const off = i * stride;
-                                const lo = batchView.getUint32(off, true);
-                                const hi = batchView.getUint32(off + 4, true);
-                                if (lo === 0 && hi === 0) continue;
-                                obj = ptrFromU32(lo, hi);
-                            } else {
-                                obj = objects.add(i * stride).readPointer();
-                            }
-                            if (!isValidPtr(obj)) continue;
-                            const data = this.dataFieldOf(obj);
-                            if (!isValidPtr(data)) continue;
-                            let objVt = null;
-                            try {
-                                objVt = obj.readPointer();
-                            } catch (_) {}
-                            if (
-                                (objVt && objVt.equals(vtableProjClient)) ||
-                                data.readPointer().equals(vtableProj)
-                            ) {
-                                this.#captureProjectile(obj, data, now);
-                                continue;
-                            }
-                            if (obj.equals(own)) continue;
-                            if (!this.#isEnemyOf(obj, bm, false)) {
-                                const idx = this.#readOwnerIndex(obj);
-                                if (idx >= 0) {
-                                    this.#friendlyIdx.add(idx);
-                                    if (idx !== this.state.myPlayerIndex)
-                                        this.#rememberCharacter(idx, obj);
-                                }
-                                continue;
-                            }
-                            if (obj.add(offsets.LogicCharacterClient_hitpoints).readU32() === 0)
-                                continue;
-                            const dataKey = this.#ptrKey(data);
-                            let brawlerName;
-                            if (dataKey) {
-                                const cached = this.#brawlerNameCache.get(dataKey);
-                                if (cached !== undefined) brawlerName = cached;
-                                else {
-                                    brawlerName = this.#readDataName(data);
-                                    this.#brawlerNameCache.set(dataKey, brawlerName);
-                                }
-                            } else brawlerName = this.#readDataName(data);
-                            const radius = this.collisionRadius(data) | 0;
-                            if (!brawlerName && radius <= 0) continue;
-                            const kind = brawlerName ? "player" : "spawnable";
-                            const moveSpeed = this.#characterSpeed(data);
-                            const playerIndex = this.#readOwnerIndex(obj);
-                            if (brawlerName) this.#rememberCharacter(playerIndex, obj);
-                            enemies.push({
-                                gid: this.#ptrKey(obj),
-                                ptr: obj,
-                                x: this.#fieldS32(obj, offsets.LogicGameObjectClient_x),
-                                y: this.#fieldS32(obj, offsets.LogicGameObjectClient_y),
-                                brawlerName,
-                                body: obj,
-                                teamId: this.#teamOf(obj, bm),
-                                moveSpeed,
-                                moveAngle: this.#moveAngleOf(obj),
-                                radius,
-                                kind
-                            });
-                        } catch (_) {}
-                    }
-                }
-            }
+            this.#scanOwn(own, bm);
+            const enemies = this.#scanEnemies(own, bm, now);
             this.#scanCount++;
             if ((this.#scanCount & 63) === 0) {
                 this.#brawlerNameCache.clear();
@@ -1696,7 +1797,7 @@ class Scanner {
             this.state.enemies = enemies;
             this.state.projectiles = this.#updateLiveProjectiles(now);
             this.state.lastUpdate = now;
-        } catch (_) {}
+        } catch {}
     }
 
     resetCache() {

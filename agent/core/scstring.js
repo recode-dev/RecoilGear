@@ -7,7 +7,7 @@ export const readScString = (value, maxLength = defaultMaxLength) => {
         if (!text) return null;
         if (text.length > maxLength) return null;
         return text;
-    } catch (_) {
+    } catch {
         return null;
     }
 };

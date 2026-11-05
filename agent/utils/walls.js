@@ -33,69 +33,81 @@ class WallGrid {
         try {
             const fn = getFunctions().LogicTileMap_tileToLogic;
             if (!fn) return;
-            const a = fn(0) | 0;
-            const b = fn(1) | 0;
+            const a = Math.trunc(fn(0));
+            const b = Math.trunc(fn(1));
             const size = b - a;
             if (size >= 100 && size <= 2000) this.tileSize = size;
-        } catch (_) {}
+        } catch {}
+    }
+
+    #syncPathFinder(tileMap) {
+        try {
+            const pf = tileMap.add(offsets.LogicTileMap_pathFinder).readPointer();
+            this.#pathFinder = isValidPtr(pf) ? pf : null;
+        } catch {
+            this.#pathFinder = null;
+        }
+    }
+
+    #flagsFor(tileType, flagsByType) {
+        const key = tileType.toString();
+        let flags = flagsByType.get(key);
+        if (flags !== undefined) return flags;
+        flags = 0;
+        try {
+            const packed = tileType.add(offsets.LogicTileData_blocksMovement).readU16();
+            if (packed & 0xff) flags |= movementBit;
+            if (packed >> 8) flags |= projectileBit;
+        } catch {}
+        flagsByType.set(key, flags);
+        return flags;
+    }
+
+    #tileFlags(view, i, flagsByType) {
+        const lo = view.getUint32(i * Process.pointerSize, true);
+        const hi = view.getUint32(i * Process.pointerSize + 4, true);
+        if (lo === 0 && hi === 0) return 0;
+        let tileType = null;
+        try {
+            tileType = ptrFromU32(lo, hi).readPointer();
+        } catch {
+            return 0;
+        }
+        if (!isValidPtr(tileType)) return 0;
+        return this.#flagsFor(tileType, flagsByType);
+    }
+
+    #readGrid(tiles, total) {
+        const raw = tiles.readByteArray(total * Process.pointerSize);
+        if (!raw) return null;
+        const view = new DataView(raw);
+        const gridData = new Uint8Array(total);
+        const flagsByType = new Map();
+        for (let i = 0; i < total; i++) gridData[i] = this.#tileFlags(view, i, flagsByType);
+        return gridData;
     }
 
     #rebuildFrom(tileMap) {
         if (!isValidPtr(tileMap)) return false;
         try {
             this.#syncTileSize();
-            try {
-                const pf = tileMap.add(offsets.LogicTileMap_pathFinder).readPointer();
-                this.#pathFinder = isValidPtr(pf) ? pf : null;
-            } catch (_) {
-                this.#pathFinder = null;
-            }
+            this.#syncPathFinder(tileMap);
             const width = tileMap.add(offsets.LogicTileMap_width).readS32();
             const height = tileMap.add(offsets.LogicTileMap_height).readS32();
             if (width <= 0 || width > maxMapTiles || height <= 0 || height > maxMapTiles)
                 return false;
-            const total = width * height;
-            if (total > maxTotalTiles) return false;
+            if (width * height > maxTotalTiles) return false;
             const tiles = tileMap.add(offsets.LogicTileMap_tiles).readPointer();
             if (!isValidPtr(tiles)) return false;
-            const pointerSize = Process.pointerSize;
-            const raw = tiles.readByteArray(total * pointerSize);
-            if (!raw) return false;
-            const view = new DataView(raw);
-            const gridData = new Uint8Array(total);
-            const flagsByType = new Map();
-            for (let i = 0; i < total; i++) {
-                const lo = view.getUint32(i * pointerSize, true);
-                const hi = view.getUint32(i * pointerSize + 4, true);
-                if (lo === 0 && hi === 0) continue;
-                const tile = ptrFromU32(lo, hi);
-                let tileType;
-                try {
-                    tileType = tile.readPointer();
-                } catch (_) {
-                    continue;
-                }
-                if (!isValidPtr(tileType)) continue;
-                const key = tileType.toString();
-                let flags = flagsByType.get(key);
-                if (flags === undefined) {
-                    flags = 0;
-                    try {
-                        const packed = tileType.add(offsets.LogicTileData_blocksMovement).readU16();
-                        if (packed & 0xff) flags |= movementBit;
-                        if (packed >> 8) flags |= projectileBit;
-                    } catch (_) {}
-                    flagsByType.set(key, flags);
-                }
-                gridData[i] = flags;
-            }
+            const gridData = this.#readGrid(tiles, width * height);
+            if (!gridData) return false;
             this.#walls = gridData;
             this.#width = width;
             this.#height = height;
             this.#needsRebuild = false;
             this.#gridVersion++;
             return true;
-        } catch (_) {
+        } catch {
             return false;
         }
     }
@@ -111,33 +123,32 @@ class WallGrid {
         this.maybeRefreshWallCache(battleMode, Date.now());
     }
 
-    maybeRefreshWallCache(battleMode, now) {
+    maybeRefreshWallCache(battleMode, now = Date.now()) {
         if (!this.#needsRebuild || !isValidPtr(battleMode)) return;
-        if (now === undefined) now = Date.now();
         if (now - this.#lastFailedTs < retryMs) return;
         try {
             const tileMap = getFunctions().LogicBattleModeClient_getTileMap(battleMode);
             if (this.#rebuildFrom(tileMap)) return;
-        } catch (_) {}
+        } catch {}
         this.#lastFailedTs = now;
     }
 
-    #pfKey(size, x1, y1, x2, y2, f1, f2) {
-        return `${size}|${x1}|${y1}|${x2}|${y2}|${f1}|${f2}`;
+    #pfKey(q) {
+        return `${q.size}|${q.x1}|${q.y1}|${q.x2}|${q.y2}|${q.f1}|${q.f2}`;
     }
 
-    #pfRemember(size, x1, y1, x2, y2, f1, f2, dist) {
+    #pfRemember(q, dist) {
         const now = Date.now();
         if (now - this.#pfMemoTs > pfBucketMs || this.#pfMemo.size > pfMemoMax) {
             this.#pfMemo.clear();
             this.#pfMemoTs = now;
         }
-        this.#pfMemo.set(this.#pfKey(size, x1, y1, x2, y2, f1, f2), dist);
+        this.#pfMemo.set(this.#pfKey(q), dist);
     }
 
-    #pfLookup(size, x1, y1, x2, y2, f1, f2) {
+    #pfLookup(q) {
         if (Date.now() - this.#pfMemoTs > pfBucketMs) return -1;
-        const hit = this.#pfMemo.get(this.#pfKey(size, x1, y1, x2, y2, f1, f2));
+        const hit = this.#pfMemo.get(this.#pfKey(q));
         return hit === undefined ? -1 : hit;
     }
 
@@ -151,7 +162,7 @@ class WallGrid {
                     }
                 });
                 this.#tileWatchInstalled = true;
-            } catch (_) {}
+            } catch {}
         }
         this.#installPathHook(base);
     }
@@ -162,7 +173,7 @@ class WallGrid {
         try {
             const fns = getFunctions();
             if (!fns.LogicGamePlayUtil_getClosestPathfinderCollision) return;
-            const self = this;
+            const remember = (q, dist) => this.#pfRemember(q, dist);
             Interceptor.attach(base.add(offsets.LogicGamePlayUtil_getClosestPathfinderCollision), {
                 onEnter(args) {
                     this.size = args[0].toInt32();
@@ -178,35 +189,30 @@ class WallGrid {
                     try {
                         let dist = Math.round(Math.hypot(this.x2 - this.x1, this.y2 - this.y1));
                         if (retval.toInt32() & 1) {
-                            const hx = this.out.readS32() | 0;
-                            const hy = this.out.add(4).readS32() | 0;
+                            const hx = Math.trunc(this.out.readS32());
+                            const hy = Math.trunc(this.out.add(4).readS32());
                             dist = Math.max(0, Math.round(Math.hypot(hx - this.x1, hy - this.y1)));
                         }
-                        self.#pfRemember(
-                            this.size,
-                            this.x1,
-                            this.y1,
-                            this.x2,
-                            this.y2,
-                            this.f1,
-                            this.f2,
-                            dist
-                        );
-                    } catch (_) {}
+                        remember(this, dist);
+                    } catch {}
                 }
             });
-        } catch (_) {}
+        } catch {}
+    }
+
+    #blockedCell(cx, cy, checkBit) {
+        const width = this.#width;
+        const height = this.#height;
+        if (cx < 0 || cx >= width || cy < 0 || cy >= height) return false;
+        return !!(this.#walls[cy * width + cx] & checkBit);
     }
 
     losCheck(wx0, wy0, wx1, wy1, checkBit) {
-        const gridData = this.#walls;
-        if (!gridData) return true;
-        const width = this.#width;
-        const height = this.#height;
-        let cx = (wx0 / this.tileSize) | 0;
-        let cy = (wy0 / this.tileSize) | 0;
-        const tx = (wx1 / this.tileSize) | 0;
-        const ty = (wy1 / this.tileSize) | 0;
+        if (!this.#walls) return true;
+        let cx = Math.trunc(wx0 / this.tileSize);
+        let cy = Math.trunc(wy0 / this.tileSize);
+        const tx = Math.trunc(wx1 / this.tileSize);
+        const ty = Math.trunc(wy1 / this.tileSize);
         if (cx === tx && cy === ty) return true;
         const dx = Math.abs(tx - cx);
         const dy = -Math.abs(ty - cy);
@@ -224,30 +230,20 @@ class WallGrid {
                 err += dx;
                 cy += sy;
             }
-            if (cx === tx && cy === ty) {
-                if (
-                    tx >= 0 &&
-                    tx < width &&
-                    ty >= 0 &&
-                    ty < height &&
-                    gridData[ty * width + tx] & checkBit
-                )
-                    return false;
-                return true;
-            }
-            if (cx < 0 || cx >= width || cy < 0 || cy >= height) continue;
-            if (gridData[cy * width + cx] & checkBit) return false;
+            if (cx === tx && cy === ty) return !this.#blockedCell(tx, ty, checkBit);
+            if (this.#blockedCell(cx, cy, checkBit)) return false;
         }
         return true;
     }
 
-    losCheckWide(wx0, wy0, wx1, wy1, checkBit, radius) {
+    losCheckWide(wx0, wy0, wx1, wy1, opts) {
+        const checkBit = opts.bit;
         if (this.losCheck(wx0, wy0, wx1, wy1, checkBit) === false) return false;
-        const r = radius > 0 ? radius : 0;
+        const r = Math.max(opts.radius, 0);
         if (r <= 0) return true;
         const dx = wx1 - wx0;
         const dy = wy1 - wy0;
-        const len = Math.sqrt(dx * dx + dy * dy);
+        const len = Math.hypot(dx, dy);
         if (!(len > 1)) return this.isBlockedAt(wx1, wy1, checkBit) === false;
         const px = (-dy / len) * r;
         const py = (dx / len) * r;
@@ -262,49 +258,54 @@ class WallGrid {
         const width = this.#width;
         const height = this.#height;
         if (width <= 0 || height <= 0) return false;
-        const tx = (wx / this.tileSize) | 0;
-        const ty = (wy / this.tileSize) | 0;
+        const tx = Math.trunc(wx / this.tileSize);
+        const ty = Math.trunc(wy / this.tileSize);
         if (tx < 0 || tx >= width || ty < 0 || ty >= height) return false;
         return !!(gridData[ty * width + tx] & checkBit);
+    }
+
+    #queryFor(size, wx0, wy0, wx1, wy1) {
+        return {
+            size,
+            x1: Math.trunc(wx0),
+            y1: Math.trunc(wy0),
+            x2: Math.trunc(wx1),
+            y2: Math.trunc(wy1),
+            f1: 0,
+            f2: 0
+        };
     }
 
     firstWallHit(wx0, wy0, wx1, wy1, size) {
         const fn = getFunctions().LogicGamePlayUtil_getClosestPathfinderCollision;
         if (!fn || !isValidPtr(this.#pathFinder)) return -1;
-        const bodySize = typeof size === "number" ? size | 0 : 0;
-        const memo = this.#pfLookup(bodySize, wx0 | 0, wy0 | 0, wx1 | 0, wy1 | 0, 0, 0);
+        const bodySize = typeof size === "number" ? Math.trunc(size) : 0;
+        const q = this.#queryFor(bodySize, wx0, wy0, wx1, wy1);
+        const memo = this.#pfLookup(q);
         if (memo >= 0) return memo;
         try {
             if (!this.#probeOut) this.#probeOut = Memory.alloc(8);
             this.#probeOut.writeS32(0);
             this.#probeOut.add(4).writeS32(0);
-            const hit =
-                fn(
-                    bodySize,
-                    wx0 | 0,
-                    wy0 | 0,
-                    wx1 | 0,
-                    wy1 | 0,
-                    this.#pathFinder,
-                    this.#probeOut,
-                    0,
-                    0
-                ) | 0;
-            const hx = this.#probeOut.readS32() | 0;
-            const hy = this.#probeOut.add(4).readS32() | 0;
-            const dist = !(hit & 1)
-                ? Math.round(Math.hypot(wx1 - wx0, wy1 - wy0))
-                : Math.max(0, Math.round(Math.hypot(hx - wx0, hy - wy0)));
-            this.#pfRemember(bodySize, wx0 | 0, wy0 | 0, wx1 | 0, wy1 | 0, 0, 0, dist);
+            const hit = Math.trunc(
+                fn(bodySize, q.x1, q.y1, q.x2, q.y2, this.#pathFinder, this.#probeOut, 0, 0)
+            );
+            const hx = Math.trunc(this.#probeOut.readS32());
+            const hy = Math.trunc(this.#probeOut.add(4).readS32());
+            const dist =
+                hit & 1
+                    ? Math.max(0, Math.round(Math.hypot(hx - wx0, hy - wy0)))
+                    : Math.round(Math.hypot(wx1 - wx0, wy1 - wy0));
+            this.#pfRemember(q, dist);
             return dist;
-        } catch (_) {
+        } catch {
             return -1;
         }
     }
 
     isBlockedWide(wx, wy, radius, checkBit) {
         if (this.isBlockedAt(wx, wy, checkBit)) return true;
-        const r = radius > 0 ? radius : 0;
+        const r = Math.max(radius, 0);
         if (r <= 0) return false;
         return (
             this.isBlockedAt(wx + r, wy, checkBit) ||
@@ -322,8 +323,8 @@ export const notifyBattleModeChanged = (battleMode) => wallGrid.notifyBattleMode
 export const maybeRefreshWallCache = (battleMode, now) =>
     wallGrid.maybeRefreshWallCache(battleMode, now);
 export const watchTileChanges = (base) => wallGrid.watchTileChanges(base);
-export const losCheckWide = (wx0, wy0, wx1, wy1, checkBit, radius) =>
-    wallGrid.losCheckWide(wx0, wy0, wx1, wy1, checkBit, radius);
+export const losCheckWide = (wx0, wy0, wx1, wy1, opts) =>
+    wallGrid.losCheckWide(wx0, wy0, wx1, wy1, opts);
 export const firstWallHit = (wx0, wy0, wx1, wy1, size) =>
     wallGrid.firstWallHit(wx0, wy0, wx1, wy1, size);
 export const isBlockedWide = (wx, wy, radius, checkBit) =>

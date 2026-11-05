@@ -11,27 +11,12 @@ const k = [
 
 const rotr = (x, n) => ((x >>> n) | (x << (32 - n))) >>> 0;
 
-const digestToBytes = (h0, h1, h2, h3, h4, h5, h6, h7) => {
-    const out = new Uint8Array(32);
-    const words = [h0, h1, h2, h3, h4, h5, h6, h7];
-    for (let i = 0; i < 8; i++) {
-        out[i * 4] = (words[i] >>> 24) & 0xff;
-        out[i * 4 + 1] = (words[i] >>> 16) & 0xff;
-        out[i * 4 + 2] = (words[i] >>> 8) & 0xff;
-        out[i * 4 + 3] = words[i] & 0xff;
-    }
-    return out;
-};
-
 const compress = (buf) => {
-    let h0 = 0x6a09e667;
-    let h1 = 0xbb67ae85;
-    let h2 = 0x3c6ef372;
-    let h3 = 0xa54ff53a;
-    let h4 = 0x510e527f;
-    let h5 = 0x9b05688c;
-    let h6 = 0x1f83d9ab;
-    let h7 = 0x5be0cd19;
+    const hv = new Int32Array([
+        0x6a09e667, 0xbb67ae85, 0x3c6ef372, 0xa54ff53a, 0x510e527f, 0x9b05688c, 0x1f83d9ab,
+        0x5be0cd19
+    ]);
+    const v = new Int32Array(8);
     const w = new Int32Array(64);
     for (let off = 0; off < buf.length; off += 64) {
         for (let i = 0; i < 16; i++) {
@@ -43,42 +28,35 @@ const compress = (buf) => {
             const b = w[i - 2];
             const s0 = rotr(a, 7) ^ rotr(a, 18) ^ (a >>> 3);
             const s1 = rotr(b, 17) ^ rotr(b, 19) ^ (b >>> 10);
-            w[i] = (w[i - 16] + s0 + w[i - 7] + s1) | 0;
+            w[i] = w[i - 16] + s0 + w[i - 7] + s1;
         }
-        let a = h0;
-        let b = h1;
-        let c = h2;
-        let d = h3;
-        let e = h4;
-        let f = h5;
-        let g = h6;
-        let h = h7;
+        v.set(hv);
         for (let i = 0; i < 64; i++) {
-            const s1 = rotr(e, 6) ^ rotr(e, 11) ^ rotr(e, 25);
-            const ch = (e & f) ^ (~e & g);
-            const t1 = (h + s1 + ch + k[i] + w[i]) | 0;
-            const s0 = rotr(a, 2) ^ rotr(a, 13) ^ rotr(a, 22);
-            const maj = (a & b) ^ (a & c) ^ (b & c);
-            const t2 = (s0 + maj) | 0;
-            h = g;
-            g = f;
-            f = e;
-            e = (d + t1) | 0;
-            d = c;
-            c = b;
-            b = a;
-            a = (t1 + t2) | 0;
+            const s1 = rotr(v[4], 6) ^ rotr(v[4], 11) ^ rotr(v[4], 25);
+            const ch = (v[4] & v[5]) ^ (~v[4] & v[6]);
+            const t1 = v[7] + s1 + ch + k[i] + w[i];
+            const s0 = rotr(v[0], 2) ^ rotr(v[0], 13) ^ rotr(v[0], 22);
+            const maj = (v[0] & v[1]) ^ (v[0] & v[2]) ^ (v[1] & v[2]);
+            const t2 = s0 + maj;
+            v[7] = v[6];
+            v[6] = v[5];
+            v[5] = v[4];
+            v[4] = v[3] + t1;
+            v[3] = v[2];
+            v[2] = v[1];
+            v[1] = v[0];
+            v[0] = t1 + t2;
         }
-        h0 = (h0 + a) | 0;
-        h1 = (h1 + b) | 0;
-        h2 = (h2 + c) | 0;
-        h3 = (h3 + d) | 0;
-        h4 = (h4 + e) | 0;
-        h5 = (h5 + f) | 0;
-        h6 = (h6 + g) | 0;
-        h7 = (h7 + h) | 0;
+        for (let i = 0; i < 8; i++) hv[i] += v[i];
     }
-    return digestToBytes(h0, h1, h2, h3, h4, h5, h6, h7);
+    const out = new Uint8Array(32);
+    for (let i = 0; i < 8; i++) {
+        out[i * 4] = (hv[i] >>> 24) & 0xff;
+        out[i * 4 + 1] = (hv[i] >>> 16) & 0xff;
+        out[i * 4 + 2] = (hv[i] >>> 8) & 0xff;
+        out[i * 4 + 3] = hv[i] & 0xff;
+    }
+    return out;
 };
 
 export const sha256 = (bytes) => {

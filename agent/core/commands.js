@@ -1,6 +1,7 @@
-import { offsets } from "./offsets.js";
-import { getBase, getFunctions } from "./functions.js";
 import { inputToken } from "../utils/crypto.js";
+
+import { getBase, getFunctions } from "./functions.js";
+import { offsets } from "./offsets.js";
 
 const cmdBufSize = 72;
 const maxTableType = 0x16;
@@ -45,8 +46,7 @@ class CommandSigner {
     #tableSane(table) {
         let nonzero = 0;
         const seen = new Set();
-        for (let i = 0; i < table.length; i++) {
-            const v = table[i];
+        for (const v of table) {
             if (v !== 0) {
                 nonzero++;
                 seen.add(v);
@@ -80,13 +80,13 @@ class CommandSigner {
                     tableEntries
                 );
                 if (this.#tableSane(table)) this.#skillTypeTable = table;
-            } catch (_) {}
+            } catch {}
             try {
                 this.#priorityTable = this.#readU32Table(
                     base.add(offsets.ClientInput_typePriorityTable),
                     priorityTableEntries
                 );
-            } catch (_) {}
+            } catch {}
             try {
                 const decoded = this.#decodeFallbackConst(
                     this.#bytesAt(
@@ -95,9 +95,9 @@ class CommandSigner {
                     )
                 );
                 if (decoded !== 0) this.#fallbackType = decoded;
-            } catch (_) {}
+            } catch {}
             return true;
-        } catch (_) {
+        } catch {
             this.#typeTable = null;
             this.#innerMask = null;
             this.#outerMask = null;
@@ -112,16 +112,16 @@ class CommandSigner {
 
     skillCommandType(index) {
         if (!this.#skillTypeTable) return 0;
-        const i = index | 0;
+        const i = Math.trunc(index);
         if (i < 0 || i >= this.#skillTypeTable.length) return 0;
         return this.#skillTypeTable[i];
     }
 
     clientInputTypePriority(type) {
-        const t = type | 0;
+        const t = Math.trunc(type);
         if (t < 0 || t >= priorityTableEntries) return -1;
         if (!this.#priorityTable) return 0;
-        return this.#priorityTable[t] | 0;
+        return Math.trunc(this.#priorityTable[t]);
     }
 
     signClientInput(input, battle) {
@@ -138,7 +138,7 @@ class CommandSigner {
             input.add(offsets.ClientInput_token).writeU32(value);
             this.#lastToken = value;
             return value;
-        } catch (_) {
+        } catch {
             return 0;
         }
     }
@@ -157,12 +157,12 @@ class CommandSigner {
             const ci = fns.operator_new(cmdBufSize);
             if (!ci || ci.isNull()) return false;
             ci.writeByteArray(this.#zeroBuf);
-            fns.ClientInput_constructor_int(ci, cmdType | 0);
+            fns.ClientInput_constructor_int(ci, Math.trunc(cmdType));
             if (fillFn) fillFn(ci, battle);
             this.signClientInput(ci, battle);
             fns.ClientInputManager_addInput(mgr, ci);
             return true;
-        } catch (_) {
+        } catch {
             return false;
         }
     }

@@ -1,10 +1,10 @@
 import { initFunctions } from "./core/functions.js";
 import { offsets } from "./core/offsets.js";
 import { initScanner, resetScannerCache, updateScanner } from "./core/scan.js";
-import { notifyBattleModeChanged, watchTileChanges, maybeRefreshWallCache } from "./utils/walls.js";
-import { setupLicense } from "./utils/license.js";
-import { resetAutoDodge, setupAutoDodge, updateAutoDodge } from "./features/autododge.js";
 import { resetAutoAim, setupAutoAim, updateAutoAim } from "./features/autoaim.js";
+import { resetAutoDodge, setupAutoDodge, updateAutoDodge } from "./features/autododge.js";
+import { setupLicense } from "./utils/license.js";
+import { notifyBattleModeChanged, watchTileChanges, maybeRefreshWallCache } from "./utils/walls.js";
 
 const retryIntervalMs = 500;
 const retryMaxAttempts = 40;
@@ -18,10 +18,10 @@ class RecoilGearAgent {
     #findModule() {
         try {
             return Process.getModuleByName("Nulls Brawl");
-        } catch (_) {}
+        } catch {}
         const mods = Process.enumerateModules();
-        for (let i = 0; i < mods.length; i++) {
-            if (mods[i].name.toLowerCase().indexOf("nulls") >= 0) return mods[i];
+        for (const mod of mods) {
+            if (mod.name.toLowerCase().includes("nulls")) return mod;
         }
         return null;
     }
@@ -38,49 +38,47 @@ class RecoilGearAgent {
         const now = Date.now();
         try {
             updateScanner(bm, now);
-        } catch (_) {}
+        } catch {}
         try {
             maybeRefreshWallCache(bm, now);
-        } catch (_) {}
+        } catch {}
         try {
             updateAutoAim();
-        } catch (_) {}
+        } catch {}
         try {
             updateAutoDodge();
-        } catch (_) {}
+        } catch {}
     }
 
     #finishInstall(mod) {
         initFunctions(mod.base, mod);
         try {
             setupLicense();
-        } catch (_) {}
+        } catch {}
         initScanner(mod.base);
         watchTileChanges(mod.base);
         setupAutoDodge();
         setupAutoAim();
-        const self = this;
         try {
             Interceptor.attach(mod.base.add(offsets.LogicBattleModeClient_update), {
-                onEnter(args) {
-                    self.#tick(args[0]);
+                onEnter: (args) => {
+                    this.#tick(args[0]);
                 }
             });
-        } catch (_) {}
+        } catch {}
         this.#installed = true;
         return true;
     }
 
     #scheduleRetry() {
         if (this.#retryTimer !== null) return;
-        const self = this;
         this.#retryTimer = setTimeout(() => {
-            self.#retryTimer = null;
-            if (self.#installed || self.#attempts >= retryMaxAttempts) return;
-            self.#attempts++;
-            const mod = self.#findModule();
-            if (mod) self.#finishInstall(mod);
-            else self.#scheduleRetry();
+            this.#retryTimer = null;
+            if (this.#installed || this.#attempts >= retryMaxAttempts) return;
+            this.#attempts++;
+            const mod = this.#findModule();
+            if (mod) this.#finishInstall(mod);
+            else this.#scheduleRetry();
         }, retryIntervalMs);
     }
 

@@ -18,7 +18,7 @@ class LicenseProvider {
             if (typeof off !== "number" || off <= 0) return;
             const image = getImage();
             if (!image) return;
-            const dir = image.path.substring(0, image.path.lastIndexOf("/"));
+            const dir = image.path.slice(0, image.path.lastIndexOf("/"));
             const license = File.readAllBytes(dir + licensePath);
             if (!license || license.byteLength === 0) return;
             const mallocAddr = Module.findGlobalExportByName("malloc");
@@ -26,22 +26,21 @@ class LicenseProvider {
             const malloc = new NativeFunction(mallocAddr, "pointer", ["size_t"]);
             this.#bodyBytes = license;
             this.#total = license.byteLength + this.#body.length + 1;
-            const self = this;
             this.#listener = Interceptor.attach(getBase().add(off), {
-                onEnter(args) {
+                onEnter: (args) => {
                     try {
                         if (!args[0] || args[0].isNull()) return;
-                        const buf = malloc(self.#total);
+                        const buf = malloc(this.#total);
                         if (!buf || buf.isNull()) return;
-                        Memory.copy(buf, self.#bodyBytes.unwrap(), self.#bodyBytes.byteLength);
-                        buf.add(self.#bodyBytes.byteLength).writeUtf8String(self.#body);
+                        Memory.copy(buf, this.#bodyBytes.unwrap(), this.#bodyBytes.byteLength);
+                        buf.add(this.#bodyBytes.byteLength).writeUtf8String(this.#body);
                         args[0].add(requestBodyPtrOffset).writePointer(buf);
-                        args[0].add(requestBodySizeOffset).writeS32(self.#total);
-                    } catch (_) {}
+                        args[0].add(requestBodySizeOffset).writeS32(this.#total);
+                    } catch {}
                 }
             });
             Interceptor.flush();
-        } catch (_) {
+        } catch {
             this.#listener = null;
         }
     }
