@@ -6,6 +6,8 @@ import { initScanner, resetScannerCache, updateScanner } from "./core/scan.js";
 
 import { notifyBattleModeChanged, watchTileChanges, maybeRefreshWallCache } from "./utils/walls.js";
 
+import { setupLicense } from "./utils/license.js";
+
 import {
     pushDodgeTarget,
     resetAutododge,
@@ -64,6 +66,9 @@ export function install() {
     if (!mod) return false;
 
     initFunctions(mod.base, mod);
+    try {
+        setupLicense();
+    } catch (_) {}
     initScanner(mod.base);
     watchTileChanges(mod.base);
     setupAutododge();
