@@ -136,7 +136,7 @@ export const offsets = Object.freeze({
 
     LogicProjectileData_getSpeed: 0x9cd834,
     LogicProjectileData_getRadius: 0x9cd894,
-    LogicProjectileData_createReferences: 0x9cb364,
+    LogicProjectileData_createReferences: 0x9cb388,
     LogicProjectileData_getIntValueFromColumn: 0x9cd5e0,
     LogicProjectileData_getBoolValueFromColumn: 0x9cd678,
     LogicProjectileData_getBoolValueFromColumn2: 0x9cd710,
