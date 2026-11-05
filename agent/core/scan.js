@@ -297,7 +297,7 @@ function _teamOf(obj, bm) {
     const fns = getFunctions();
     if (fns.LogicGameObjectClient_getTeam && isValidPtr(bm)) {
         try {
-            const mgr = bm.add(offsets.BattleMode_logicBattleModeClient).readPointer();
+            const mgr = bm.add(offsets.BattleMode_objectManager).readPointer();
             if (isValidPtr(mgr)) {
                 const t = fns.LogicGameObjectClient_getTeam(obj, mgr) | 0;
                 if (t !== -1) return t;
@@ -323,7 +323,7 @@ function _isEnemyOf(obj, bm, unknownAsEnemy) {
     try {
         const mode = isValidPtr(bm) ? bm : scanData.battleModeClient;
         if (isValidPtr(mode)) {
-            const mgr = mode.add(offsets.BattleMode_logicBattleModeClient).readPointer();
+            const mgr = mode.add(offsets.BattleMode_objectManager).readPointer();
             if (isValidPtr(mgr)) {
                 const myTeam = mgr.add(offsets.LogicGameObjectManagerClient_ownTeam).readS32() | 0;
                 if (fns.LogicGameObjectClient_getTeam) {
@@ -473,9 +473,9 @@ function _castingRangeTiles(character) {
     const skill = _weaponSkillFor(character);
     if (!skill) return 0;
     const fns = getFunctions();
-    if (fns.LogicSkillData_getRange) {
+    if (fns.LogicAccessoryData_getRange) {
         try {
-            const tiles = fns.LogicSkillData_getRange(skill) | 0;
+            const tiles = fns.LogicAccessoryData_getRange(skill) | 0;
             if (tiles >= 1 && tiles <= 64) return tiles;
         } catch (_) {}
     }
@@ -890,14 +890,14 @@ function _readProjectileMeta(projectile, data, speed, rangeUnits, beam) {
         lifeMs = ticks * TICK_MS;
         travel = travelDistance(ticks, speed);
     }
-    if (fns.LogicProjectileData_getType) {
+    if (fns.LogicProjectileData_getUniqueProperty) {
         try {
-            const t = fns.LogicProjectileData_getType(data) | 0;
+            const t = fns.LogicProjectileData_getUniqueProperty(data) | 0;
             if (t >= 0 && t <= 20) typeId = t;
         } catch (_) {}
     }
     if (typeId < 0) {
-        const t = _readClientU32(data, offsets.LogicProjectileData_type, 20);
+        const t = _readClientU32(data, offsets.LogicProjectileData_uniqueProperty, 20);
         if (t >= 0) typeId = t;
     }
     try {
@@ -1498,7 +1498,7 @@ export function updateScanner(bm, now) {
         scanData.battleModeClient = bm;
         let myTeamFromMgr = -1;
         try {
-            const mgrForTeam = bm.add(offsets.BattleMode_logicBattleModeClient).readPointer();
+            const mgrForTeam = bm.add(offsets.BattleMode_objectManager).readPointer();
             if (isValidPtr(mgrForTeam))
                 myTeamFromMgr =
                     mgrForTeam.add(offsets.LogicGameObjectManagerClient_ownTeam).readS32() | 0;
@@ -1523,7 +1523,7 @@ export function updateScanner(bm, now) {
         const enemies = [];
         const vtableProj = moduleBase.add(offsets.LogicProjectileData_vtable);
         const vtableProjClient = moduleBase.add(offsets.LogicProjectileClient_vtable);
-        const objMgr = bm.add(offsets.BattleMode_logicBattleModeClient).readPointer();
+        const objMgr = bm.add(offsets.BattleMode_objectManager).readPointer();
         if (isValidPtr(objMgr)) {
             const objects = objMgr.add(offsets.LogicGameObjectManagerClient_objects).readPointer();
             const count = objMgr.add(offsets.LogicGameObjectManagerClient_count).readU32();

@@ -93,7 +93,7 @@ export function initFunctions(baseIn, imageIn) {
             "int32",
             "int32"
         ]),
-        LogicProjectileData_getType: _nf("LogicProjectileData_getType", "int32", ["pointer"]),
+        LogicProjectileData_getUniqueProperty: _nf("LogicProjectileData_getUniqueProperty", "int32", ["pointer"]),
         LogicProjectileClient_isBeam: _nf("LogicProjectileData_isBeam", "uint32", ["pointer"]),
         LogicSkillData_getSpread: _nf("LogicSkillData_getSpread", "int32", ["pointer"]),
         LogicSkillData_getNumBulletsInOneAttack: _nf(
@@ -126,7 +126,7 @@ export function initFunctions(baseIn, imageIn) {
         LogicProjectileData_getTravelType: _nf("LogicProjectileData_getTravelType", "int32", [
             "pointer"
         ]),
-        LogicSkillData_getRange: _nf("LogicSkillData_getRange", "int32", ["pointer"]),
+        LogicAccessoryData_getRange: _nf("LogicAccessoryData_getRange", "int32", ["pointer"]),
         LogicProjectileData_getIntValueFromColumn: _nf(
             "LogicProjectileData_getIntValueFromColumn",
             "int32",

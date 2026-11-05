@@ -1,6 +1,6 @@
 # RecoilGear — отчёт верификации оффсетов (v69.252 iOS arm64)
 
-**Дата:** 2026-11-05 · **Статус:** все оффсеты VERIFIED · **Всего записей:** 137 · **Исправлено:** 1
+**Дата:** 2026-11-05 · **Статус:** все оффсеты VERIFIED · **Всего записей:** 137 · **Исправлено:** 1 · **Переименовано:** 4
 
 
 ## Методика
@@ -30,6 +30,7 @@ K-таблицей в дампе v69 по адресу 0xe1df58 (64 слова);
 | Записей в offsets.js | 137 |
 | VERIFIED | 137 / 137 |
 | Исправлено (было → стало) | `LogicProjectileData_createReferences: 0x9cb364 → 0x9cb388` |
+| Переименовано (имя ключа; оффсет не менялся) | 4 — см. «Переименования» |
 | Спор u32-vs-float (SkillCommandTypeTable) | **u32** — дизасм потребителя: `ldr s1,[x9,x8,lsl #2]` + `ushll v1.8h,v1.8b,#0` (32-битная запись, байтовое расширение; НЕ float-семантика) |
 | Fallback-константа | @0xe1bc28 = `0xdeadbeef` (4×u16 в дампе; совпадает с константой агента) |
 
@@ -39,6 +40,15 @@ K-таблицей в дампе v69 по адресу 0xe1df58 (64 слова);
 |---|---|---|---|
 | LogicProjectileData_createReferences | `0x9cb364` | `0x9cb388` | 0x9cb364 — слот [2] vtable = **destruct** (bl LogicData::destruct + обнуление полей). createReferences — слот [4] = 0x9cb388 (bl LogicData::createReferences + полный CSV-загрузчик с колонками Speed/IsBeam/Radius/...). Позиции [2]/[4] совпадают с v36-таблицей 1:1. |
 
+## Переименования (было → стало; оффсеты не менялись)
+
+| Ключ (стало) | Было | Основание |
+|---|---|---|
+| BattleMode_objectManager | `BattleMode_logicBattleModeClient` | Поле BattleMode+0x28 — указатель на **LogicGameObjectManagerClient** (менеджер объектов), а не на LogicBattleModeClient: именно его передают в findGameObject/addInput/getTeam (VERIFIED-цепочки). Имя приведено к фактическому классу поля. |
+| LogicProjectileData_uniqueProperty | `LogicProjectileData_type` | Поле +0x28c питается из CSV-колонки **UniqueProperty** (CR-карта createReferences). Родное имя клиента: v36-символ `_ZNK19LogicProjectileData17getUniquePropertyEv` — тело `return *(this+0x18c)`, то же поле. |
+| LogicProjectileData_getUniqueProperty | `LogicProjectileData_getType` | Геттер 0x9cdd70 (`return *(this+0x28c)`) — v69-аналог v36 `LogicProjectileData::getUniqueProperty` (`return *(this+0x18c)`). Имя выровнено с клиентским символом. |
+| LogicAccessoryData_getRange | `LogicSkillData_getRange` | Класс-владелец по v36-символу `_ZNK18LogicAccessoryData8getRangeEv` @0x931cf0 — **LogicAccessoryData** (колонка "Range" таблицы аксессуаров). Агент вызывает геттер на объекте скилла/аксессуара, семантика «range в тайлах» верна. |
+
 ## По-записные доказательства
 
 
@@ -46,7 +56,7 @@ K-таблицей в дампе v69 по адресу 0xe1df58 (64 слова);
 
 | # | Ключ | Значение | Доказательство | Класс | Статус |
 |---|---|---|---|---|---|
-| 1 | `BattleMode_logicBattleModeClient` | `0x28` | BattleMode+0x28 читается как указатель на LogicGameObjectManagerClient в VERIFIED-цепочке: isEnemy(FUN_1004cf7a4): getOwnPlayerTeam(*(battle+0x28)) и getTeam(obj,*(battle+0x28)); ClientInputManager_addInput вызывается как fcn.10074675c(*(lVar28+0x58),input) после lVar28=getInstance(); getOwnCharacter(FUN_100ac3934): findGameObject(*(this+0x28),*(this+0x100),-1). Семантика совпадает с v36 LogicBattleModeClient::getOwnCharacter (v36: findGameObject(*(this+0x28),...)). ВНИМАНИЕ: историческое имя ключа («logicBattleModeClient») не соответствует классу поля — по факту это указатель на менеджер объектов; оффсет 0x28 верен. | дизасм+декомпил | VERIFIED |
+| 1 | `BattleMode_objectManager` ✏️**ПЕРЕИМЕНОВАНО** | `0x28` | BattleMode+0x28 читается как указатель на LogicGameObjectManagerClient в VERIFIED-цепочке: isEnemy(FUN_1004cf7a4): getOwnPlayerTeam(*(battle+0x28)) и getTeam(obj,*(battle+0x28)); ClientInputManager_addInput вызывается как fcn.10074675c(*(lVar28+0x58),input) после lVar28=getInstance(); getOwnCharacter(FUN_100ac3934): findGameObject(*(this+0x28),*(this+0x100),-1). Семантика совпадает с v36 LogicBattleModeClient::getOwnCharacter (v36: findGameObject(*(this+0x28),...)). ПЕРЕИМЕНОВАНО (было BattleMode_logicBattleModeClient): поле — указатель на менеджер объектов LogicGameObjectManagerClient, имя ключа приведено к фактическому классу поля; оффсет 0x28 не менялся. | дизасм+декомпил | VERIFIED |
 | 2 | `BattleMode_clientInputManager` | `0x58` | send-command FUN_1007a60f4 (BattleScreen, VERIFIED-контекст): fcn.10074675c(*(lVar28+0x58), piVar33) — BattleMode+0x58 передаётся как this в VERIFIED ClientInputManager::addInput. | декомпил | VERIFIED |
 | 3 | `BattleMode_hashKey` | `0x60` | FUN_1007a60f4: if(*(char*)(battle+0x70)==1){ чтение 16 байт ключа: *(byte*)(battle+0x60)..(battle+0x6f) — 16 последовательных ldrb; ключ передаётся в хэш fcn.10079d594. Совпадает с агентом: MASK_SIZE=16, battle.add(0x60). | декомпил | VERIFIED |
 | 4 | `BattleMode_hashEnabled` | `0x70` | FUN_1007a60f4 (3 места: строки 168/481/822): if(*(char*)(lVar28+0x70)=='\x01'){...подпись...} — семантика «подписывать только при 1», как в commands.js: readU8()!==1 → return 0. | декомпил | VERIFIED |
@@ -165,7 +175,7 @@ K-таблицей в дампе v69 по адресу 0xe1df58 (64 слова);
 | 82 | `LogicProjectileData_homingDistance` | `0x280` | Колонка "HomeDistance" (0x100ee4d62; в v36 называлась HomingDistance) → str w0,[x19,#0x280]; v36 getHomingDistance @0x593778 (поле +0x180 в v36). | CR-карта | VERIFIED |
 | 83 | `LogicProjectileData_steerLifeTime` | `0x284` | Колонка "SteerLifeTime" (0x100ee4d6f) → str w0,[x19,#0x284]. | CR-карта | VERIFIED |
 | 84 | `LogicProjectileData_visualizeEndPoint` | `0x288` | Колонка "SteerLifeTime"-блок, следующая запись: strb [x19,#0x288] (VisualizeEndPoint); геттер FUN_1009cdd60: return *(this+0x288). | CR-карта+геттер | VERIFIED |
-| 85 | `LogicProjectileData_type` | `0x28c` | createReferences: строка "UniqueProperty" (0x100edd449) → getIntValueFromColumn (VERIFIED) → str w0,[x19,#0x28c]. Геттер FUN_1009cdd70: return *(this+0x28c); вызывается VERIFIED autoshoot (0x7b67ec) со сравнением с малыми константами (==2) — семантика type-id. Примечание: в v69 поле питается из CSV-колонки UniqueProperty (в v36 UniqueProperty → +0x18c); в agent scan.js используется как typeId 0..20. | CR-карта+геттер+консенсус | VERIFIED |
+| 85 | `LogicProjectileData_uniqueProperty` ✏️**ПЕРЕИМЕНОВАНО** | `0x28c` | createReferences: строка "UniqueProperty" (0x100edd449) → getIntValueFromColumn (VERIFIED) → str w0,[x19,#0x28c]. Геттер FUN_1009cdd70: return *(this+0x28c); вызывается VERIFIED autoshoot (0x7b67ec) со сравнением с малыми константами (==2). Родное имя клиента: v36-символ _ZNK19LogicProjectileData17getUniquePropertyEv — тело return *(this+0x18c), то же поле (в v36 UniqueProperty → +0x18c). В agent scan.js используется как typeId 0..20. ПЕРЕИМЕНОВАНО (было LogicProjectileData_type): имя выровнено с CSV-колонкой и клиентским символом. | CR-карта+геттер+консенсус | VERIFIED |
 | 86 | `LogicProjectileData_bouncePercent` | `0x2d8` | Колонка "BouncePercent" → 0x2d8; геттер FUN_1009cda7c: return *(this+0x2d8); v36 getBouncePercent @0x2de23c; sm_columnIndexBouncePercent. | CR-карта+геттер | VERIFIED |
 | 87 | `LogicProjectileData_allowDynamicRange` | `0x2dd` | Флаг-парсер createReferences (strcmp-цепочка): "AllowDynamicRange" (0x100ee4f9f) → strb [x19,#0x2dd]. | CR-карта | VERIFIED |
 | 88 | `LogicProjectileData_ignoreCharacterCollisions` | `0x2df` | Флаг-парсер: "IgnoreCharacterCollisions" (0x100ee4fcc) → strb [x19,#0x2df]. | CR-карта | VERIFIED |
@@ -185,13 +195,13 @@ K-таблицей в дампе v69 по адресу 0xe1df58 (64 слова);
 | 97 | `LogicProjectileData_isHomingMissile` | `0x9cdd40` | FUN_1009cdd40: return *(byte*)(this+0x11e); v36 @0x70e0b0. | декомпил | VERIFIED |
 | 98 | `LogicProjectileData_isBouncing` | `0x9cda84` | FUN_1009cda84: return *(byte*)(this+0x1da); v36 @0x83b6e8. | декомпил | VERIFIED |
 | 99 | `LogicProjectileData_getPreExplosionTimeMs` | `0x9cdd08` | FUN_1009cdd08: return *(this+0x128); v36 @0x9e4048. | декомпил | VERIFIED |
-| 100 | `LogicProjectileData_getType` | `0x9cdd70` | FUN_1009cdd70: return *(this+0x28c); вызывается VERIFIED autoshoot (0x7b67ec) с проверками iVar11==2 — тип-id. (Значение поля формируется из CSV-колонки UniqueProperty.) | декомпил+консенсус | VERIFIED |
+| 100 | `LogicProjectileData_getUniqueProperty` ✏️**ПЕРЕИМЕНОВАНО** | `0x9cdd70` | FUN_1009cdd70: return *(this+0x28c); вызывается VERIFIED autoshoot (0x7b67ec) с проверками iVar11==2. Родное имя клиента: v36-символ _ZNK19LogicProjectileData17getUniquePropertyEv (LogicProjectileData::getUniqueProperty() const) — тело return *(this+0x18c), то же поле, что в v69 питается из CSV-колонки UniqueProperty. ПЕРЕИМЕНОВАНО (было LogicProjectileData_getType). | декомпил+консенсус | VERIFIED |
 | 101 | `LogicProjectileData_getTravelType` | `0x9cdd48` | FUN_1009cdd48: return *(this+0x260); v36 getTravelType @0x824364. | декомпил | VERIFIED |
 | 102 | `LogicProjectileData_getIntValueFromColumn` | `0x9cd5e0` | Отладочная строка в бинарнике: "LogicProjectileData::getIntValueFromColumn called for projectile '%s' column '%s'" (VA 0x100ee5310), xref ровно один — 0x9cd5e0. Тело: reader=*(this+0x68); fcn.1009a50e4(reader,col,0). | строка | VERIFIED |
 | 103 | `LogicProjectileData_getBoolValueFromColumn` | `0x9cd678` | Строка "LogicProjectileData::getBoolValueFromColumn called ..." (VA 0x100ee5362), xrefs [0x9cd678, 0x9cd710]. Тело 0x9cd678: fcn.1009a51e8(reader,col,0). | строка | VERIFIED |
 | 104 | `LogicProjectileData_getBoolValueFromColumn2` | `0x9cd710` | Вторая функция с той же строкой (вторая перегрузка): 0x9cd710, fcn.1009a529c(reader,col,0); различие в типе возврата (указатель). Репо-суффикс «2» — историческое имя перегрузки. | строка | VERIFIED |
 
-### LogicSkillData
+### LogicSkillData / LogicAccessoryData
 
 | # | Ключ | Значение | Доказательство | Класс | Статус |
 |---|---|---|---|---|---|
@@ -202,7 +212,7 @@ K-таблицей в дампе v69 по адресу 0xe1df58 (64 слова);
 | 109 | `LogicSkillData_getSpread` | `0x9dec84` | FUN_1009dec84: getIntegerValueAt(*(this+8), DAT_1010ccfd8); DAT_1010ccfd8="Spread" (VERIFIED createReferences). v36 getSpread @0x6ca2e4. | CR-консенсус | VERIFIED |
 | 110 | `LogicSkillData_getNumBulletsInOneAttack` | `0x9ded40` | FUN_1009ded40: getIntegerValueAt(*(this+8), DAT_1010ccfe0); DAT_1010ccfe0="NumBulletsInOneAttack". v36 @0x3fd61c. | CR-консенсус | VERIFIED |
 | 111 | `LogicSkillData_getMsBetweenAttacks` | `0x9dec74` | FUN_1009dec74: getIntegerValueAt(*(this+8), DAT_1010ccfd4); DAT_1010ccfd4="MsBetweenAttacks". v36 @0x321a74. | CR-консенсус | VERIFIED |
-| 112 | `LogicSkillData_getRange` | `0x978d74` | FUN_100978d74: getIntegerValueAt(*(this+8), DAT_1010cb530); DAT_1010cb530 = getColumnIndexByName("Range") — пишет FUN_100978018, чьи колонки (AimGuideType, ConsumesAmmo, DestroyPet, ActiveTicks) в v36 принадлежат LogicAccessoryData. Точная структурная копия v36 LogicAccessoryData::getRange() const @0x931cf0: CSVRow::getIntegerValueAt(*(this+8), sm_columnIndexRange). ВНИМАНИЕ: класс в имени ключа (LogicSkillData) исторический; по факту геттер аксессуара (гаджеты/звёздные силы), вызывается агентом как fns.LogicSkillData_getRange(skill). | CR-консенсус+структура | VERIFIED |
+| 112 | `LogicAccessoryData_getRange` ✏️**ПЕРЕИМЕНОВАНО** | `0x978d74` | FUN_100978d74: getIntegerValueAt(*(this+8), DAT_1010cb530); DAT_1010cb530 = getColumnIndexByName("Range") — пишет FUN_100978018, чьи колонки (AimGuideType, ConsumesAmmo, DestroyPet, ActiveTicks) в v36 принадлежат LogicAccessoryData. Точная структурная копия v36 LogicAccessoryData::getRange() const @0x931cf0 (символ _ZNK18LogicAccessoryData8getRangeEv): CSVRow::getIntegerValueAt(*(this+8), sm_columnIndexRange). ПЕРЕИМЕНОВАНО (было LogicSkillData_getRange): класс-владелец по v36-символу — LogicAccessoryData (гаджеты/звёздные силы); агент вызывает его на объекте скилла/аксессуара, семантика «range в тайлах» верна. | CR-консенсус+структура | VERIFIED |
 
 ### ClientInput и подпись (crypto)
 
@@ -244,14 +254,13 @@ K-таблицей в дампе v69 по адресу 0xe1df58 (64 слова);
 | 136 | `LogicData_getIntegerValueAt` | `0xbc6dfc` | FUN_100bc6dfc: fcn.100bc7644(*param_1, param_2, param_1[1]) — структурная копия v36 CSVRow::getIntegerValueAt(int) @0x760150. Вызывается VERIFIED getSpread/getNumBullets/MsBetween/CastingRangeTiles/getRange — консистентное использование как (row, column) → int. | декомпил+консенсус | VERIFIED |
 | 137 | `LogicData_getName` | `0x9a4f1c` | FUN_1009a4f1c: ldr x0,[x0,#8]; b 0x100bc6d84 — идентично v36 LogicData::getName @0x286c2c: ldr x0,[x0,#8]; b 0x6725b4 (возврат this->name(+8) хвостовым вызовом String-копии). | дизасм+структура | VERIFIED |
 
-## Примечания по именованию (на оффсеты не влияют)
+## Примечания по именованию
 
-1. `BattleMode_logicBattleModeClient` (+0x28) — по факту указатель на **LogicGameObjectManagerClient** (менеджер объектов): именно его передают в findGameObject/addInput/getTeam. Агент использует ключ именно как менеджер (`mgr = bm.add(...).readPointer()`), расхождение только в историческом имени ключа.
-2. `LogicGameObjectManagerClient_ownTeam` (+0xe4) — поле читается геттером `getOwnPlayerTeam` у объекта менеджера (в v36 символ принадлежал LogicBattleModeClient). Использование агентом корректно.
-3. `LogicSkillData_getRange` (0x978d74) — фактически `LogicAccessoryData::getRange()` (колонка "Range" таблицы аксессуаров; класс-владелец в v36 — LogicAccessoryData). Агент вызывает его на объекте скилла/аксессуара — адрес и семантика «range в тайлах» верны.
-4. `LogicProjectileData_type` (+0x28c) — поле питается из CSV-колонки **UniqueProperty**; используется в клиенте как type-id (сравнения с малыми константами в autoshoot). Имя ключа историческое.
-5. `LogicSkillData_getProjectileData` и `LogicHttpRequest_encode` не имели v36-символов (появились между версиями) — верифицированы телом/контекстом вызовов (см. таблицы).
-6. `operator_new` (0xd8da2c) — GOT-стаб `operator new` (Znwm); в VERIFIED send-command аллокация входа — `Znwm(0x48)` = 72 байта = CMD_BUF_SIZE агента.
+Расхождения «имя ключа ↔ фактический класс/семантика», найденные при верификации, исправлены переименованиями (см. «Переименования»): BattleMode_objectManager (было BattleMode_logicBattleModeClient), LogicProjectileData_uniqueProperty и LogicProjectileData_getUniqueProperty (было type/getType), LogicAccessoryData_getRange (было LogicSkillData_getRange). Значения оффсетов при этом не менялись; все использования в коде агента (offsets.js, functions.js, scan.js) обновлены.
+
+1. `LogicGameObjectManagerClient_ownTeam` (+0xe4) — поле читается геттером `getOwnPlayerTeam` у объекта менеджера (в v36 символ принадлежал LogicBattleModeClient). Имя ключа соответствует фактическому расположению поля в менеджере; использование агентом корректно.
+2. `LogicSkillData_getProjectileData` и `LogicHttpRequest_encode` не имели v36-символов (появились между версиями) — верифицированы телом/контекстом вызовов (см. таблицы); имена соответствуют семантике.
+3. `operator_new` (0xd8da2c) — GOT-стаб `operator new` (Znwm); в VERIFIED send-command аллокация входа — `Znwm(0x48)` = 72 байта = CMD_BUF_SIZE агента.
 
 ## Воспроизводимость
 

@@ -1,5 +1,5 @@
 export const offsets = Object.freeze({
-    BattleMode_logicBattleModeClient: 0x28,
+    BattleMode_objectManager: 0x28,
     BattleMode_clientInputManager: 0x58,
 
     LogicGameObjectManagerClient_objects: 0x0,
@@ -64,7 +64,7 @@ export const offsets = Object.freeze({
     LogicProjectileData_homingDistance: 0x280,
     LogicProjectileData_steerLifeTime: 0x284,
     LogicProjectileData_visualizeEndPoint: 0x288,
-    LogicProjectileData_type: 0x28c,
+    LogicProjectileData_uniqueProperty: 0x28c,
     LogicProjectileData_bouncePercent: 0x2d8,
     LogicProjectileData_allowDynamicRange: 0x2dd,
     LogicProjectileData_ignoreCharacterCollisions: 0x2df,
@@ -130,7 +130,7 @@ export const offsets = Object.freeze({
     LogicProjectileData_isHomingMissile: 0x9cdd40,
     LogicProjectileData_isBouncing: 0x9cda84,
     LogicProjectileData_getPreExplosionTimeMs: 0x9cdd08,
-    LogicProjectileData_getType: 0x9cdd70,
+    LogicProjectileData_getUniqueProperty: 0x9cdd70,
     LogicProjectileClient_getTravelTicks: 0xa3192c,
     LogicProjectileClient_decode: 0xa314e0,
 
@@ -157,7 +157,7 @@ export const offsets = Object.freeze({
 
     LogicData_getName: 0x9a4f1c,
 
-    LogicSkillData_getRange: 0x978d74,
+    LogicAccessoryData_getRange: 0x978d74,
 
     LogicHttpRequest_encode: 0xbd5f3c
 });
