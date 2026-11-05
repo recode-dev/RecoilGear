@@ -103,8 +103,7 @@ jobs:
                           setTimeout: "readonly",
                           clearTimeout: "readonly",
                           setInterval: "readonly",
-                          clearInterval: "readonly",
-                          console: "readonly"
+                          clearInterval: "readonly"
                       }
                   },
                   linterOptions: { reportUnusedDisableDirectives: "error" },
@@ -129,7 +128,6 @@ jobs:
                       "no-implied-eval": "error",
                       "no-new-func": "error",
                       "no-debugger": "error",
-                      "no-console": "error",
                       "prefer-const": "error"
                   }
               }
@@ -242,8 +240,7 @@ jobs:
                           setTimeout: "readonly",
                           clearTimeout: "readonly",
                           setInterval: "readonly",
-                          clearInterval: "readonly",
-                          console: "readonly"
+                          clearInterval: "readonly"
                       }
                   },
                   linterOptions: { reportUnusedDisableDirectives: "error" },
@@ -268,7 +265,6 @@ jobs:
                       "no-implied-eval": "error",
                       "no-new-func": "error",
                       "no-debugger": "error",
-                      "no-console": "error",
                       "prefer-const": "error"
                   }
               }
