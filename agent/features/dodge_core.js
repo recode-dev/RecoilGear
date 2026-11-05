@@ -74,8 +74,8 @@ let _walls = null;
 let _world = { projectiles: [] };
 let _myR = 60;
 let _cmd = null; // the single active dodge command
-let _zoneMem = new Map(); // gid -> landed area { x, y, r, until }
-let _lastZones = new Map(); // gid -> last observed zone/sticky snapshot
+const _zoneMem = new Map(); // gid -> landed area { x, y, r, until }
+const _lastZones = new Map(); // gid -> last observed zone/sticky snapshot
 
 function _ring() {
     return RING;
