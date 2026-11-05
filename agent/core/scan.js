@@ -1323,7 +1323,7 @@ function _applyMeta(entry, meta) {
 function _updateLiveProjectiles(now) {
     const output = _outArr;
     output.length = 0;
-    let metaBudget = _probeBudget > 0 ? 1 : 0;
+    let metaBudget = _probeBudget > 0 ? 4 : 0;
     _liveProjectiles.forEach(function (entry, gid) {
         try {
             if (now - (entry.spawnTs || now) > STALE_MS) {
@@ -1434,7 +1434,10 @@ function _updateLiveProjectiles(now) {
                 o.trailMin = entry.trailMin || 0;
                 o.lifeTicks = entry.lifeTicks || 0;
                 o.clientRadius = entry.clientRadius || 0;
-                o.volleyMs = _volleyMs(_weaponForOwner(entry.ownerIndex));
+                const w = _weaponForOwner(entry.ownerIndex);
+                o.volleyMs = _volleyMs(w);
+                o.volleyBullets = (w && w.bullets) || 0;
+                o.volleySpread = (w && w.spread) || 0;
             }
             o.x = x;
             o.y = y;
@@ -1519,6 +1522,7 @@ export function updateScanner(bm, now) {
         _probeBudget = 8;
         const enemies = [];
         const vtableProj = moduleBase.add(offsets.LogicProjectileData_vtable);
+        const vtableProjClient = moduleBase.add(offsets.LogicProjectileClient_vtable);
         const objMgr = bm.add(offsets.BattleMode_logicBattleModeClient).readPointer();
         if (isValidPtr(objMgr)) {
             const objects = objMgr.add(offsets.LogicGameObjectManagerClient_objects).readPointer();
@@ -1547,7 +1551,14 @@ export function updateScanner(bm, now) {
                         if (!isValidPtr(obj)) continue;
                         const data = dataFieldOf(obj);
                         if (!isValidPtr(data)) continue;
-                        if (data.readPointer().equals(vtableProj)) {
+                        let objVt = null;
+                        try {
+                            objVt = obj.readPointer();
+                        } catch (_) {}
+                        if (
+                            (objVt && objVt.equals(vtableProjClient)) ||
+                            data.readPointer().equals(vtableProj)
+                        ) {
                             _captureProjectile(obj, data, now);
                             continue;
                         }

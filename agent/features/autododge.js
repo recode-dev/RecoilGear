@@ -217,18 +217,21 @@ const TUNE = {
     MOMENTUM: 150,
     CURVE_MAX: 400,
     CURVE_FRAC: 0.35,
-    RELEASE_GRACE_MS: 60,
+    RELEASE_GRACE_MS: 120,
     WALL_HIT: 2400,
     MIN_ROOM: 400,
-    MERGE_MAX_RAD: 540,
+    MERGE_MAX_RAD: 240,
     MERGE_SAME_VOLLEY: 260,
     MIN_POS: 50,
     CROSS_W: 300,
     CORRIDOR_W: 75,
-    SWITCH_MARGIN: 80,
+    SWITCH_MARGIN: 200,
     REFREEZE_DIST: 260,
-    ENGAGE_S: 1.15,
+    ENGAGE_S: 1.6,
     ENGAGE_NEAR: 700,
+    KEEP_FLOOR: 140,
+    VOLLEY_RAD: 60,
+    CLEAR_HORIZON_S: 2.6,
     WEAK_RELEASE_MS: 140
 };
 
@@ -377,6 +380,9 @@ function _collectLive(myX, myY, myRadius, now, mySpeed) {
     const shots = scanData.projectiles;
     if (!shots || shots.length === 0) return out;
     const zoneSq = TUNE.AWARE * TUNE.AWARE;
+    const armedOwners = new Set();
+    const buckets = new Map();
+    const bucketOrder = [];
     for (let i = 0; i < shots.length; i++) {
         const p = shots[i];
         if (!p) continue;
@@ -393,6 +399,7 @@ function _collectLive(myX, myY, myRadius, now, mySpeed) {
         if (!(shotR > 0)) continue;
         const hitR = shotR + myRadius;
         let rad = hitR + TUNE.SKIN + 60 + shotR * 0.45;
+        if (p.volleyMs > 0) rad += TUNE.VOLLEY_RAD;
         if (p.stunMs > 0 || p.silenceMs > 0) rad += 40;
         if (p.attachArea) rad += 30;
         if (p.trail) rad += LogicMath.min(200, p.trailMin || 0) / 2;
@@ -406,7 +413,8 @@ function _collectLive(myX, myY, myRadius, now, mySpeed) {
                 if (left >= 0 && left + 1 < dist) continue;
                 const flight = p.speed > 0 ? p.speed : 0;
                 const t2land = flight > 0 ? dist / flight : 0;
-                if (!_heading && t2land > TUNE.ENGAGE_S) continue;
+                if (!_heading && !armedOwners.has(p.ownerIndex) && t2land > TUNE.ENGAGE_S) continue;
+                armedOwners.add(p.ownerIndex);
                 out.push({
                     x: lx,
                     y: ly,
@@ -496,9 +504,36 @@ function _collectLive(myX, myY, myRadius, now, mySpeed) {
             left = LogicMath.min(left, (p.earlyTicks * travel) / TICKS_PER_SEC);
         if (left >= 0) left += _bounceBudget(p);
         if (!blob && left >= 0 && left <= 10 && distance(p.x, p.y, myX, myY) > hitR) continue;
-        if (!_heading && travel > 0) {
+        if (!_heading && travel > 0 && !armedOwners.has(p.ownerIndex)) {
             const gap = distance(p.x, p.y, myX, myY) - hitR;
             if (gap / travel > TUNE.ENGAGE_S) continue;
+        }
+        armedOwners.add(p.ownerIndex);
+        const vb = p.volleyBullets | 0;
+        const vs = p.volleySpread | 0;
+        if (!blob && spd >= 1 && vb >= 2 && vs > 0) {
+            const pk = p.ownerIndex + ":" + (p.spawnX | 0) + ":" + (p.spawnY | 0);
+            let bucket = buckets.get(pk);
+            if (!bucket) {
+                bucket = {
+                    dirs: [],
+                    spawnX: p.spawnX,
+                    spawnY: p.spawnY,
+                    owner: p.ownerIndex,
+                    speed: spd,
+                    vb,
+                    vs,
+                    seg0: 0,
+                    hitR: 0,
+                    rad: 0
+                };
+                buckets.set(pk, bucket);
+                bucketOrder.push(pk);
+            }
+            bucket.dirs.push(Math.atan2(vy, vx));
+            bucket.seg0 = p.seg0 > 0 ? p.seg0 : p.seg > 0 ? p.seg : bucket.seg0;
+            bucket.hitR = hitR;
+            bucket.rad = rad;
         }
         if (!_reachesMe(p, myX, myY, hitR, vx, vy, blob ? -1 : left)) {
             if (blob || chase) continue;
@@ -523,6 +558,53 @@ function _collectLive(myX, myY, myRadius, now, mySpeed) {
             sx: p.spawnX,
             sy: p.spawnY
         });
+    }
+    for (let bi = 0; bi < bucketOrder.length; bi++) {
+        const bucket = buckets.get(bucketOrder[bi]);
+        const dirs = bucket.dirs;
+        const step = (bucket.vs / (bucket.vb - 1)) * (Math.PI / 180);
+        const missing = bucket.vb - dirs.length;
+        if (missing <= 0) continue;
+        const extra = [];
+        if (dirs.length >= 2) {
+            let last = dirs[0];
+            let delta = null;
+            for (let k = 1; k < dirs.length; k++) {
+                let d = dirs[k] - last;
+                while (d > Math.PI) d -= 2 * Math.PI;
+                while (d < -Math.PI) d += 2 * Math.PI;
+                if (Math.abs(d) > (45 * Math.PI) / 180) {
+                    delta = null;
+                } else if (delta === null || d * delta > 0) {
+                    delta = delta === null ? d : delta;
+                }
+                last = dirs[k];
+            }
+            if (delta !== null && delta !== 0) {
+                for (let k = 1; k <= missing; k++) extra.push(last + delta * k);
+                if (extra.length > 6) extra.length = 6;
+            }
+        } else if (step > 0) {
+            extra.push(dirs[0] + step, dirs[0] - step);
+        }
+        for (let k = 0; k < extra.length; k++) {
+            const a = extra[k];
+            const ca = Math.cos(a);
+            const sa = Math.sin(a);
+            out.push({
+                x: bucket.spawnX,
+                y: bucket.spawnY,
+                vx: ca * bucket.speed,
+                vy: sa * bucket.speed,
+                rad: bucket.rad,
+                hitRad: bucket.hitR,
+                left: bucket.seg0 > 0 ? bucket.seg0 : -1,
+                chase: 0,
+                owner: bucket.owner,
+                sx: bucket.spawnX,
+                sy: bucket.spawnY
+            });
+        }
     }
     return _mergeThreats(out, myX, myY);
 }
@@ -631,8 +713,8 @@ function _clearanceFor(threats, myX, myY, mvx, mvy) {
         const rely = t.y - myY;
         const reach = distance(t.x, t.y, myX, myY);
         const spd = length(t.vx, t.vy);
-        let maxT = TUNE.HORIZON_S;
-        if (spd > 1) maxT = LogicMath.min(maxT, LogicMath.max(0, t.left) / spd);
+        let maxT = TUNE.CLEAR_HORIZON_S;
+        if (spd > 1 && t.left >= 0) maxT = LogicMath.min(maxT, t.left / spd);
         let dist;
         if (t.chase) {
             const away = reach > 1 ? -(mvx * relx + mvy * rely) / reach : length(mvx, mvy);
@@ -682,10 +764,8 @@ function _pathsHitMe(threats, px, py) {
         if (t.chase) {
             const reach = distance(t.x, t.y, px, py);
             const spd = length(t.vx, t.vy);
-            const maxT =
-                spd > 1
-                    ? LogicMath.min(TUNE.HORIZON_S, LogicMath.max(0, t.left) / spd)
-                    : TUNE.HORIZON_S;
+            const leftT = t.left >= 0 ? t.left : TUNE.CLEAR_HORIZON_S * spd;
+            const maxT = spd > 1 ? LogicMath.min(TUNE.HORIZON_S, leftT / spd) : TUNE.HORIZON_S;
             if (reach - t.hitRad <= spd * maxT) return true;
             continue;
         }
@@ -836,6 +916,26 @@ function _sendMove(logic, tx, ty) {
     }
 }
 
+function _directionScore(hazards, paths, myX, myY, bodyR, speed, idx, refDir) {
+    const d = _ring[idx];
+    _scratchA.x = d.x;
+    _scratchA.y = d.y;
+    const dirSpeed = normalize(_scratchA, speed | 0);
+    let s = _clearanceFor(hazards, myX, myY, dirSpeed.x, dirSpeed.y);
+    if (_crossesPath(paths, myX, myY, dirSpeed.x, dirSpeed.y)) s -= TUNE.CROSS_W;
+    s -= _corridorPenalty(paths, myX, myY, dirSpeed.x, dirSpeed.y);
+    if (refDir) {
+        const turn = LogicMath.getAngleBetween(
+            LogicMath.getAngle(d.x, d.y),
+            LogicMath.getAngle(refDir.x, refDir.y)
+        );
+        s += (TUNE.MOMENTUM * (180 - turn)) / 180;
+    }
+    const room = _roomFor(myX, myY, idx, bodyR);
+    if (room <= 0) return -Infinity;
+    return s - (TUNE.WALL_HIT * (TUNE.REACH - room)) / TUNE.REACH;
+}
+
 function _clearHeading() {
     _heading = null;
     _headingIdx = -1;
@@ -854,12 +954,8 @@ export function pushDodgeTarget() {
     if (!_heading) return;
     const now = Date.now();
     const myRadius = _hitbox > 0 ? _hitbox : scanData.myRadius;
-    const danger = _pathsHitMe(
-        _collectLiveCached(scanData.myX, scanData.myY, myRadius, now, scanData.mySpeed),
-        scanData.myX,
-        scanData.myY
-    );
-    if (now - _lastDangerTs > TUNE.RELEASE_GRACE_MS && !danger) return;
+    const hazards = _collectLiveCached(scanData.myX, scanData.myY, myRadius, now, scanData.mySpeed);
+    if (hazards.length === 0 && now - _lastDangerTs > TUNE.RELEASE_GRACE_MS) return;
     _push(now, scanData.myX, scanData.myY);
 }
 
@@ -1009,16 +1105,22 @@ export function updateAutododge() {
         return;
     }
 
-    if (!inDanger && (!_heading || now - _lastDangerTs > TUNE.RELEASE_GRACE_MS)) {
-        if (_heading) _clearHeading();
-        return;
-    }
+    if (!inDanger && !_heading) return;
 
     let stayClear = _clearanceFor(hazards, myX, myY, 0, 0);
     if (_pathCoversPoint(paths, myX, myY, bodyR)) stayClear -= TUNE.CROSS_W;
 
     const prevIdx = _headingIdx >= 0 && _headingIdx < _ring.length ? _headingIdx : -1;
     const prevDir = prevIdx >= 0 ? _ring[prevIdx] : null;
+    if (_heading && prevIdx >= 0) {
+        const keep = _directionScore(hazards, paths, myX, myY, bodyR, speed, prevIdx, prevDir);
+        if (keep > stayClear && keep > TUNE.KEEP_FLOOR) {
+            _holdUntil = now + TUNE.LOCK_MS;
+            _push(now, myX, myY);
+            return;
+        }
+        _clearHeading();
+    }
     const refDir = prevDir || _walkDir;
     const n = _ring.length;
     const scores = _scores;
