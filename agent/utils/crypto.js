@@ -135,7 +135,7 @@ export function inputToken(key16, innerMask, outerMask, data16, mapped) {
     a[81] = (mapped >>> 8) & 0xff;
     a[82] = (mapped >>> 16) & 0xff;
     a[83] = (mapped >>> 24) & 0xff;
-    a[87] = 0x80;
+    a[84] = 0x80;
     a[126] = 0x02;
     a[127] = 0xa0;
     const inner = _compress(a);
@@ -144,7 +144,7 @@ export function inputToken(key16, innerMask, outerMask, data16, mapped) {
     for (let i = 0; i < 16; i++) b[i] = key16[i] ^ outerMask[i];
     b.fill(0x5c, 16, 64);
     b.set(inner, 64);
-    b[99] = 0x80;
+    b[96] = 0x80;
     b[126] = 0x03;
     b[127] = 0x00;
     const digest = _compress(b);
