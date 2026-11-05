@@ -93,7 +93,11 @@ export function initFunctions(baseIn, imageIn) {
             "int32",
             "int32"
         ]),
-        LogicProjectileData_getUniqueProperty: _nf("LogicProjectileData_getUniqueProperty", "int32", ["pointer"]),
+        LogicProjectileData_getUniqueProperty: _nf(
+            "LogicProjectileData_getUniqueProperty",
+            "int32",
+            ["pointer"]
+        ),
         LogicProjectileClient_isBeam: _nf("LogicProjectileData_isBeam", "uint32", ["pointer"]),
         LogicSkillData_getSpread: _nf("LogicSkillData_getSpread", "int32", ["pointer"]),
         LogicSkillData_getNumBulletsInOneAttack: _nf(
