@@ -158,3 +158,10 @@ export const offsets = Object.freeze({
 
     LogicHttpRequest_encode: 0xbd5f3c
 });
+
+export const offsetsFallback = Object.freeze({
+    ClientInput_typeConstantTable: 0xe1d9a8,
+    ClientInput_hashInnerMask: 0xe1bbd0,
+    ClientInput_hashOuterMask: 0xe1bbf0,
+    SkillCommandTypeTable: 0xe1bf7c
+});
