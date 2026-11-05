@@ -17,6 +17,8 @@ import {
 
 import { resetAutoaim, setupAutoaim, updateAutoaim } from "./features/autoaim.js";
 
+import { resetSignature, setupSignature, updateSignature } from "./features/signature.js";
+
 let _lastBattle = null;
 let _installed = false;
 
@@ -39,6 +41,7 @@ function tick(bm) {
         resetScannerCache();
         resetAutododge();
         resetAutoaim();
+        resetSignature();
         notifyBattleModeChanged(bm);
     }
 
@@ -58,6 +61,9 @@ function tick(bm) {
     try {
         updateAutododge();
     } catch (_) {}
+    try {
+        updateSignature();
+    } catch (_) {}
 }
 
 export function install() {
@@ -73,6 +79,7 @@ export function install() {
     watchTileChanges(mod.base);
     setupAutododge();
     setupAutoaim();
+    setupSignature();
 
     try {
         Interceptor.attach(mod.base.add(offsets.LogicBattleModeClient_update), {

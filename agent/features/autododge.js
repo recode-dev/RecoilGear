@@ -950,6 +950,10 @@ function _collectLiveCached(myX, myY, myRadius, now, mySpeed) {
     return _threatCache;
 }
 
+export function dodgeBusy() {
+    return _heading !== null;
+}
+
 export function pushDodgeTarget() {
     if (!_heading) return;
     const now = Date.now();
