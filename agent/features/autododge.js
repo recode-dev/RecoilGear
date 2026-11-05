@@ -16,7 +16,7 @@ import {
     BLOCKS_PROJECTILES,
     firstWallHit,
     isBlockedWide,
-    losCheck,
+    pathBlocked,
     tileSizeUnits,
     wallsVersion
 } from "../utils/walls.js";
@@ -346,6 +346,27 @@ const _scratchD = { x: 0, y: 0 };
 const _scores = new Float64Array(160);
 const _order = new Int32Array(160);
 
+function _wallShields(px, py, ex, ey, mx, my, hitR) {
+    const dx = ex - px;
+    const dy = ey - py;
+    const fx = px - mx;
+    const fy = py - my;
+    const a = dx * dx + dy * dy;
+    const c = fx * fx + fy * fy - hitR * hitR;
+    if (c <= 0) return false;
+    let t = 1;
+    if (a > 0) {
+        const b = 2 * (fx * dx + fy * dy);
+        const disc = b * b - 4 * a * c;
+        if (disc > 0) {
+            const t0 = (-b - Math.sqrt(disc)) / (2 * a);
+            if (t0 < 1) t = t0 > 0 ? t0 : 0;
+        }
+    }
+    if (t <= 0) return false;
+    return pathBlocked(px, py, px + dx * t, py + dy * t, BLOCKS_PROJECTILES);
+}
+
 function _collectLive(myX, myY, myRadius, now) {
     const out = [];
     const shots = scanData.projectiles;
@@ -437,17 +458,14 @@ function _collectLive(myX, myY, myRadius, now) {
             _scratchA.y = myY - p.y;
             const frame = rotate(_scratchA, -heading);
             const playerAlong = frame.x;
-            if (playerAlong < -50) continue;
+            const steerBack = p.steer > 0 || p.homing ? 50 : 0;
+            if (playerAlong < -steerBack) continue;
             _scratchB.x = vx;
             _scratchB.y = vy;
             const reachDir = normalize(_scratchB, Math.max(playerAlong, 0) | 0);
-            const hitX = p.hasTarget ? p.targetX : p.x + reachDir.x;
-            const hitY = p.hasTarget ? p.targetY : p.y + reachDir.y;
-            if (
-                !p.passesEnv &&
-                !p.piercesEnv &&
-                !losCheck(p.x, p.y, hitX, hitY, BLOCKS_PROJECTILES)
-            )
+            const endX = p.hasTarget ? p.targetX : p.x + reachDir.x;
+            const endY = p.hasTarget ? p.targetY : p.y + reachDir.y;
+            if (!p.passesEnv && !p.piercesEnv && _wallShields(p.x, p.y, endX, endY, myX, myY, hitR))
                 continue;
         }
         const travel = spd >= 1 ? spd : p.speed > 0 ? p.speed : 0;

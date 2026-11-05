@@ -248,6 +248,40 @@ export function losCheck(wx0, wy0, wx1, wy1, checkBit) {
     }
     return true;
 }
+
+export function pathBlocked(x0, y0, x1, y1, checkBit) {
+    const grid = walls;
+    if (!grid) return false;
+    const width = wallsWidth;
+    const height = wallsHeight;
+    if (width <= 0 || height <= 0) return false;
+    const cx0 = Math.max(0, Math.floor(Math.min(x0, x1) / tileSize));
+    const cx1 = Math.min(width - 1, Math.floor(Math.max(x0, x1) / tileSize));
+    const cy0 = Math.max(0, Math.floor(Math.min(y0, y1) / tileSize));
+    const cy1 = Math.min(height - 1, Math.floor(Math.max(y0, y1) / tileSize));
+    const dx = x1 - x0;
+    const dy = y1 - y0;
+    const lenSq = dx * dx + dy * dy;
+    for (let cy = cy0; cy <= cy1; cy++) {
+        const by = cy * tileSize;
+        for (let cx = cx0; cx <= cx1; cx++) {
+            if (!(grid[cy * width + cx] & checkBit)) continue;
+            const bx = cx * tileSize;
+            if (lenSq < 1) {
+                if (x0 >= bx && x0 <= bx + tileSize && y0 >= by && y0 <= by + tileSize) return true;
+                continue;
+            }
+            let t = ((bx + tileSize * 0.5 - x0) * dx + (by + tileSize * 0.5 - y0) * dy) / lenSq;
+            t = t < 0 ? 0 : t > 1 ? 1 : t;
+            const px = x0 + dx * t;
+            const py = y0 + dy * t;
+            const qx = px < bx ? bx - px : px > bx + tileSize ? px - bx - tileSize : 0;
+            const qy = py < by ? by - py : py > by + tileSize ? py - by - tileSize : 0;
+            if (qx * qx + qy * qy <= 1) return true;
+        }
+    }
+    return false;
+}
 function isBlockedAt(wx, wy, checkBit) {
     const grid = walls;
     if (!grid) return false;
