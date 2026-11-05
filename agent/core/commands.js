@@ -1,4 +1,4 @@
-import { offsets, offsetsFallback } from "./offsets.js";
+import { offsets } from "./offsets.js";
 import { getBase, getFunctions } from "./functions.js";
 import { inputToken } from "../utils/crypto.js";
 
@@ -17,7 +17,6 @@ let _typeTable = null;
 let _innerMask = null;
 let _outerMask = null;
 let _skillTypeTable = null;
-let _usedFallback = false;
 let _lastToken = 0;
 
 function _bytesAt(address, size) {
@@ -53,64 +52,37 @@ function _tableSane(table) {
     return nonzero >= SANITY_MIN_NONZERO && seen.size >= SANITY_MIN_DISTINCT;
 }
 
-function _resolveSet(source) {
-    const base = getBase();
-    if (!base) return null;
-    try {
-        const innerMask = _bytesAt(base.add(source.ClientInput_hashInnerMask), MASK_SIZE);
-        const outerMask = _bytesAt(base.add(source.ClientInput_hashOuterMask), MASK_SIZE);
-        const typeTable = _readU32Table(
-            base.add(source.ClientInput_typeConstantTable),
-            TABLE_ENTRIES
-        );
-        if (!_tableSane(typeTable)) return null;
-        let skillTypeTable = null;
-        const skillOff = source.SkillCommandTypeTable;
-        if (typeof skillOff === "number" && skillOff > 0) {
-            try {
-                const table = _readU32Table(base.add(skillOff), TABLE_ENTRIES);
-                if (_tableSane(table)) skillTypeTable = table;
-            } catch (_) {}
-        }
-        return {
-            typeTable: typeTable,
-            innerMask: innerMask,
-            outerMask: outerMask,
-            skillTypeTable: skillTypeTable
-        };
-    } catch (_) {
-        return null;
-    }
-}
-
-function _applySet(set, isFallback) {
-    _typeTable = set.typeTable;
-    _innerMask = set.innerMask;
-    _outerMask = set.outerMask;
-    _skillTypeTable = set.skillTypeTable;
-    _usedFallback = isFallback;
-}
-
 function _loadSigning() {
     if (_typeTable) return true;
     const base = getBase();
     if (!base) return false;
-    const primary = _resolveSet(offsets);
-    if (primary) {
-        _applySet(primary, false);
+    try {
+        _innerMask = _bytesAt(base.add(offsets.ClientInput_hashInnerMask), MASK_SIZE);
+        _outerMask = _bytesAt(base.add(offsets.ClientInput_hashOuterMask), MASK_SIZE);
+        _typeTable = _readU32Table(
+            base.add(offsets.ClientInput_typeConstantTable),
+            TABLE_ENTRIES
+        );
+        if (!_tableSane(_typeTable)) {
+            _typeTable = null;
+            return false;
+        }
+        try {
+            const table = _readU32Table(base.add(offsets.SkillCommandTypeTable), TABLE_ENTRIES);
+            if (_tableSane(table)) _skillTypeTable = table;
+        } catch (_) {}
         return true;
+    } catch (_) {
+        _typeTable = null;
+        _innerMask = null;
+        _outerMask = null;
+        return false;
     }
-    const fallback = _resolveSet(offsetsFallback);
-    if (fallback) {
-        _applySet(fallback, true);
-        return true;
-    }
-    return false;
 }
 
 export function signingSource() {
     if (!_typeTable) return null;
-    return _usedFallback ? "v36" : "v69";
+    return "v69";
 }
 
 export function skillCommandType(index) {
