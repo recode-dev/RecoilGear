@@ -564,7 +564,13 @@ class DodgeCore {
         const step = this.#stepTarget(cmd.headingDeg);
         cmd.tx = step.x;
         cmd.ty = step.y;
-        return { active: true, targetX: cmd.tx, targetY: cmd.ty, headingDeg: cmd.headingDeg, send: true };
+        return {
+            active: true,
+            targetX: cmd.tx,
+            targetY: cmd.ty,
+            headingDeg: cmd.headingDeg,
+            send: true
+        };
     }
 
     tick(world) {
