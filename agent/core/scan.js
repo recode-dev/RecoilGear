@@ -4,7 +4,6 @@ import { readScString } from "./scstring.js";
 
 const tileUnits = 100;
 export const ticksPerSec = 20;
-const tickMs = 1000 / ticksPerSec;
 export const beamTicks = 18000;
 const staleMs = 10000;
 const defaultProjectileRadius = 40;
@@ -26,7 +25,6 @@ class Scanner {
     #reloadCallbacks = [];
     #dataHooksInstalled = false;
     #coreHooksInstalled = false;
-    #metaBudget = 0;
     #outArr = [];
     #moduleBase = null;
     #vtableProj = null;
@@ -280,43 +278,6 @@ class Scanner {
         return -1;
     }
 
-    #steerSpecs(data) {
-        return {
-            ignore: this.#readProjectileField(
-                data,
-                offsets.LogicProjectileData_steerIgnoreTicks,
-                1,
-                400
-            ),
-            life: this.#readProjectileField(
-                data,
-                offsets.LogicProjectileData_steerLifeTime,
-                1,
-                20000
-            )
-        };
-    }
-
-    #bounceSpecs(data) {
-        const percent = this.#metaFlag(data, offsets.LogicProjectileData_bouncePercent, 100);
-        return {
-            add: this.#readProjectileField(
-                data,
-                offsets.LogicProjectileData_distanceAddFromBounce,
-                1,
-                3000
-            ),
-            max: this.#readProjectileField(
-                data,
-                offsets.LogicProjectileData_maxDistanceAddBounces,
-                1,
-                20000
-            ),
-            keep: percent > 0 ? percent / 100 : 0,
-            rehit: this.#metaFlag(data, offsets.LogicProjectileData_canHitAgainAfterBounce, 1)
-        };
-    }
-
     travelTicksFor(data, rangeUnits, speed) {
         const fn = getFunctions().LogicProjectileClient_getTravelTicks;
         if (fn && isValidPtr(data) && rangeUnits > 0 && speed > 0) {
@@ -327,92 +288,6 @@ class Scanner {
         }
         if (!(rangeUnits > 0) || !(speed > 0)) return 0;
         return Math.max(1, Math.round((rangeUnits * ticksPerSec) / speed));
-    }
-
-    #resolveTicks(projectile, data, rangeUnits, speed, beam) {
-        let isBeam = !!beam;
-        const ticks = this.travelTicksFor(data, rangeUnits, speed);
-        if (ticks >= beamTicks) isBeam = true;
-        return { ticks, isBeam };
-    }
-
-    #lifeSpecs(ticks, isBeam, rangeUnits, speed) {
-        if (isBeam || ticks >= beamTicks)
-            return { lifeMs: Infinity, travel: Math.max(rangeUnits, 0) };
-        if (ticks > 0) return { lifeMs: ticks * tickMs, travel: this.travelDistance(ticks, speed) };
-        return { lifeMs: 0, travel: 0 };
-    }
-
-    #typeIdOf(data) {
-        return this.#readClientU32(data, offsets.LogicProjectileData_uniqueProperty, 20);
-    }
-
-    #steerStrengthOf(data) {
-        try {
-            const v = data.add(offsets.LogicProjectileData_steerStrength).readFloat();
-            if (v > 0 && v <= 1000) return v;
-        } catch {}
-        return 0;
-    }
-
-    #beamCopyOf(projectile) {
-        try {
-            return projectile.add(offsets.LogicProjectileClient_isBeamCopy).readU8() & 1;
-        } catch {
-            return 0;
-        }
-    }
-
-    #metaFlag(data, off, max) {
-        try {
-            const v = data.add(off).readU8();
-            return v <= max ? v : 0;
-        } catch {
-            return 0;
-        }
-    }
-
-    #readProjectileMeta(projectile, data, speed, rangeUnits, beam) {
-        const preMs = this.#readProjectileField(
-            data,
-            offsets.LogicProjectileData_preExplosionTimeMs,
-            1,
-            60000
-        );
-        const homing = this.#metaFlag(data, offsets.LogicProjectileData_isHomingMissileField, 1);
-        const bouncing = this.#metaFlag(data, offsets.LogicProjectileData_isBouncingField, 1);
-        const steerSpecs = this.#steerSpecs(data);
-        const bounceSpecs = this.#bounceSpecs(data);
-        const resolved = this.#resolveTicks(projectile, data, rangeUnits, speed, beam);
-        const life = this.#lifeSpecs(resolved.ticks, resolved.isBeam, rangeUnits, speed);
-        const travelType = this.#readClientU32(
-            projectile,
-            offsets.LogicProjectileClient_travelType,
-            16
-        );
-        const beamCopy = this.#beamCopyOf(projectile);
-        let steerLifeMs = 0;
-        if (steerSpecs.life > 0)
-            steerLifeMs = steerSpecs.life > 400 ? steerSpecs.life : steerSpecs.life * tickMs;
-        return {
-            preMs,
-            lifeMs: life.lifeMs,
-            ticks: resolved.ticks,
-            travel: life.travel,
-            typeId: this.#typeIdOf(data),
-            travelType,
-            isBeam: resolved.isBeam || !!beamCopy,
-            beamCopy: !!beamCopy,
-            homing: !!homing,
-            bouncing: !!bouncing,
-            steer: this.#steerStrengthOf(data),
-            steerIgnoreMs: steerSpecs.ignore > 0 ? steerSpecs.ignore * tickMs : 0,
-            steerLifeMs,
-            bounceAdd: bounceSpecs.add,
-            bounceMax: bounceSpecs.max,
-            bounceKeep: bounceSpecs.keep,
-            rehit: !!bounceSpecs.rehit
-        };
     }
 
     #skillStats(owner, fns) {
@@ -568,10 +443,6 @@ class Scanner {
         const travelType = this.#travelTypeOf(data, projectile);
         const dynamicRange = this.#dataU8(data, offsets.LogicProjectileData_allowDynamicRange);
         if (travelType === 6 || dynamicRange) isIndirect = 1;
-        let beam = 0;
-        try {
-            beam = data.add(offsets.LogicProjectileData_isBeamField).readU8() & 1;
-        } catch {}
         const targetObj = this.#readPtrField(
             projectile,
             offsets.LogicProjectileClient_targetObject
@@ -593,8 +464,6 @@ class Scanner {
             hasTarget: !!target || !!targetObj,
             seg0: target && spawnReady ? length(target.x - x, target.y - y) : 0,
             isIndirect: !!isIndirect,
-            isBeam: !!beam,
-            beamCopy: false,
             ageMs: 0,
             spawnTs: now,
             lastX: x,
@@ -603,9 +472,8 @@ class Scanner {
             vx: 0,
             vy: 0,
             hasVelocitySample: false,
-            meta: null,
             travelType,
-            dynamicRange,
+            preMs: this.#dataS32(data, offsets.LogicProjectileData_preExplosionTimeMs, 1, 60000),
             stunMs: this.#clientS32(projectile, offsets.LogicProjectileClient_stunMs, 1, 60000),
             silenceMs: this.#clientS32(
                 projectile,
@@ -647,10 +515,6 @@ class Scanner {
     #notifyDataReload() {
         this.#weaponMeta.clear();
         this.#charSpeedByData.clear();
-        for (const [, projectile] of this.#liveProjectiles) {
-            projectile.travelDistance = 0;
-            projectile.ticks = 0;
-        }
         for (const callback of this.#reloadCallbacks) {
             try {
                 callback();
@@ -737,28 +601,6 @@ class Scanner {
         if (!(cap > 0)) cap = entry.seg0;
         if (!(cap > 0)) return 0;
         return Math.max(cap - flown, 0);
-    }
-
-    #applyMeta(entry, meta) {
-        entry.meta = meta;
-        if (!meta) return;
-        entry.isBeam = !!meta.isBeam;
-        entry.beamCopy = !!meta.beamCopy;
-        entry.isIndirect = entry.isIndirect || meta.travelType > 0;
-        entry.preMs = meta.preMs;
-        entry.lifeMs = meta.lifeMs;
-        entry.ticks = meta.ticks;
-        if (meta.travel > 0) entry.travelDistance = meta.travel;
-        entry.homing = meta.homing;
-        entry.bouncing = meta.bouncing;
-        entry.steer = meta.steer;
-        entry.steerIgnoreMs = meta.steerIgnoreMs;
-        entry.steerLifeMs = meta.steerLifeMs;
-        entry.bounceAdd = meta.bounceAdd;
-        entry.bounceMax = meta.bounceMax;
-        entry.bounceKeep = meta.bounceKeep;
-        entry.rehit = meta.rehit;
-        entry.typeId = meta.typeId;
     }
 
     #blendVelocity(entry, dx, dy, dt) {
@@ -855,8 +697,6 @@ class Scanner {
         o.gid = gid;
         o.radius = entry.radius;
         o.isIndirect = !!entry.isIndirect;
-        o.isBeam = !!entry.isBeam;
-        o.beamCopy = !!entry.beamCopy;
         this.#staticOutputFields(entry, o);
         this.#effectOutputFields(entry, o);
         const w = this.#weaponForOwner(entry.ownerIndex);
@@ -875,25 +715,11 @@ class Scanner {
         o.vy = entry.vy;
         o.speed = entry.speed;
         o.seg = entry.seg;
-        o.segUncertain = !!entry.segUncertain;
         o.hasTarget = !!entry.hasTarget;
         o.targetX = entry.targetX;
         o.targetY = entry.targetY;
         o.ageMs = entry.ageMs;
         o.preMs = entry.preMs || 0;
-        o.lifeMs = entry.lifeMs || 0;
-        o.ticks = entry.ticks || 0;
-        o.travelDistance = entry.travelDistance || 0;
-        o.typeId = entry.typeId;
-        o.homing = !!entry.homing;
-        o.bouncing = !!entry.bouncing;
-        o.steer = entry.steer || 0;
-        o.steerIgnoreMs = entry.steerIgnoreMs || 0;
-        o.steerLifeMs = entry.steerLifeMs || 0;
-        o.bounceAdd = entry.bounceAdd || 0;
-        o.bounceMax = entry.bounceMax || 0;
-        o.bounceKeep = entry.bounceKeep || 0;
-        o.rehit = !!entry.rehit;
         o.ownerIndex = entry.ownerIndex;
     }
 
@@ -913,21 +739,8 @@ class Scanner {
         }
         entry.ageMs = Math.max(0, now - (entry.spawnTs || now));
         this.#updateEntryTarget(entry, x, y);
-        if (!entry.meta && this.#metaBudget > 0) {
-            this.#metaBudget--;
-            this.#applyMeta(
-                entry,
-                this.#readProjectileMeta(entry.ptr, entry.data, entry.speed, 0, entry.isBeam)
-            );
-        }
         const flown = this.#traveled(entry, x, y);
         entry.seg = this.#segmentLeft(entry, flown);
-        entry.segUncertain = !!(
-            entry.hasVelocitySample &&
-            now - entry.lastMoveTs < 200 &&
-            !(entry.seg > 0) &&
-            length(entry.vx, entry.vy) > 100
-        );
         if (!this.#entryVisible(entry, this.#resolveOwner(entry))) return;
         const o = entry.out || this.#newOutput(entry, gid);
         this.#refreshOutput(entry, o, x, y);
@@ -937,7 +750,6 @@ class Scanner {
     #updateLiveProjectiles(now) {
         const output = this.#outArr;
         output.length = 0;
-        this.#metaBudget = 4;
         this.#liveProjectiles.forEach((entry, gid) => {
             try {
                 if (now - (entry.spawnTs || now) > staleMs) {

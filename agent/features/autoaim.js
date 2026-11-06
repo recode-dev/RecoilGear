@@ -289,13 +289,7 @@ class AutoAim {
     #learnSteer(data) {
         try {
             const steer = data.add(offsets.LogicProjectileData_steerStrength).readFloat();
-            const life = this.#readInt(
-                data,
-                offsets.LogicProjectileData_steerLifeTime,
-                null,
-                1,
-                20000
-            );
+            const life = this.#readInt(data, offsets.LogicProjectileData_steerLifeTime, 1, 20000);
             this.#ownSteerLife = steer > 0 && life > 0 ? life : 0;
         } catch {
             this.#ownSteerLife = 0;
