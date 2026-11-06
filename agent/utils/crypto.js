@@ -59,25 +59,6 @@ const compress = (buf) => {
     return out;
 };
 
-export const sha256 = (bytes) => {
-    const len = bytes.length;
-    const total = ((len + 9 + 63) >> 6) << 6;
-    const buf = new Uint8Array(total);
-    buf.set(bytes);
-    buf[len] = 0x80;
-    const bits = len * 8;
-    const hi = Math.floor(bits / 4294967296);
-    buf[total - 8] = (hi >>> 24) & 0xff;
-    buf[total - 7] = (hi >>> 16) & 0xff;
-    buf[total - 6] = (hi >>> 8) & 0xff;
-    buf[total - 5] = hi & 0xff;
-    buf[total - 4] = (bits >>> 24) & 0xff;
-    buf[total - 3] = (bits >>> 16) & 0xff;
-    buf[total - 2] = (bits >>> 8) & 0xff;
-    buf[total - 1] = bits & 0xff;
-    return compress(buf);
-};
-
 export const tokenVariants = Object.freeze(
     [true, false].flatMap((swap) =>
         [0, 4].flatMap((rot) =>
@@ -111,7 +92,7 @@ const putWords = (dst, off, src, swap) => {
     }
 };
 
-export const inputToken = (key16, maskIn, maskOut, typeConst, snapshot, variant) => {
+export const inputToken = (secrets, typeConst, snapshot, variant) => {
     const v = variant || tokenVariants[0];
     let data = snapshot;
     if (v.rot) {
@@ -121,8 +102,8 @@ export const inputToken = (key16, maskIn, maskOut, typeConst, snapshot, variant)
     const mixed = new Uint8Array(16);
     const outerKey = new Uint8Array(16);
     for (let i = 0; i < 16; i++) {
-        mixed[i] = key16[i] ^ maskIn[i];
-        outerKey[i] = key16[i] ^ maskOut[i];
+        mixed[i] = secrets.key16[i] ^ secrets.maskIn[i];
+        outerKey[i] = secrets.key16[i] ^ secrets.maskOut[i];
     }
     const inner = new Uint8Array(128);
     putWords(inner, 0, mixed, v.swap);
@@ -148,9 +129,9 @@ export const inputToken = (key16, maskIn, maskOut, typeConst, snapshot, variant)
     return value < 2 ? 1 : value;
 };
 
-export const matchVariant = (key16, maskIn, maskOut, typeConst, snapshot, expected) => {
+export const matchVariant = (secrets, typeConst, snapshot, expected) => {
     for (const variant of tokenVariants) {
-        if (inputToken(key16, maskIn, maskOut, typeConst, snapshot, variant) === expected) {
+        if (inputToken(secrets, typeConst, snapshot, variant) === expected) {
             return variant;
         }
     }

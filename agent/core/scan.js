@@ -2,7 +2,7 @@ import { getFunctions, isValidPtr, ptrFromU32 } from "./functions.js";
 import { offsets } from "./offsets.js";
 import { readScString } from "./scstring.js";
 
-export const tileUnits = 100;
+const tileUnits = 100;
 export const ticksPerSec = 20;
 const tickMs = 1000 / ticksPerSec;
 export const beamTicks = 18000;
@@ -26,12 +26,6 @@ class Scanner {
     #reloadCallbacks = [];
     #dataHooksInstalled = false;
     #coreHooksInstalled = false;
-    #moveAppliedAt = 0;
-    #moveAppliedX = 0;
-    #moveAppliedY = 0;
-    #inputAt = 0;
-    #inputX = 0;
-    #inputY = 0;
     #metaBudget = 0;
     #outArr = [];
     #moduleBase = null;
@@ -77,49 +71,17 @@ class Scanner {
         return this.dataFieldOf(obj);
     }
 
-    #learnInput(ci) {
-        this.#inputX = Math.trunc(ci.add(offsets.ClientInput_x).readS32());
-        this.#inputY = Math.trunc(ci.add(offsets.ClientInput_y).readS32());
-        this.#inputAt = Date.now();
-    }
-
-    moveAppliedSince(x, y, ms) {
-        if (!(this.#moveAppliedAt > 0)) return false;
-        if (Date.now() - this.#moveAppliedAt > ms) return false;
-        const dx = x - this.#moveAppliedX;
-        const dy = y - this.#moveAppliedY;
-        return dx * dx + dy * dy <= 4;
-    }
-
-    inputSentSince(x, y, ms) {
-        if (!(this.#inputAt > 0) || Date.now() - this.#inputAt > ms) return false;
-        const dx = x - this.#inputX;
-        const dy = y - this.#inputY;
-        return dx * dx + dy * dy <= 4;
-    }
-
     #installCoreHooks(base) {
         if (this.#coreHooksInstalled || !base) return;
         this.#coreHooksInstalled = true;
-        const learnInput = (ci) => this.#learnInput(ci);
         try {
             Interceptor.attach(base.add(offsets.LogicBattleModeClient_setClientPredictionMoveTo), {
-                onEnter: (args) => {
-                    this.#moveAppliedAt = Date.now();
-                    this.#moveAppliedX = args[1].toInt32();
-                    this.#moveAppliedY = args[2].toInt32();
-                }
+                onEnter: () => {}
             });
         } catch {}
         try {
             Interceptor.attach(base.add(offsets.ClientInputManager_addInput), {
-                onEnter: (args) => {
-                    try {
-                        const ci = args[1];
-                        if (!isValidPtr(ci)) return;
-                        learnInput(ci);
-                    } catch {}
-                }
+                onEnter: () => {}
             });
         } catch {}
     }
@@ -229,10 +191,6 @@ class Scanner {
         return unknownAsEnemy === true;
     }
 
-    isEnemyObject(obj) {
-        return this.#isEnemyOf(obj, this.state.battleModeClient, false);
-    }
-
     travelDistance(ticks, speed) {
         if (!(ticks > 0) || ticks >= beamTicks || !(speed > 0)) return 0;
         return Math.round((ticks * speed) / ticksPerSec);
@@ -310,22 +268,6 @@ class Scanner {
             if (getRadius) return Math.trunc(getRadius(data));
         } catch {}
         return 0;
-    }
-
-    #readProjectileFlags(data) {
-        let passes = 0;
-        let pierces = 0;
-        let piercesChars = 0;
-        try {
-            passes = data.add(offsets.LogicProjectileData_passesEnvironment).readU8() & 1;
-        } catch {}
-        try {
-            pierces = data.add(offsets.LogicProjectileData_piercesEnvironmentField).readU8() & 1;
-        } catch {}
-        try {
-            piercesChars = data.add(offsets.LogicProjectileData_piercesCharacters).readU8() & 1;
-        } catch {}
-        return { passes, pierces, piercesChars };
     }
 
     #readClientU32(obj, off, max) {
@@ -620,7 +562,6 @@ class Scanner {
         const y = this.#fieldS32(projectile, offsets.LogicGameObjectClient_y);
         const spawnReady = x !== 0 || y !== 0;
         const target = this.#readProjectileTarget(projectile, data, x, y);
-        const flags = this.#readProjectileFlags(data);
         let isIndirect = this.#dataU8(data, offsets.LogicProjectileData_indirect);
         const travelType = this.#travelTypeOf(data, projectile);
         const dynamicRange = this.#dataU8(data, offsets.LogicProjectileData_allowDynamicRange);
@@ -649,9 +590,6 @@ class Scanner {
             targetY: target ? target.y : 0,
             hasTarget: !!target || !!targetObj,
             seg0: target && spawnReady ? length(target.x - x, target.y - y) : 0,
-            passesEnv: flags.passes,
-            piercesEnv: flags.pierces,
-            piercesChars: flags.piercesChars,
             isIndirect: !!isIndirect,
             isBeam: !!beam,
             beamCopy: false,
@@ -666,11 +604,6 @@ class Scanner {
             meta: null,
             travelType,
             dynamicRange,
-            ignoreChars: this.#dataU8(data, offsets.LogicProjectileData_ignoreCharacterCollisions),
-            ignoreEnv: this.#dataU8(data, offsets.LogicProjectileData_ignoreEnvironmentCollisions),
-            grapples: this.#dataU8(data, offsets.LogicProjectileData_grapplesEnemy),
-            boomerang: this.#dataS32(data, offsets.LogicProjectileData_boomerang, 1, 8),
-            chains: this.#dataU8(data, offsets.LogicProjectileData_chainsToEnemies),
             stunMs: this.#clientS32(projectile, offsets.LogicProjectileClient_stunMs, 1, 60000),
             silenceMs: this.#clientS32(
                 projectile,
@@ -684,29 +617,15 @@ class Scanner {
                 1,
                 60000
             ),
-            constantFly: this.#dataU8(data, offsets.LogicProjectileData_constantFlyTime),
-            earlyTicks: this.#dataS32(data, offsets.LogicProjectileData_numEarlyTicks, 1, 400),
-            homeDistance: this.#dataS32(data, offsets.LogicProjectileData_homingDistance, 1, 30000),
             gravity: this.#dataS32(data, offsets.LogicProjectileData_gravity, 1, 20000),
-            shotByHero: this.#dataU8(data, offsets.LogicProjectileData_isShotByHero),
-            visualized: this.#dataU8(data, offsets.LogicProjectileData_visualizeEndPoint),
             attachArea: this.#dataU8(data, offsets.LogicProjectileData_attachAreaEffectToTarget),
             trail: this.#dataU8(data, offsets.LogicProjectileData_spawnAreaEffectTrail),
-            trailMin: this.#dataS32(
-                data,
-                offsets.LogicProjectileData_areaEffectTrailMinDistance,
-                1,
-                20000
-            ),
             lifeTicks: this.#clientS32(
                 projectile,
                 offsets.LogicProjectileClient_lifeTicks,
                 1,
                 100000
-            ),
-            clientRadius: 0,
-            seekX: 0,
-            seekY: 0
+            )
         };
     }
 
@@ -917,30 +836,15 @@ class Scanner {
 
     #staticOutputFields(entry, o) {
         o.travelType = entry.travelType || 0;
-        o.dynamicRange = entry.dynamicRange || 0;
-        o.ignoreChars = entry.ignoreChars || 0;
-        o.ignoreEnv = entry.ignoreEnv || 0;
-        o.grapples = entry.grapples || 0;
-        o.boomerang = entry.boomerang || 0;
-        o.chains = entry.chains || 0;
         o.stunMs = entry.stunMs || 0;
         o.silenceMs = entry.silenceMs || 0;
         o.triggerMs = entry.triggerMs || 0;
-        o.constantFly = entry.constantFly || 0;
     }
 
     #effectOutputFields(entry, o) {
-        o.earlyTicks = entry.earlyTicks || 0;
-        o.homeDistance = entry.homeDistance || 0;
         o.gravity = entry.gravity || 0;
-        o.shotByHero = entry.shotByHero || 0;
-        o.levelBorder = entry.levelBorder || 0;
-        o.visualized = entry.visualized || 0;
         o.attachArea = entry.attachArea || 0;
         o.trail = entry.trail || 0;
-        o.trailMin = entry.trailMin || 0;
-        o.lifeTicks = entry.lifeTicks || 0;
-        o.clientRadius = entry.clientRadius || 0;
     }
 
     #newOutput(entry, gid) {
@@ -948,9 +852,6 @@ class Scanner {
         entry.out = o;
         o.gid = gid;
         o.radius = entry.radius;
-        o.passesEnv = !!entry.passesEnv;
-        o.piercesEnv = !!entry.piercesEnv;
-        o.piercesChars = !!entry.piercesChars;
         o.isIndirect = !!entry.isIndirect;
         o.isBeam = !!entry.isBeam;
         o.beamCopy = !!entry.beamCopy;
@@ -983,8 +884,6 @@ class Scanner {
         o.travelDistance = entry.travelDistance || 0;
         o.typeId = entry.typeId;
         o.homing = !!entry.homing;
-        o.seekX = entry.seekX || 0;
-        o.seekY = entry.seekY || 0;
         o.bouncing = !!entry.bouncing;
         o.steer = entry.steer || 0;
         o.steerIgnoreMs = entry.steerIgnoreMs || 0;
@@ -1230,11 +1129,7 @@ const scanner = new Scanner();
 const scanData = scanner.state;
 
 export { scanData };
-export const dataFieldOf = (obj) => scanner.dataFieldOf(obj);
 export const dataOf = (obj) => scanner.dataOf(obj);
-export const moveAppliedSince = (x, y, ms) => scanner.moveAppliedSince(x, y, ms);
-export const inputSentSince = (x, y, ms) => scanner.inputSentSince(x, y, ms);
-export const isEnemyObject = (obj) => scanner.isEnemyObject(obj);
 export const travelDistance = (ticks, speed) => scanner.travelDistance(ticks, speed);
 export const travelTicksFor = (data, rangeUnits, speed) =>
     scanner.travelTicksFor(data, rangeUnits, speed);

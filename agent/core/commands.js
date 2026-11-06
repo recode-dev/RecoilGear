@@ -6,7 +6,6 @@ import { offsets } from "./offsets.js";
 const cmdBufSize = 72;
 const maxTableType = 0x16;
 const tableEntries = 0x17;
-const priorityTableEntries = 0x15;
 const maskSize = 16;
 const fallbackConstSize = 8;
 const data16Offset = 4;
@@ -18,10 +17,7 @@ class CommandSigner {
     #typeTable = null;
     #innerMask = null;
     #outerMask = null;
-    #skillTypeTable = null;
-    #priorityTable = null;
     #fallbackType = 0xdeadbeef;
-    #lastToken = 0;
     #variant = null;
     #votes = new Map();
     #hooked = false;
@@ -80,19 +76,6 @@ class CommandSigner {
                 return false;
             }
             try {
-                const table = this.#readU32Table(
-                    base.add(offsets.SkillCommandTypeTable),
-                    tableEntries
-                );
-                if (this.#tableSane(table)) this.#skillTypeTable = table;
-            } catch {}
-            try {
-                this.#priorityTable = this.#readU32Table(
-                    base.add(offsets.ClientInput_typePriorityTable),
-                    priorityTableEntries
-                );
-            } catch {}
-            try {
                 const decoded = this.#decodeFallbackConst(
                     this.#bytesAt(
                         base.add(offsets.ClientInput_typeConstantFallback),
@@ -108,25 +91,6 @@ class CommandSigner {
             this.#outerMask = null;
             return false;
         }
-    }
-
-    signingSource() {
-        if (!this.#typeTable) return null;
-        return this.#variant ? this.#variant.id : "v69";
-    }
-
-    skillCommandType(index) {
-        if (!this.#skillTypeTable) return 0;
-        const i = Math.trunc(index);
-        if (i < 0 || i >= this.#skillTypeTable.length) return 0;
-        return this.#skillTypeTable[i];
-    }
-
-    clientInputTypePriority(type) {
-        const t = Math.trunc(type);
-        if (t < 0 || t >= priorityTableEntries) return -1;
-        if (!this.#priorityTable) return 0;
-        return Math.trunc(this.#priorityTable[t]);
     }
 
     #typeConstBytes(type) {
@@ -166,51 +130,45 @@ class CommandSigner {
         const token = input.add(offsets.ClientInput_token).readU32() >>> 0;
         if (token < 2) return;
         this.#tries++;
-        const key16 = this.#bytesAt(battle.add(offsets.BattleMode_hashKey), maskSize);
+        const secrets = {
+            key16: this.#bytesAt(battle.add(offsets.BattleMode_hashKey), maskSize),
+            maskIn: this.#innerMask,
+            maskOut: this.#outerMask
+        };
         const snapshot = this.#bytesAt(input.add(data16Offset), maskSize);
         const type = input.add(offsets.ClientInput_type).readU32() >>> 0;
-        const hit = matchVariant(
-            key16,
-            this.#innerMask,
-            this.#outerMask,
-            this.#typeConstBytes(type),
-            snapshot,
-            token
-        );
+        const hit = matchVariant(secrets, this.#typeConstBytes(type), snapshot, token);
         if (!hit) return;
         const votes = (this.#votes.get(hit.id) || 0) + 1;
         this.#votes.set(hit.id, votes);
         if (votes >= 2) this.#variant = hit;
     }
 
-    signClientInput(input, battle) {
+    #signClientInput(input, battle) {
         if (!input || input.isNull()) return 0;
         if (!battle || battle.isNull()) return 0;
         try {
             if (battle.add(offsets.BattleMode_hashEnabled).readU8() !== 1) return 0;
             if (!this.#loadSigning()) return 0;
             this.#ensureCalibration();
-            const key16 = this.#bytesAt(battle.add(offsets.BattleMode_hashKey), maskSize);
+            const secrets = {
+                key16: this.#bytesAt(battle.add(offsets.BattleMode_hashKey), maskSize),
+                maskIn: this.#innerMask,
+                maskOut: this.#outerMask
+            };
             const snapshot = this.#bytesAt(input.add(data16Offset), maskSize);
             const type = input.add(offsets.ClientInput_type).readU32() >>> 0;
             const value = inputToken(
-                key16,
-                this.#innerMask,
-                this.#outerMask,
+                secrets,
                 this.#typeConstBytes(type),
                 snapshot,
                 this.#variant || tokenVariants[0]
             );
             input.add(offsets.ClientInput_token).writeU32(value);
-            this.#lastToken = value;
             return value;
         } catch {
             return 0;
         }
-    }
-
-    get token() {
-        return this.#lastToken;
     }
 
     sendCommand(cmdType, fillFn) {
@@ -225,7 +183,7 @@ class CommandSigner {
             ci.writeByteArray(this.#zeroBuf);
             fns.ClientInput_constructor_int(ci, Math.trunc(cmdType));
             if (fillFn) fillFn(ci, battle);
-            this.signClientInput(ci, battle);
+            this.#signClientInput(ci, battle);
             this.#signing = true;
             try {
                 fns.ClientInputManager_addInput(mgr, ci);
@@ -241,9 +199,4 @@ class CommandSigner {
 
 const signer = new CommandSigner();
 
-export const signingSource = () => signer.signingSource();
-export const skillCommandType = (index) => signer.skillCommandType(index);
-export const clientInputTypePriority = (type) => signer.clientInputTypePriority(type);
-export const signClientInput = (input, battle) => signer.signClientInput(input, battle);
-export const lastToken = () => signer.token;
 export const sendCommand = (cmdType, fillFn) => signer.sendCommand(cmdType, fillFn);

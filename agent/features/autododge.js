@@ -16,31 +16,9 @@ const deg2rad = Math.PI / 180;
 const tune = {
     dirCount: 36,
     horizonS: 1.2,
-    simSteps: 8,
-    sepCap: 420,
-    skin: 60,
-    reach: 1000,
-    minRoom: 240,
-    latencyMs: 90,
-    prepSafety: 1.35,
-    minDodgeMs: 260,
-    releaseGraceMs: 170,
-    revalidateMs: 120,
-    repickMargin: 260,
-    resendMs: 170,
-    targetEps: 36,
-    refreezeDist: 300,
     aware: 3600,
-    coneMinSpread: 60,
-    coneControlSpread: 10,
-    zoneMinR: 110,
-    zoneScale: 1.15,
-    zoneLingerMs: 3500,
-    stickyMemMs: 500,
-    stickyFuseMinS: 0.4,
-    stunMargin: 70,
+    skin: 60,
     wallPenalty: 1500,
-    roomCandidates: 6,
     momentum: 110
 };
 
@@ -84,14 +62,14 @@ class DodgeCore {
         const vb = Math.trunc(p.volleyBullets);
         const vs = Math.trunc(p.volleySpread);
         const control = Math.trunc(p.stunMs) > 0 || Math.trunc(p.silenceMs) > 0;
-        if (vb >= 2 && vs >= tune.coneMinSpread) return "cone";
-        if (vb >= 3 && vs >= tune.coneControlSpread && control) return "cone";
+        if (vb >= 2 && vs >= 60) return "cone";
+        if (vb >= 3 && vs >= 10 && control) return "cone";
         return "linear";
     }
 
     #blastRadius(p) {
-        const r = Math.trunc(p.radius) > 0 ? Math.trunc(p.radius) : tune.zoneMinR;
-        return r >= tune.zoneMinR ? r * 1.02 : tune.zoneMinR * tune.zoneScale;
+        const r = Math.trunc(p.radius) > 0 ? Math.trunc(p.radius) : 110;
+        return r >= 110 ? r * 1.02 : 110 * 1.15;
     }
 
     #linearVelocity(p) {
@@ -121,7 +99,7 @@ class DodgeCore {
         const r = this.#blastRadius(p);
         const flightS = Math.trunc(p.seg0) > 0 && Math.trunc(p.speed) > 0 ? p.seg0 / p.speed : 0;
         const fuseS = Math.max(
-            tune.stickyFuseMinS,
+            0.4,
             Math.trunc(p.triggerMs) / 1000 - Math.max(0, Math.trunc(p.ageMs) / 1000 - flightS)
         );
         this.#lastZones.set(p.gid, {
@@ -210,13 +188,13 @@ class DodgeCore {
     #pathHazard(p) {
         const v = this.#linearVelocity(p);
         const stun = Math.trunc(p.stunMs) > 0 || Math.trunc(p.silenceMs) > 0;
-        const hitR = Math.trunc(p.radius) + this.#myR + (stun ? tune.stunMargin : 0);
+        const hitR = Math.trunc(p.radius) + this.#myR + (stun ? 70 : 0);
         if (!v) {
             return {
                 kind: "zone",
                 x: p.x,
                 y: p.y,
-                r: Math.max(hitR + tune.skin, tune.zoneMinR),
+                r: Math.max(hitR + tune.skin, 110),
                 fuse: 0,
                 approach: 0,
                 gid: p.gid
@@ -264,9 +242,7 @@ class DodgeCore {
                 x: mx,
                 y: my,
                 r: z.r,
-                until:
-                    this.#now +
-                    (z.sticky ? Math.max(tune.stickyMemMs, z.fuseMs || 0) : tune.zoneLingerMs),
+                until: this.#now + (z.sticky ? Math.max(500, z.fuseMs || 0) : 3500),
                 fuseMs: z.sticky ? Math.max(0, z.fuseMs || 0) : 0
             });
         }
@@ -358,20 +334,19 @@ class DodgeCore {
             const n = this.#clearanceNeed(h);
             if (n > need) need = n;
         }
-        const prepMs = Math.round((need / this.#speed) * 1000 * tune.prepSafety) + tune.latencyMs;
+        const prepMs = Math.round((need / this.#speed) * 1000 * 1.35) + 90;
         return { danger: tMin <= prepMs / 1000, prepMs, tMin };
     }
 
     #wallRoom(deg) {
         const rad = deg * deg2rad;
-        const ex = this.#myX + Math.cos(rad) * tune.reach;
-        const ey = this.#myY + Math.sin(rad) * tune.reach;
+        const ex = this.#myX + Math.cos(rad) * 1000;
+        const ey = this.#myY + Math.sin(rad) * 1000;
         const hit = this.#walls.firstWallHit(this.#myX, this.#myY, ex, ey, this.#myR > 200 ? 2 : 1);
-        if (hit >= 0) return hit >= tune.reach ? tune.reach : Math.max(0, hit - this.#myR - 40);
-        if (!this.#walls.isBlockedWide(ex, ey, this.#myR, this.#walls.movementBit))
-            return tune.reach;
+        if (hit >= 0) return hit >= 1000 ? 1000 : Math.max(0, hit - this.#myR - 40);
+        if (!this.#walls.isBlockedWide(ex, ey, this.#myR, this.#walls.movementBit)) return 1000;
         let lo = 0;
-        let hi = tune.reach;
+        let hi = 1000;
         for (let i = 0; i < 6; i++) {
             const mid = (lo + hi) / 2;
             if (
@@ -390,8 +365,8 @@ class DodgeCore {
 
     #anchor(deg) {
         const room = this.#wallRoom(deg);
-        if (room <= tune.minRoom) return null;
-        const run = Math.min(room, tune.reach);
+        if (room <= 240) return null;
+        const run = Math.min(room, 1000);
         const rad = deg * deg2rad;
         return { x: this.#myX + Math.cos(rad) * run, y: this.#myY + Math.sin(rad) * run };
     }
@@ -413,7 +388,7 @@ class DodgeCore {
         if (h.kind === "linear") {
             const spd = Math.hypot(h.vx, h.vy);
             if (!(spd > 1)) return this.#dist(h.x, h.y, px, py) - h.hitR;
-            if (h.left > 0 && t > h.left / spd) return tune.sepCap;
+            if (h.left > 0 && t > h.left / spd) return 420;
             return Math.hypot(px - (h.x + h.vx * t), py - (h.y + h.vy * t)) - h.hitR;
         }
         if (h.kind === "cone") return this.#wedgeSep(h, px, py);
@@ -426,15 +401,15 @@ class DodgeCore {
         const vy = Math.sin(rad) * this.#speed;
         let total = 0;
         for (const hazard of hazards) {
-            let sep = tune.sepCap;
-            for (let s = 1; s <= tune.simSteps; s++) {
-                const t = tune.horizonS * (s / tune.simSteps) * (s / tune.simSteps);
+            let sep = 420;
+            for (let s = 1; s <= 8; s++) {
+                const t = tune.horizonS * (s / 8) * (s / 8);
                 const d = this.#sepAt(hazard, this.#myX + vx * t, this.#myY + vy * t, t);
                 if (d < sep) sep = d;
                 if (sep <= -200) break;
             }
             if (sep < -200) sep = -200;
-            else if (sep > tune.sepCap) sep = tune.sepCap;
+            else if (sep > 420) sep = 420;
             total += sep;
             if (total <= -600) return total;
         }
@@ -442,7 +417,7 @@ class DodgeCore {
     }
 
     #headingScore(cand, room, refDeg) {
-        let score = cand.sep - (tune.wallPenalty * Math.max(0, tune.reach - room)) / tune.reach;
+        let score = cand.sep - (tune.wallPenalty * Math.max(0, 1000 - room)) / 1000;
         if (refDeg != null) score -= (tune.momentum * angDiff(cand.deg, refDeg)) / 180;
         return score;
     }
@@ -455,10 +430,10 @@ class DodgeCore {
         cands.sort((a, b) => b.sep - a.sep);
         let outDeg = -1;
         let outScore = -Infinity;
-        const top = Math.min(cands.length, tune.roomCandidates);
+        const top = Math.min(cands.length, 6);
         for (let i = 0; i < top; i++) {
             const room = this.#wallRoom(cands[i].deg);
-            if (room <= tune.minRoom) continue;
+            if (room <= 240) continue;
             const score = this.#headingScore(cands[i], room, refDeg);
             if (score > outScore) {
                 outScore = score;
@@ -486,9 +461,9 @@ class DodgeCore {
 
     #scoreOf(hazards, deg, refDeg) {
         const room = this.#wallRoom(deg);
-        if (room <= tune.minRoom) return -Infinity;
+        if (room <= 240) return -Infinity;
         let score = this.#separationScore(hazards, deg);
-        score -= (tune.wallPenalty * Math.max(0, tune.reach - room)) / tune.reach;
+        score -= (tune.wallPenalty * Math.max(0, 1000 - room)) / 1000;
         if (refDeg != null) score -= (tune.momentum * angDiff(deg, refDeg)) / 180;
         return score;
     }
@@ -546,12 +521,12 @@ class DodgeCore {
     }
 
     #revalidate(cmd, hazards) {
-        if (this.#now - cmd.lastCheckAt < tune.revalidateMs) return;
+        if (this.#now - cmd.lastCheckAt < 120) return;
         cmd.lastCheckAt = this.#now;
         const cur = this.#scoreOf(hazards, cmd.headingDeg, cmd.headingDeg);
         const alt = this.#bestHeading(hazards, cmd.headingDeg);
         if (!alt || alt.deg === cmd.headingDeg) return;
-        if (!(cur < -30) || alt.score <= cur + tune.repickMargin) return;
+        if (!(cur < -30) || alt.score <= cur + 260) return;
         const a = this.#anchor(alt.deg);
         if (!a) return;
         cmd.headingDeg = alt.deg;
@@ -562,14 +537,14 @@ class DodgeCore {
 
     #releaseCheck(cmd, danger) {
         if (danger) return false;
-        if (this.#now - cmd.lastDangerAt <= tune.releaseGraceMs) return false;
-        if (this.#now - cmd.startedAt <= tune.minDodgeMs) return false;
+        if (this.#now - cmd.lastDangerAt <= 170) return false;
+        if (this.#now - cmd.startedAt <= 260) return false;
         this.#cmd = null;
         return true;
     }
 
     #refreshTarget(cmd) {
-        if (this.#dist(this.#myX, this.#myY, cmd.tx, cmd.ty) >= tune.refreezeDist) return;
+        if (this.#dist(this.#myX, this.#myY, cmd.tx, cmd.ty) >= 300) return;
         const a = this.#anchor(cmd.headingDeg);
         if (!a) return;
         cmd.tx = a.x;
@@ -582,10 +557,8 @@ class DodgeCore {
         this.#revalidate(cmd, hazards);
         if (this.#releaseCheck(cmd, danger)) return { active: false, stopped: true };
         this.#refreshTarget(cmd);
-        const moved =
-            !isFinite(cmd.sentX) ||
-            this.#dist(cmd.tx, cmd.ty, cmd.sentX, cmd.sentY) > tune.targetEps;
-        const send = cmd.forceSend || moved || this.#now - cmd.lastSendAt >= tune.resendMs;
+        const moved = !isFinite(cmd.sentX) || this.#dist(cmd.tx, cmd.ty, cmd.sentX, cmd.sentY) > 36;
+        const send = cmd.forceSend || moved || this.#now - cmd.lastSendAt >= 170;
         if (send) {
             cmd.forceSend = false;
             cmd.lastSendAt = this.#now;
