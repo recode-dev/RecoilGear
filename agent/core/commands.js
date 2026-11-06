@@ -1,4 +1,4 @@
-import { inputToken, matchVariant, tokenVariants } from "../utils/crypto.js";
+import { inputToken } from "../utils/crypto.js";
 
 import { getBase, getFunctions } from "./functions.js";
 import { offsets } from "./offsets.js";
@@ -18,12 +18,6 @@ class CommandSigner {
     #innerMask = null;
     #outerMask = null;
     #fallbackType = 0xdeadbeef;
-    #variant = null;
-    #votes = new Map();
-    #hooked = false;
-    #signing = false;
-    #tries = 0;
-    #calibAt = 0;
 
     #bytesAt(address, size) {
         const raw = address.readByteArray(size);
@@ -95,57 +89,15 @@ class CommandSigner {
     }
 
     #typeConstBytes(type) {
-        const raw = type <= maxTableType ? this.#typeTable[type] : this.#fallbackType;
-        return new Uint8Array([
-            raw & 0xff,
-            (raw >>> 8) & 0xff,
-            (raw >>> 16) & 0xff,
-            (raw >>> 24) & 0xff
-        ]);
-    }
-
-    #ensureCalibration() {
-        if (this.#hooked) return;
-        const base = getBase();
-        if (!base) return;
-        this.#hooked = true;
-        try {
-            Interceptor.attach(base.add(offsets.ClientInputManager_addInput), {
-                onEnter: (args) => {
-                    if (this.#signing) return;
-                    try {
-                        this.#observe(args[1]);
-                    } catch {}
-                }
-            });
-        } catch {}
-    }
-
-    #observe(input) {
-        if (this.#variant || this.#tries > 30 || !input || input.isNull()) return;
-        const now = Date.now();
-        if (now - this.#calibAt < 400) return;
-        const fns = getFunctions();
-        const battle = fns.BattleMode_getInstance();
-        if (!battle || battle.isNull()) return;
-        if (battle.add(offsets.BattleMode_hashEnabled).readU8() !== 1) return;
-        if (!this.#loadSigning()) return;
-        const token = input.add(offsets.ClientInput_token).readU32() >>> 0;
-        if (token < 2) return;
-        this.#calibAt = now;
-        this.#tries++;
-        const secrets = {
-            key16: this.#bytesAt(battle.add(offsets.BattleMode_hashKey), maskSize),
-            maskIn: this.#innerMask,
-            maskOut: this.#outerMask
-        };
-        const snapshot = this.#bytesAt(input.add(data16Offset), maskSize);
-        const type = input.add(offsets.ClientInput_type).readU32() >>> 0;
-        const hit = matchVariant(secrets, this.#typeConstBytes(type), snapshot, token);
-        if (!hit) return;
-        const votes = (this.#votes.get(hit.id) || 0) + 1;
-        this.#votes.set(hit.id, votes);
-        if (votes >= 2) this.#variant = hit;
+        if (type > maxTableType)
+            return new Uint8Array([
+                this.#fallbackType & 0xff,
+                (this.#fallbackType >>> 8) & 0xff,
+                (this.#fallbackType >>> 16) & 0xff,
+                (this.#fallbackType >>> 24) & 0xff
+            ]);
+        const raw = this.#typeTable[type];
+        return new Uint8Array([raw & 0xff, (raw >>> 16) & 0xff, 0, 0]);
     }
 
     #signClientInput(input, battle) {
@@ -154,7 +106,6 @@ class CommandSigner {
         try {
             if (battle.add(offsets.BattleMode_hashEnabled).readU8() !== 1) return 0;
             if (!this.#loadSigning()) return 0;
-            this.#ensureCalibration();
             const secrets = {
                 key16: this.#bytesAt(battle.add(offsets.BattleMode_hashKey), maskSize),
                 maskIn: this.#innerMask,
@@ -162,12 +113,7 @@ class CommandSigner {
             };
             const snapshot = this.#bytesAt(input.add(data16Offset), maskSize);
             const type = input.add(offsets.ClientInput_type).readU32() >>> 0;
-            const value = inputToken(
-                secrets,
-                this.#typeConstBytes(type),
-                snapshot,
-                this.#variant || tokenVariants[0]
-            );
+            const value = inputToken(secrets, this.#typeConstBytes(type), snapshot);
             input.add(offsets.ClientInput_token).writeU32(value);
             return value;
         } catch {
@@ -188,12 +134,7 @@ class CommandSigner {
             fns.ClientInput_constructor_int(ci, Math.trunc(cmdType));
             if (fillFn) fillFn(ci, battle);
             this.#signClientInput(ci, battle);
-            this.#signing = true;
-            try {
-                fns.ClientInputManager_addInput(mgr, ci);
-            } finally {
-                this.#signing = false;
-            }
+            fns.ClientInputManager_addInput(mgr, ci);
             return true;
         } catch {
             return false;
