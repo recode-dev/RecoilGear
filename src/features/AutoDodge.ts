@@ -15,7 +15,7 @@ const DEG2RAD = Math.PI / 180;
 
 const ANCHOR_RUN = 520;
 const ANCHOR_ARRIVE = 150;
-const SEND_MIN_MS = 130;
+const SEND_MIN_MS = 200;
 const SEND_MIN_SHIFT = 90;
 
 interface TuneOptions {
@@ -154,7 +154,6 @@ interface DodgeCommand {
     ty: number;
     sentX: number;
     sentY: number;
-    startedAt: number;
     lastDangerAt: number;
     lastCheckAt: number;
     lastSendAt: number;
@@ -195,6 +194,8 @@ class DodgeCore {
     #now = 0;
     #cmd: DodgeCommand | null = null;
     #curDeg = NaN;
+    #lastDeg = NaN;
+    #lastActiveAt = 0;
     #zoneMem = new Map<string, ZoneMemo>();
     #lastZones = new Map<string, ZoneSnapshot>();
 
@@ -522,7 +523,16 @@ class DodgeCore {
         cmd.ty = cmd.anchorY;
     }
 
+    #extendAnchor(cmd: DodgeCommand): void {
+        const rad = this.#curDeg * DEG2RAD;
+        cmd.anchorX += Math.cos(rad) * ANCHOR_RUN;
+        cmd.anchorY += Math.sin(rad) * ANCHOR_RUN;
+        cmd.tx = cmd.anchorX;
+        cmd.ty = cmd.anchorY;
+    }
+
     #shouldSend(cmd: DodgeCommand): boolean {
+        if (this.#now - cmd.lastSendAt < 90) return false;
         const shift = this.#dist(cmd.tx, cmd.ty, cmd.sentX, cmd.sentY);
         if (shift < SEND_MIN_SHIFT && this.#now - cmd.lastSendAt < SEND_MIN_MS) return false;
         cmd.lastSendAt = this.#now;
@@ -681,10 +691,11 @@ class DodgeCore {
 
     #engage(hazards: Hazard[]): DodgeResult {
         const now = this.#now;
-        this.#curDeg = NaN;
+        if (now - this.#lastActiveAt > 700) this.#curDeg = NaN;
+        const ref = isFinite(this.#lastDeg) ? this.#lastDeg : null;
         let deg: number | null = null;
         let anchor: StepPoint | null = null;
-        const picked = this.#bestHeading(hazards, null);
+        const picked = this.#bestHeading(hazards, ref);
         if (picked) anchor = this.#anchor(picked.deg);
         if (picked && anchor) deg = picked.deg;
         if (deg === null) {
@@ -698,7 +709,7 @@ class DodgeCore {
             else deg = null;
         }
         if (deg === null || !anchor) return { active: false };
-        this.#curDeg = NaN;
+        if (!isFinite(this.#curDeg)) this.#curDeg = deg;
         const cmd: DodgeCommand = {
             headingDeg: deg,
             anchorX: anchor.x,
@@ -707,11 +718,20 @@ class DodgeCore {
             ty: anchor.y,
             sentX: anchor.x,
             sentY: anchor.y,
-            startedAt: now,
             lastDangerAt: now,
             lastCheckAt: now,
             lastSendAt: now,
         };
+        this.#placeAnchor(cmd);
+        if (this.#stepBlocked({ x: cmd.anchorX, y: cmd.anchorY })) {
+            cmd.anchorX = anchor.x;
+            cmd.anchorY = anchor.y;
+            cmd.tx = anchor.x;
+            cmd.ty = anchor.y;
+            this.#curDeg = deg;
+        }
+        this.#lastDeg = deg;
+        this.#lastActiveAt = now;
         this.#cmd = cmd;
         return {
             active: true,
@@ -724,26 +744,27 @@ class DodgeCore {
     }
 
     #revalidate(cmd: DodgeCommand, hazards: Hazard[]): void {
-        if (this.#now - cmd.lastCheckAt < 200) return;
+        if (this.#now - cmd.lastCheckAt < 300) return;
         cmd.lastCheckAt = this.#now;
         const cur = this.#scoreOf(hazards, cmd.headingDeg, cmd.headingDeg);
         const alt = this.#bestHeading(hazards, cmd.headingDeg);
         if (!alt || alt.deg === cmd.headingDeg) return;
-        if (!(cur < -30) || alt.score <= cur + 420) return;
+        if (angDiff(alt.deg, cmd.headingDeg) < 25) return;
+        if (!(cur < -80) || alt.score <= cur + 520) return;
         cmd.headingDeg = alt.deg;
+        this.#lastDeg = alt.deg;
     }
 
     #releaseCheck(cmd: DodgeCommand, danger: boolean): boolean {
         if (danger) return false;
-        if (this.#now - cmd.lastDangerAt <= 170) return false;
-        if (this.#now - cmd.startedAt <= 260) return false;
+        if (this.#now - cmd.lastDangerAt <= 30) return false;
         this.#release();
         return true;
     }
 
     #release(): void {
         this.#cmd = null;
-        this.#curDeg = NaN;
+        this.#lastActiveAt = this.#now;
     }
 
     #clear(): DodgeResult {
@@ -767,8 +788,18 @@ class DodgeCore {
         if (this.#releaseCheck(cmd, danger)) return { active: false };
         const before = isFinite(this.#curDeg) ? wrap360(this.#curDeg) : NaN;
         const want = wrap360(this.#slewDeg(cmd.headingDeg));
+        if (want !== before) {
+            this.#curDeg = want;
+            return {
+                active: true,
+                targetX: cmd.tx,
+                targetY: cmd.ty,
+                headingDeg: cmd.headingDeg,
+                send: false,
+            };
+        }
         const arrived = this.#dist(this.#myX, this.#myY, cmd.anchorX, cmd.anchorY) < ANCHOR_ARRIVE;
-        if (want !== before || arrived) this.#placeAnchor(cmd);
+        if (arrived) this.#extendAnchor(cmd);
         if (this.#stepBlocked({ x: cmd.anchorX, y: cmd.anchorY })) {
             const repick = this.#engage(hazards);
             if (!repick.active) {
@@ -806,6 +837,8 @@ class DodgeCore {
     reset(): void {
         this.#cmd = null;
         this.#curDeg = NaN;
+        this.#lastDeg = NaN;
+        this.#lastActiveAt = 0;
         this.#zoneMem.clear();
         this.#lastZones.clear();
         this.#world = { projectiles: [] };
@@ -816,6 +849,8 @@ class AutoDodge {
     #hitbox = 0;
     #radiusMemoData: NativePointer | null = null;
     #radiusMemoValue = 0;
+    #predX = NaN;
+    #predY = NaN;
     #wallsApi: WallsApi = { firstWallHit, rayHitDistance, movementBit: MOVEMENT_BIT };
 
     #core = new DodgeCore();
@@ -862,7 +897,11 @@ class AutoDodge {
         try {
             const logic = scanData.battleModeClient;
             if (!logic || logic.isNull()) return false;
-            getFunctions().LogicBattleModeClient_setClientPredictionMoveTo(logic, x, y, 1);
+            if (x !== this.#predX || y !== this.#predY) {
+                getFunctions().LogicBattleModeClient_setClientPredictionMoveTo(logic, x, y, 1);
+                this.#predX = x;
+                this.#predY = y;
+            }
             return this.#moveCommand(x, y);
         } catch {
             return false;
@@ -899,6 +938,8 @@ class AutoDodge {
     reset(): void {
         this.#core.reset();
         this.#invalidateOwnMetrics();
+        this.#predX = NaN;
+        this.#predY = NaN;
     }
 
     setup(): void {
