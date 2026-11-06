@@ -23,11 +23,6 @@ class WallGrid {
     #pfHookInstalled = false;
     #pfMemo = new Map();
     #pfMemoTs = 0;
-    #gridVersion = 1;
-
-    get version() {
-        return this.#gridVersion;
-    }
 
     #syncTileSize() {
         try {
@@ -105,7 +100,6 @@ class WallGrid {
             this.#width = width;
             this.#height = height;
             this.#needsRebuild = false;
-            this.#gridVersion++;
             return true;
         } catch {
             return false;
@@ -318,7 +312,6 @@ class WallGrid {
 
 const wallGrid = new WallGrid();
 
-export const tileSizeUnits = () => wallGrid.tileSize;
 export const notifyBattleModeChanged = (battleMode) => wallGrid.notifyBattleModeChanged(battleMode);
 export const maybeRefreshWallCache = (battleMode, now) =>
     wallGrid.maybeRefreshWallCache(battleMode, now);

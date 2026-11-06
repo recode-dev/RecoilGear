@@ -15,8 +15,6 @@ class Scanner {
     #scanCount = 0;
     #liveProjectiles = new Map();
     #friendlyIdx = new Set();
-    #objectsArr = null;
-    #objCount = 0;
     #objMgrPtr = null;
     #projectileHooksInstalled = false;
     #weaponMeta = new Map();
@@ -24,7 +22,6 @@ class Scanner {
     #charsByIndex = new Map();
     #reloadCallbacks = [];
     #dataHooksInstalled = false;
-    #coreHooksInstalled = false;
     #outArr = [];
     #moduleBase = null;
     #vtableProj = null;
@@ -69,21 +66,6 @@ class Scanner {
 
     dataOf(obj) {
         return this.dataFieldOf(obj);
-    }
-
-    #installCoreHooks(base) {
-        if (this.#coreHooksInstalled || !base) return;
-        this.#coreHooksInstalled = true;
-        try {
-            Interceptor.attach(base.add(offsets.LogicBattleModeClient_setClientPredictionMoveTo), {
-                onEnter: () => {}
-            });
-        } catch {}
-        try {
-            Interceptor.attach(base.add(offsets.ClientInputManager_addInput), {
-                onEnter: () => {}
-            });
-        } catch {}
     }
 
     #readDataName(data) {
@@ -887,9 +869,7 @@ class Scanner {
         if (!isValidPtr(objMgr)) return [];
         const objects = objMgr.add(offsets.LogicGameObjectManagerClient_objects).readPointer();
         const count = objMgr.add(offsets.LogicGameObjectManagerClient_count).readU32();
-        this.#objectsArr = isValidPtr(objects) ? objects : null;
         const ok = isValidPtr(objects) && count > 0 && count <= 1200;
-        this.#objCount = ok ? count : 0;
         if (!ok) return [];
         return this.#scanObjectBatch(objects, count, own, bm, now);
     }
@@ -925,8 +905,6 @@ class Scanner {
         this.#weaponMeta.clear();
         this.#liveProjectiles.clear();
         this.#friendlyIdx.clear();
-        this.#objectsArr = null;
-        this.#objCount = 0;
         this.#objMgrPtr = null;
         this.#charsByIndex.clear();
         this.#charSpeedByData.clear();
@@ -939,7 +917,6 @@ class Scanner {
         this.#moduleBase = base;
         this.#vtableProj = base.add(offsets.LogicProjectileData_vtable);
         this.#vtableProjClient = base.add(offsets.LogicProjectileClient_vtable);
-        this.#installCoreHooks(base);
     }
 
     enableProjectileTracking() {

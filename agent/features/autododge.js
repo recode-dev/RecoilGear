@@ -605,7 +605,6 @@ class AutoDodge {
     #hitbox = 0;
     #radiusMemoData = null;
     #radiusMemoValue = 0;
-    #last = { active: false };
     #stopSent = false;
     #wallsApi = { firstWallHit, isBlockedWide, movementBit };
     #core = new DodgeCore();
@@ -687,7 +686,6 @@ class AutoDodge {
             projectiles: scanData.projectiles,
             walls: this.#wallsApi
         });
-        this.#last = d;
         if (d.active) {
             this.#stopSent = false;
             if (d.send && isFinite(d.targetX) && isFinite(d.targetY))
@@ -709,7 +707,6 @@ class AutoDodge {
     reset() {
         this.#core.reset();
         this.#invalidateOwnMetrics();
-        this.#last = { active: false };
         this.#stopSent = false;
     }
 
