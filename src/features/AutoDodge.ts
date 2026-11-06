@@ -25,7 +25,7 @@ const CFG = {
     SWITCH_MARGIN: 1.25,
     URGENT_MARGIN: 0.6,
     BREAK_WINDOW_S: 0.15,
-    N_DIRECTIONS: 24,
+    N_DIRECTIONS: 8,
     STEP_SIZE: 150,
     MAX_SEARCH_DIST: 1500,
     ARRIVAL_THRESHOLD: 42,
@@ -39,7 +39,7 @@ const CFG = {
     URGENT_CACHE_MS: 16,
     URGENT_FAST_SPEED: 1800,
     URGENT_FAST_BONUS: 0.25,
-    HOLD_AFTER_CLEAR_MS: 15,
+    HOLD_AFTER_CLEAR_MS: 150,
     VOLLEY_WINDOW_MS: 200,
     SPAWN_BUCKET: 128,
     SEND_MIN_SHIFT: 80,
@@ -116,6 +116,12 @@ for (let i = 0; i < CFG.N_DIRECTIONS; i++) {
     const a = (Math.PI * 2 * i) / CFG.N_DIRECTIONS;
     RING.push({ x: Math.cos(a), y: Math.sin(a) });
 }
+
+const snapDir = (v: Vec): Vec => {
+    const step = Math.PI / 4;
+    const a = Math.round(Math.atan2(v.y, v.x) / step) * step;
+    return { x: Math.cos(a), y: Math.sin(a) };
+};
 
 const normalize2d = (x: number, y: number): Vec => {
     const n = Math.sqrt(x * x + y * y);
@@ -568,7 +574,8 @@ class DodgeCore {
         }
         let dir: Vec | null = null;
         if (threatened) {
-            const parsed = this.#parse(px, py, myR, intent);
+            const parsedRaw = this.#parse(px, py, myR, intent);
+            const parsed = parsedRaw ? snapDir(parsedRaw) : null;
             const safe = this.#findSafe(px, py, myR, parsed ?? intent);
             if (safe) {
                 const nx = Math.round(safe.x);
