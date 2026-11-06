@@ -41,7 +41,7 @@ class FunctionTable {
             LogicBattleModeClient_setClientPredictionMoveTo: this.#nf(
                 "LogicBattleModeClient_setClientPredictionMoveTo",
                 "void",
-                ["pointer", "int", "int", "int"]
+                ["pointer", "int", "int", "bool"]
             ),
             LogicGameObjectManagerClient_getOwnPlayerTeam: this.#nf(
                 "LogicGameObjectManagerClient_getOwnPlayerTeam",
@@ -53,7 +53,7 @@ class FunctionTable {
                 "pointer",
                 ["pointer", "int", "int"]
             ),
-            ClientInput_constructor_int: this.#nf("ClientInput_constructor_int", "pointer", [
+            ClientInput_constructor_int: this.#nf("ClientInput_constructor_int", "void", [
                 "pointer",
                 "int"
             ]),
@@ -87,7 +87,7 @@ class FunctionTable {
             ),
             LogicCharacterData_getCollisionRadius: this.#nf(
                 "LogicCharacterData_getCollisionRadius",
-                "uint32",
+                "int32",
                 ["pointer"]
             ),
             LogicBattleModeClient_getTileMap: this.#nf(
@@ -108,7 +108,7 @@ class FunctionTable {
             LogicSkillData_getProjectileData: this.#nf(
                 "LogicSkillData_getProjectileData",
                 "pointer",
-                ["pointer", "int"]
+                ["pointer"]
             ),
             LogicData_getName: this.#nf("LogicData_getName", "pointer", ["pointer"]),
             LogicProjectileClient_getTravelTicks: this.#nf(
@@ -145,7 +145,7 @@ class FunctionTable {
             LogicCharacterData_getProjectileStartRadius: this.#nf(
                 "LogicCharacterData_getProjectileStartRadius",
                 "int32",
-                ["pointer"]
+                []
             ),
             operator_new: this.#nf("operator_new", "pointer", ["size_t"])
         });

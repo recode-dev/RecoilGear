@@ -117,7 +117,7 @@ class Scanner {
             } catch {}
         }
         try {
-            const t = Math.trunc(obj.add(offsets.LogicGameObjectClient_team).readU32());
+            const t = Math.trunc(obj.add(offsets.LogicGameObjectClient_team).readS32());
             return t === -1 ? -1 : t;
         } catch {
             return -1;

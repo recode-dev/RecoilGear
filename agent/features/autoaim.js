@@ -2,7 +2,6 @@ import { getBase, getFunctions, isValidPtr } from "../core/functions.js";
 import { offsets } from "../core/offsets.js";
 import {
     beamTicks,
-    dataOf,
     enableProjectileTracking,
     onDataReload,
     scanData,
@@ -260,7 +259,7 @@ class AutoAim {
     #ownProjectileData(own) {
         const fns = getFunctions();
         const skill = fns.LogicCharacterClient_getWeaponSkill(own);
-        let data = skill && !skill.isNull() ? fns.LogicSkillData_getProjectileData(skill, 0) : null;
+        let data = skill && !skill.isNull() ? fns.LogicSkillData_getProjectileData(skill) : null;
         if ((!data || data.isNull()) && skill && !skill.isNull()) {
             try {
                 const direct = skill.add(offsets.LogicSkillData_projectileData).readPointer();
@@ -270,17 +269,12 @@ class AutoAim {
         return data && !data.isNull() ? data : null;
     }
 
-    #shotRadius(data, own, fns) {
+    #shotRadius(data, fns) {
         let rad = this.#readInt(data, offsets.LogicProjectileData_radius, 1, 2000);
         if (!(rad > 0) && fns.LogicCharacterData_getProjectileStartRadius) {
             try {
-                const ownData = dataOf(own);
-                if (ownData && !ownData.isNull()) {
-                    const start = Math.trunc(
-                        fns.LogicCharacterData_getProjectileStartRadius(ownData)
-                    );
-                    if (start >= 1 && start <= 2000) rad = start;
-                }
+                const start = Math.trunc(fns.LogicCharacterData_getProjectileStartRadius());
+                if (start >= 1 && start <= 2000) rad = start;
             } catch {}
         }
         return rad;
@@ -318,7 +312,7 @@ class AutoAim {
         } catch {
             this.#ownPiercesChars = false;
         }
-        this.#ownShotR = this.#shotRadius(data, own, fns);
+        this.#ownShotR = this.#shotRadius(data, fns);
         this.#learnSteer(data);
         this.#learnTravelTicks(data, engineSpeed, own);
         return engineSpeed;

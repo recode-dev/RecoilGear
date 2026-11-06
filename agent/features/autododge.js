@@ -626,13 +626,22 @@ class AutoDodge {
         return value;
     }
 
+    #ownData(fns, own) {
+        if (fns.LogicGameObjectClient_getData) {
+            try {
+                const viaFn = fns.LogicGameObjectClient_getData(own);
+                if (viaFn && !viaFn.isNull()) return viaFn;
+            } catch {}
+        }
+        return dataOf(own);
+    }
+
     #learnOwnHitbox() {
         try {
             const own = scanData.ownCharacter;
             if (!own || own.isNull()) return false;
-            const fns = getFunctions();
-            if (!fns.LogicGameObjectClient_getData) return false;
-            const radius = Math.trunc(this.#characterCollisionRadius(dataOf(own)));
+            const data = this.#ownData(getFunctions(), own);
+            const radius = Math.trunc(this.#characterCollisionRadius(data));
             if (!(radius > 0)) return false;
             this.#hitbox = radius;
             return true;
