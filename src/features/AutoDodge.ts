@@ -29,6 +29,7 @@ const CFG = {
     STEP_SIZE: 150,
     MAX_SEARCH_DIST: 1500,
     ARRIVAL_THRESHOLD: 42,
+    REANCHOR_DIST: 150,
     STALE_MS: 300,
     PERP_WEIGHT: 1.8,
     AWAY_WEIGHT: 2.2,
@@ -796,13 +797,27 @@ class DodgeCore {
             this.#resetCommit();
             return null;
         }
-        const reach = this.#wallReach(px, py, myR, commit);
-        const along = this.#walkOut(px, py, myR, commit, reach);
-        if (along) {
-            this.#safeX = Math.round(along.x);
-            this.#safeY = Math.round(along.y);
-        }
         return commit;
+    }
+
+    #targetFor(px: number, py: number, myR: number, dir: Vec, run: number, hot: boolean): Vec {
+        const ax = this.#safeX;
+        const ay = this.#safeY;
+        const dta = ax ? Math.hypot(ax - px, ay - py) : Infinity;
+        if (hot && (ax === 0 || dta < CFG.REANCHOR_DIST)) {
+            const along = this.#walkOut(px, py, myR, dir, run);
+            if (along) {
+                this.#safeX = Math.round(along.x);
+                this.#safeY = Math.round(along.y);
+                return { x: this.#safeX, y: this.#safeY };
+            }
+            this.#safeX = 0;
+            this.#safeY = 0;
+        }
+        return {
+            x: this.#safeX || Math.round(px + dir.x * run),
+            y: this.#safeY || Math.round(py + dir.y * run),
+        };
     }
 
     #decide(
@@ -911,27 +926,26 @@ class DodgeCore {
             return { active: false };
         }
         this.#lastDir = dir;
-        if (!this.#commit || !this.#sameDirection(this.#commit, dir)) {
+        const preX = this.#safeX;
+        const preY = this.#safeY;
+        const fresh = !this.#commit || !this.#sameDirection(this.#commit, dir);
+        if (fresh) {
             this.#commit = dir;
             this.#commitAt = now;
             this.#commitUntil = now + CFG.DODGE_COMMIT_MS;
+            if (this.#safeX === preX && this.#safeY === preY) this.#safeX = this.#safeY = 0;
         }
         const run = Math.min(
             CFG.DODGE_RANGE,
             Math.max(CFG.STEP_SIZE, this.#wallReach(px, py, myR, dir)),
         );
-        const targetX = this.#safeX || Math.round(px + dir.x * run);
-        const targetY = this.#safeY || Math.round(py + dir.y * run);
-        if (
-            Math.hypot(targetX - px, targetY - py) <= CFG.ARRIVAL_THRESHOLD &&
-            !threatened &&
-            !enemyNear
-        ) {
-            this.#safeX = 0;
-            this.#safeY = 0;
+        const hot = threatened || enemyNear;
+        const tgt = this.#targetFor(px, py, myR, dir, run, hot);
+        if (!hot && Math.hypot(tgt.x - px, tgt.y - py) <= CFG.ARRIVAL_THRESHOLD) {
+            this.#resetCommit();
             return { active: false };
         }
-        return { active: true, targetX, targetY, send: true, hot: threatened || enemyNear };
+        return { active: true, targetX: tgt.x, targetY: tgt.y, send: true, hot };
     }
 
     reset(): void {
