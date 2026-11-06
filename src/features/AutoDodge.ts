@@ -17,10 +17,6 @@ const ANCHOR_RUN = 520;
 const ANCHOR_ARRIVE = 150;
 const SEND_MIN_MS = 130;
 const SEND_MIN_SHIFT = 90;
-const RELEASE_COOL_MS = 320;
-const SLEW_DEG = 16;
-const STOP_REPEAT_MS = 60;
-const STOP_WINDOW_MS = 130;
 
 interface TuneOptions {
     dirCount: number;
@@ -176,7 +172,6 @@ interface DodgeWorld {
 
 interface DodgeIdleResult {
     active: false;
-    stopped?: boolean;
 }
 
 interface DodgeRunResult {
@@ -200,7 +195,6 @@ class DodgeCore {
     #now = 0;
     #cmd: DodgeCommand | null = null;
     #curDeg = NaN;
-    #coolUntil = 0;
     #zoneMem = new Map<string, ZoneMemo>();
     #lastZones = new Map<string, ZoneSnapshot>();
 
@@ -750,21 +744,19 @@ class DodgeCore {
     #release(): void {
         this.#cmd = null;
         this.#curDeg = NaN;
-        this.#coolUntil = this.#now + RELEASE_COOL_MS;
     }
 
-    #abort(): DodgeResult {
-        if (!this.#cmd) return { active: false };
+    #clear(): DodgeResult {
         this.#release();
-        return { active: false, stopped: true };
+        return { active: false };
     }
 
     #slewDeg(deg: number): number {
         if (!isFinite(this.#curDeg)) return deg;
         const diff = wrap360(deg - this.#curDeg);
         const delta = diff > 180 ? diff - 360 : diff;
-        if (delta > SLEW_DEG) return wrap360(this.#curDeg + SLEW_DEG);
-        if (delta < -SLEW_DEG) return wrap360(this.#curDeg - SLEW_DEG);
+        if (delta > 16) return wrap360(this.#curDeg + 16);
+        if (delta < -16) return wrap360(this.#curDeg - 16);
         return wrap360(deg);
     }
 
@@ -772,14 +764,17 @@ class DodgeCore {
         const cmd = this.#cmd!;
         if (danger) cmd.lastDangerAt = this.#now;
         this.#revalidate(cmd, hazards);
-        if (this.#releaseCheck(cmd, danger)) return { active: false, stopped: true };
+        if (this.#releaseCheck(cmd, danger)) return { active: false };
         const before = isFinite(this.#curDeg) ? wrap360(this.#curDeg) : NaN;
         const want = wrap360(this.#slewDeg(cmd.headingDeg));
         const arrived = this.#dist(this.#myX, this.#myY, cmd.anchorX, cmd.anchorY) < ANCHOR_ARRIVE;
         if (want !== before || arrived) this.#placeAnchor(cmd);
         if (this.#stepBlocked({ x: cmd.anchorX, y: cmd.anchorY })) {
             const repick = this.#engage(hazards);
-            if (!repick.active) return this.#abort();
+            if (!repick.active) {
+                this.#release();
+                return { active: false };
+            }
             return repick;
         }
         return {
@@ -797,14 +792,13 @@ class DodgeCore {
         this.#now = world.now;
         this.#myX = world.x;
         this.#myY = world.y;
-        if (!isFinite(this.#myX) || !isFinite(this.#myY)) return this.#abort();
+        if (!isFinite(this.#myX) || !isFinite(this.#myY)) return this.#clear();
         this.#speed = Math.trunc(world.speed);
-        if (!(this.#speed > 0)) return this.#abort();
+        if (!(this.#speed > 0)) return this.#clear();
         this.#myR = world.radius > 0 ? world.radius : this.#myR;
         const hazards = this.#collectHazards();
         const { danger } = this.#assess(hazards);
         if (this.#cmd) return this.#hold(hazards, danger);
-        if (this.#now < this.#coolUntil) return { active: false };
         if (!danger) return { active: false };
         return this.#engage(hazards);
     }
@@ -812,7 +806,6 @@ class DodgeCore {
     reset(): void {
         this.#cmd = null;
         this.#curDeg = NaN;
-        this.#coolUntil = 0;
         this.#zoneMem.clear();
         this.#lastZones.clear();
         this.#world = { projectiles: [] };
@@ -823,8 +816,6 @@ class AutoDodge {
     #hitbox = 0;
     #radiusMemoData: NativePointer | null = null;
     #radiusMemoValue = 0;
-    #stopUntil = 0;
-    #lastStopAt = 0;
     #wallsApi: WallsApi = { firstWallHit, rayHitDistance, movementBit: MOVEMENT_BIT };
 
     #core = new DodgeCore();
@@ -878,19 +869,6 @@ class AutoDodge {
         }
     }
 
-    #issueStop(): boolean {
-        try {
-            const logic = scanData.battleModeClient;
-            if (!logic || logic.isNull()) return false;
-            const x = Math.trunc(scanData.myX);
-            const y = Math.trunc(scanData.myY);
-            getFunctions().LogicBattleModeClient_setClientPredictionMoveTo(logic, x, y, 1);
-            return this.#moveCommand(x, y);
-        } catch {
-            return false;
-        }
-    }
-
     update(): void {
         if (scanData.lastUpdate === 0) return;
         const now = Date.now();
@@ -907,24 +885,9 @@ class AutoDodge {
             projectiles: scanData.projectiles,
             walls: this.#wallsApi,
         });
-        if (d.active) {
-            this.#stopUntil = 0;
-            if (d.send && isFinite(d.targetX) && isFinite(d.targetY))
-                this.#issueMove(d.targetX, d.targetY);
-            return;
-        }
-        if (d.stopped) {
-            this.#stopUntil = now + STOP_WINDOW_MS;
-            this.#lastStopAt = 0;
-        }
-        if (this.#stopUntil === 0) return;
-        if (now >= this.#stopUntil) {
-            this.#stopUntil = 0;
-            return;
-        }
-        if (now - this.#lastStopAt < STOP_REPEAT_MS) return;
-        this.#lastStopAt = now;
-        this.#issueStop();
+        if (!d.active) return;
+        if (d.send && isFinite(d.targetX) && isFinite(d.targetY))
+            this.#issueMove(d.targetX, d.targetY);
     }
 
     #invalidateOwnMetrics(): void {
@@ -936,8 +899,6 @@ class AutoDodge {
     reset(): void {
         this.#core.reset();
         this.#invalidateOwnMetrics();
-        this.#stopUntil = 0;
-        this.#lastStopAt = 0;
     }
 
     setup(): void {
