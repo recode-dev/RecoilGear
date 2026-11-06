@@ -8,6 +8,7 @@ import {
     type ProjectileOutput,
     scanData,
 } from "../core/Scan";
+import { MOVEMENT_BIT, PROJECTILE_BIT, rayHitDistance } from "../utils/Walls";
 
 const MOVE_INPUT_TYPE = 2;
 
@@ -35,6 +36,8 @@ const CFG = {
     URGENT_FAST_SPEED: 1800,
     URGENT_FAST_BONUS: 0.25,
     HOLD_AFTER_CLEAR_MS: 15,
+    VOLLEY_WINDOW_MS: 200,
+    SPAWN_BUCKET: 128,
 } as const;
 
 interface Vec {
@@ -44,6 +47,10 @@ interface Vec {
 
 interface ThreatMemory {
     gid: string;
+    ownerIndex: number;
+    spawnSlot: number;
+    spawnX: number;
+    spawnY: number;
     x: number;
     y: number;
     dirX: number;
@@ -200,6 +207,12 @@ class DodgeCore {
             if (!dir) continue;
             this.#mem.set(p.gid, {
                 gid: p.gid,
+                ownerIndex: Math.trunc(p.ownerIndex),
+                spawnSlot: Math.floor(
+                    (now - Math.max(0, Math.trunc(p.ageMs))) / CFG.VOLLEY_WINDOW_MS,
+                ),
+                spawnX: p.spawnX,
+                spawnY: p.spawnY,
                 x: p.x,
                 y: p.y,
                 dirX: dir.x,
@@ -217,6 +230,16 @@ class DodgeCore {
         }
     }
 
+    #clipPath(mem: ThreatMemory): { dist: number; blocked: boolean } {
+        const len = Math.min(Math.max(600, mem.speed * 1.5), 6000);
+        const hit = rayHitDistance(mem.x, mem.y, mem.x + mem.dirX * len, mem.y + mem.dirY * len, {
+            bit: PROJECTILE_BIT,
+            radius: 0,
+        });
+        if (!(hit >= 0)) return { dist: Infinity, blocked: false };
+        return { dist: hit, blocked: true };
+    }
+
     #choose(x: number, y: number, myR: number): void {
         this.#threats.length = 0;
         this.#maxSpeed = 0;
@@ -224,6 +247,7 @@ class DodgeCore {
         for (const mem of this.#mem.values()) {
             if (mem.ignored) continue;
             if (mem.speed > this.#maxSpeed) this.#maxSpeed = mem.speed;
+            const clip = this.#clipPath(mem);
             this.#threats.push({
                 ...mem,
                 svx: mem.dirX * mem.speed,
@@ -231,8 +255,8 @@ class DodgeCore {
                 dx: mem.x - x,
                 dy: mem.y - y,
                 rNoMove: base + (mem.impactRadius || mem.radius),
-                clipDist: Infinity,
-                clipBlocked: false,
+                clipDist: clip.dist,
+                clipBlocked: clip.blocked,
             });
         }
     }
@@ -374,6 +398,17 @@ class DodgeCore {
         return cost;
     }
 
+    #wallReach(px: number, py: number, myR: number, dir: Vec): number {
+        const hit = rayHitDistance(
+            px,
+            py,
+            px + dir.x * CFG.MAX_SEARCH_DIST,
+            py + dir.y * CFG.MAX_SEARCH_DIST,
+            { bit: MOVEMENT_BIT, radius: myR },
+        );
+        return hit < 0 ? CFG.MAX_SEARCH_DIST : hit;
+    }
+
     #findSafe(px: number, py: number, myR: number, intent: Vec): SafePoint | null {
         const dirs: Vec[] = [];
         if (intent.x !== 0 || intent.y !== 0) dirs.push(normalize2d(intent.x, intent.y));
@@ -382,9 +417,11 @@ class DodgeCore {
         let nearest = Infinity;
         for (const dir of dirs) {
             if (this.#expire(px, py, myR, dir, CFG.T_FIELD) >= 0) continue;
+            const reach = this.#wallReach(px, py, myR, dir);
+            if (reach < CFG.STEP_SIZE) continue;
             for (
                 let step = CFG.STEP_SIZE;
-                step <= CFG.MAX_SEARCH_DIST && !(step > nearest);
+                step <= reach && step <= CFG.MAX_SEARCH_DIST && !(step > nearest);
                 step += CFG.STEP_SIZE
             ) {
                 const sx = px + dir.x * step;
@@ -402,11 +439,18 @@ class DodgeCore {
         return points[0];
     }
 
+    #groupKey(threat: Threat): string {
+        if (threat.ownerIndex >= 0) return `o${threat.ownerIndex}_${threat.spawnSlot}`;
+        const bx = Math.round(threat.spawnX / CFG.SPAWN_BUCKET);
+        const by = Math.round(threat.spawnY / CFG.SPAWN_BUCKET);
+        return `s${bx}_${by}_${threat.spawnSlot}`;
+    }
+
     #parse(px: number, py: number, myR: number, intent: Vec): Vec | null {
         const groups = new Map<string, Threat[]>();
         for (const threat of this.#threats) {
             if (this.#perform(threat, px, py, myR, ZERO, this.#urgent()) < 0) continue;
-            const key = threat.gid;
+            const key = this.#groupKey(threat);
             const bucket = groups.get(key);
             if (bucket) bucket.push(threat);
             else groups.set(key, [threat]);
