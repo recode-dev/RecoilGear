@@ -26,7 +26,7 @@ const noComments = {
 };
 
 export default tseslint.config(
-    { ignores: ["build/**", "dist/**", "node_modules/**", "eslint.config.mjs"] },
+    { ignores: ["build/**", "dist/**", "node_modules/**", "mock/**", "eslint.config.mjs"] },
     js.configs.recommended,
     ...tseslint.configs.recommendedTypeChecked,
     {

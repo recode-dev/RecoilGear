@@ -1,5 +1,5 @@
 import { sendCommand } from "../core/Commands";
-import { attachOffset, getBase, getFunctions } from "../core/Functions";
+import { getFunctions } from "../core/Functions";
 import { OFFSETS } from "../core/Offsets";
 import {
     collisionRadius,
@@ -21,45 +21,41 @@ const CFG = {
     T_RELEASE: 0.2,
     MIN_CLEARANCE: 70,
     DODGE_COMMIT_MS: 110,
-    DODGE_DWELL_MS: 240,
-    SWITCH_MARGIN: 1.25,
-    URGENT_MARGIN: 0.6,
-    BREAK_WINDOW_S: 0.1,
-    N_DIRECTIONS: 8,
+    DODGE_DWELL_MS: 300,
+    SWITCH_MARGIN: 1.4,
+    BREAK_WINDOW_S: 0.25,
+    N_DIRECTIONS: 24,
     STEP_SIZE: 150,
     MAX_SEARCH_DIST: 1500,
     ARRIVAL_THRESHOLD: 42,
-    REANCHOR_DIST: 150,
     STALE_MS: 300,
     PERP_WEIGHT: 1.8,
     AWAY_WEIGHT: 2.2,
+    AWAY_FAST_WEIGHT: 0.6,
+    FAST_SPEED: 1200,
     INTENT_WEIGHT: 1,
+    INTENT_STALE_MS: 500,
+    INTENT_MIN_DIST: 80,
     CHAR_SPEED: 720,
     LAG_COMPENSATION_S: 0.03,
     DODGE_RANGE: 900,
     URGENT_CACHE_MS: 16,
     URGENT_FAST_SPEED: 1800,
     URGENT_FAST_BONUS: 0.25,
-    HOLD_AFTER_CLEAR_MS: 150,
+    HOLD_AFTER_CLEAR_MS: 15,
+    DRIFT_AFTER_MS: 600,
     VOLLEY_WINDOW_MS: 200,
     SPAWN_BUCKET: 128,
-    COMBAT_RANGE: 2700,
-    SEND_MIN_SHIFT: 80,
-    HOT_SHIFT: 20,
-    WALK_OUT: 750,
-    MIN_REACH: 300,
-    INTENT_STALE_MS: 500,
-    INTENT_MIN_DIST: 80,
-    INTENT_REVERSE_DOT: -0.3,
-    INTENT_SAFE_T: 0.5,
-    INTENT_AHEAD: 180,
-    INTENT_MIN_LAT: 0.5,
-    STRAFE_MIN_OPEN: 0.35,
-    COMMIT_MIN_OPEN: 0.5,
-    STOPPED_V: 80,
-    HOT_OPEN: 0.71,
-    ESC_BREAK_WINDOW: 0.45,
-    ENEMY_TRACK_STALE_MS: 1000,
+    SEND_MIN_SHIFT: 55,
+    WALK_OUT: 350,
+    WALL_ROOM: 900,
+    WALL_COST: 60,
+    DRIFT_REACH_CAP: 1800,
+    DRIFT_CENTER_BONUS: 900,
+    KITE_RANGE: 2400,
+    KITE_WEIGHT: 3e6,
+    CENTER_HOLD: 3000,
+    CENTER_WEIGHT: 8e5,
 } as const;
 
 interface Vec {
@@ -109,7 +105,7 @@ interface DodgeWorld {
     speed: number;
     radius: number;
     projectiles: ProjectileOutput[];
-    enemies: { x: number; y: number }[];
+    enemies: Vec[];
     intent: Vec;
 }
 
@@ -122,24 +118,20 @@ interface DodgeRunResult {
     targetX: number;
     targetY: number;
     send: boolean;
-    hot: boolean;
 }
 
 type DodgeResult = DodgeIdleResult | DodgeRunResult;
 
 const ZERO: Vec = { x: 0, y: 0 };
 
+const MAP_CENTER_X = 4950;
+const MAP_CENTER_Y = 3150;
+
 const RING: Vec[] = [];
 for (let i = 0; i < CFG.N_DIRECTIONS; i++) {
     const a = (Math.PI * 2 * i) / CFG.N_DIRECTIONS;
     RING.push({ x: Math.cos(a), y: Math.sin(a) });
 }
-
-const snapDir = (v: Vec): Vec => {
-    const step = Math.PI / 4;
-    const a = Math.round(Math.atan2(v.y, v.x) / step) * step;
-    return { x: Math.cos(a), y: Math.sin(a) };
-};
 
 const normalize2d = (x: number, y: number): Vec => {
     const n = Math.sqrt(x * x + y * y);
@@ -175,9 +167,9 @@ const distSqPointToSegment = (
 class DodgeCore {
     #mem = new Map<string, ThreatMemory>();
     #threats: Threat[] = [];
-    #enemyTrack = new Map<string, { x: number; y: number; t: number; v: number }>();
     #maxSpeed = 0;
     #charSpeed: number = CFG.CHAR_SPEED;
+    #enemies: Vec[] = [];
 
     #commit: Vec | null = null;
     #commitUntil = 0;
@@ -189,6 +181,25 @@ class DodgeCore {
 
     #urgentValue = 0;
     #urgentAt = 0;
+    #lastActiveMs = 0;
+
+    #driftDir(px: number, py: number, myR: number): Vec | null {
+        const toCenter = normalize2d(MAP_CENTER_X - px, MAP_CENTER_Y - py);
+        let best: Vec | null = null;
+        let bestScore = -Infinity;
+        for (const dir of RING) {
+            const reach = this.#wallReach(px, py, myR, dir);
+            if (reach < CFG.STEP_SIZE) continue;
+            const score =
+                Math.min(reach, CFG.DRIFT_REACH_CAP) +
+                (dir.x * toCenter.x + dir.y * toCenter.y) * CFG.DRIFT_CENTER_BONUS;
+            if (score > bestScore) {
+                bestScore = score;
+                best = dir;
+            }
+        }
+        return best;
+    }
 
     #impactRadius(radius: number, speed: number): number {
         if (speed > 0 && speed < 1200 && radius > 0 && radius < 120)
@@ -320,7 +331,6 @@ class DodgeCore {
         const root = Math.sqrt(disc);
         const t0 = (-b - root) / (2 * a);
         if ((-b + root) / (2 * a) < 0) return -1;
-        if (t0 < 0 && b > 0) return -1;
         const t = t0 >= 0 ? t0 : 0;
         if (t > tMax) return -1;
         if (
@@ -392,6 +402,8 @@ class DodgeCore {
     }
 
     #collect(dir: Vec, px: number, py: number, myR: number, intent: Vec): number {
+        const room = this.#wallReach(px, py, myR, dir);
+        if (room < CFG.STEP_SIZE) return Infinity;
         let cost = 0;
         const vx = dir.x * this.#charSpeed;
         const vy = dir.y * this.#charSpeed;
@@ -400,9 +412,11 @@ class DodgeCore {
             const t = this.#perform(threat, px, py, myR, dir, CFG.T_FIELD);
             if (t >= 0) {
                 cost += 4e7 + (CFG.T_FIELD - t) * 4e7;
+                if (t <= 0.15) cost += 4e8;
                 if (t <= 0.15) {
                     const away = normalize2d(px - threat.x, py - threat.y);
-                    cost += (1 - (dir.x * away.x + dir.y * away.y)) * 5e6;
+                    const along = dir.x * threat.dirX + dir.y * threat.dirY;
+                    if (along < 0.3) cost += (1 - (dir.x * away.x + dir.y * away.y)) * 5e6;
                 }
             }
             const reach = threat.rNoMove;
@@ -429,6 +443,23 @@ class DodgeCore {
         }
         if (intent.x !== 0 || intent.y !== 0)
             cost -= (dir.x * intent.x + dir.y * intent.y) * CFG.INTENT_WEIGHT * 500;
+        for (const enemy of this.#enemies) {
+            const dx = enemy.x - px;
+            const dy = enemy.y - py;
+            const dist = Math.hypot(dx, dy);
+            if (dist > CFG.KITE_RANGE || dist < 1) continue;
+            const pressure = (CFG.KITE_RANGE - dist) / CFG.KITE_RANGE;
+            cost += (1 - (dir.x * dx + dir.y * dy) / dist) * pressure * CFG.KITE_WEIGHT;
+        }
+        const toCenterX = MAP_CENTER_X - px;
+        const toCenterY = MAP_CENTER_Y - py;
+        const toCenterDist = Math.hypot(toCenterX, toCenterY);
+        if (toCenterDist > CFG.CENTER_HOLD) {
+            const pull = Math.min(1, (toCenterDist - CFG.CENTER_HOLD) / 3000);
+            cost -=
+                ((dir.x * toCenterX + dir.y * toCenterY) / toCenterDist) * pull * CFG.CENTER_WEIGHT;
+        }
+        if (room < CFG.WALL_ROOM) cost += (CFG.WALL_ROOM - room) * CFG.WALL_COST;
         return cost;
     }
 
@@ -448,20 +479,34 @@ class DodgeCore {
         if (intent.x !== 0 || intent.y !== 0) dirs.push(normalize2d(intent.x, intent.y));
         for (const d of RING) dirs.push(d);
 
+        let bestDir: Vec | null = null;
+        let bestScore = Infinity;
+        let bestReach = 0;
+        for (const dir of dirs) {
+            const reach = this.#wallReach(px, py, myR, dir);
+            if (reach < CFG.STEP_SIZE) continue;
+            const score = this.#collect(dir, px, py, myR, intent);
+            if (score < bestScore) {
+                bestScore = score;
+                bestDir = dir;
+                bestReach = reach;
+            }
+        }
+        if (!bestDir) return null;
+
+        const point = this.#walkOut(px, py, myR, bestDir, bestReach);
+        if (point) return point;
+
         const ranked: { dir: Vec; score: number; reach: number }[] = [];
         for (const dir of dirs) {
             const reach = this.#wallReach(px, py, myR, dir);
             if (reach < CFG.STEP_SIZE) continue;
-            const room = Math.min(reach, CFG.WALK_OUT);
-            const score = this.#collect(dir, px, py, myR, intent) + (CFG.WALK_OUT - room) * 5;
-            ranked.push({ dir, score, reach });
+            ranked.push({ dir, score: this.#collect(dir, px, py, myR, intent), reach });
         }
-        if (ranked.length === 0) return null;
         ranked.sort((a, b) => a.score - b.score);
         for (const cand of ranked) {
-            if (cand.reach < CFG.MIN_REACH && ranked[0].reach >= CFG.MIN_REACH) continue;
-            const point = this.#walkOut(px, py, myR, cand.dir, cand.reach);
-            if (point) return point;
+            const p2 = this.#walkOut(px, py, myR, cand.dir, cand.reach);
+            if (p2) return p2;
         }
         return null;
     }
@@ -477,7 +522,12 @@ class DodgeCore {
             if (clearance < CFG.MIN_CLEARANCE) break;
             best = { x: sx, y: sy, dist: step, clearance };
         }
-        return best;
+        if (best) return best;
+        if (limit < CFG.STEP_SIZE) return null;
+        const sx = px + dir.x * limit;
+        const sy = py + dir.y * limit;
+        if (this.#pointThreatened(sx, sy, myR)) return null;
+        return { x: sx, y: sy, dist: limit, clearance: this.#clearanceAt(sx, sy, myR) };
     }
 
     #groupKey(threat: Threat): string {
@@ -503,11 +553,13 @@ class DodgeCore {
             let dy = 0;
             let gx = 0;
             let gy = 0;
+            let maxSpeed = 0;
             for (const threat of group) {
                 dx += threat.dirX;
                 dy += threat.dirY;
                 gx += threat.x;
                 gy += threat.y;
+                if (threat.speed > maxSpeed) maxSpeed = threat.speed;
             }
             const n = group.length || 1;
             dx /= n;
@@ -515,18 +567,19 @@ class DodgeCore {
             gx /= n;
             gy /= n;
             const away = normalize2d(px - gx, py - gy);
+            const awayWeight = maxSpeed >= CFG.FAST_SPEED ? CFG.AWAY_FAST_WEIGHT : CFG.AWAY_WEIGHT;
             const perpA = normalize2d(-dy, dx);
             const perpB = normalize2d(dy, -dx);
             dirs.push(
                 normalize2d(
-                    perpA.x * CFG.PERP_WEIGHT + away.x * CFG.AWAY_WEIGHT,
-                    perpA.y * CFG.PERP_WEIGHT + away.y * CFG.AWAY_WEIGHT,
+                    perpA.x * CFG.PERP_WEIGHT + away.x * awayWeight,
+                    perpA.y * CFG.PERP_WEIGHT + away.y * awayWeight,
                 ),
             );
             dirs.push(
                 normalize2d(
-                    perpB.x * CFG.PERP_WEIGHT + away.x * CFG.AWAY_WEIGHT,
-                    perpB.y * CFG.PERP_WEIGHT + away.y * CFG.AWAY_WEIGHT,
+                    perpB.x * CFG.PERP_WEIGHT + away.x * awayWeight,
+                    perpB.y * CFG.PERP_WEIGHT + away.y * awayWeight,
                 ),
             );
         }
@@ -541,172 +594,6 @@ class DodgeCore {
             }
         }
         return best;
-    }
-
-    #escapeDir(
-        px: number,
-        py: number,
-        myR: number,
-        intent: Vec,
-        enemies: { x: number; y: number }[],
-    ): Vec | null {
-        let best: Threat | null = null;
-        let bestT = Infinity;
-        for (const t of this.#threats) {
-            const d = Math.hypot(t.x - px, t.y - py) - t.rNoMove;
-            const tt = Math.max(0, d) / Math.max(1, t.speed);
-            if (tt < bestT) {
-                bestT = tt;
-                best = t;
-            }
-        }
-        if (!best || bestT > CFG.T_FIELD) return null;
-        const nl = Math.hypot(best.svx, best.svy) || 1;
-        const ux = best.svx / nl;
-        const uy = best.svy / nl;
-        const lineSide = (px - best.x) * -uy + (py - best.y) * ux;
-        const cands: Vec[] = [snapDir({ x: -uy, y: ux }), snapDir({ x: uy, y: -ux })];
-        if (intent.x !== 0 || intent.y !== 0) cands.push(snapDir(intent));
-        let pick: Vec | null = null;
-        let bestScore = -Infinity;
-        const onLine = this.#pointThreatened(px, py, myR);
-        for (const dir of cands) {
-            if (this.#wallReach(px, py, myR, dir) < CFG.STEP_SIZE) continue;
-            let safe = true;
-            for (const t of this.#threats) {
-                if (this.#perform(t, px, py, myR, dir, CFG.T_FIELD) >= 0) {
-                    safe = false;
-                    break;
-                }
-            }
-            const latS = dir.x * -uy + dir.y * ux;
-            if (!safe && latS * lineSide < 0) continue;
-            const lat = Math.abs(latS);
-            const flow = -(dir.x * ux + dir.y * uy);
-            const align = dir.x * intent.x + dir.y * intent.y;
-            const stable = this.#commit ? dir.x * this.#commit.x + dir.y * this.#commit.y : 0;
-            const open = this.#openness(px, py, enemies, dir);
-            const score = onLine
-                ? (safe ? 1e6 : 0) + lat * 5000 + open * 800 + flow * 500
-                : (safe ? 1e6 : 0) +
-                  lat * 1000 +
-                  open * 800 +
-                  flow * 500 +
-                  align * 400 +
-                  stable * 300;
-            if (score > bestScore) {
-                bestScore = score;
-                pick = dir;
-            }
-        }
-        return pick;
-    }
-
-    #openness(px: number, py: number, enemies: { x: number; y: number }[], dir: Vec): number {
-        let minLat = 1;
-        for (const e of enemies) {
-            const dx = e.x - px;
-            const dy = e.y - py;
-            const d = Math.hypot(dx, dy);
-            if (d < 1 || d > CFG.COMBAT_RANGE) continue;
-            const lat = Math.abs(dir.x * -dy + dir.y * dx) / d;
-            if (lat < minLat) minLat = lat;
-        }
-        return minLat;
-    }
-
-    #nearCount(px: number, py: number, enemies: { x: number; y: number }[]): number {
-        const r2 = CFG.COMBAT_RANGE * CFG.COMBAT_RANGE;
-        let n = 0;
-        for (const e of enemies) if ((e.x - px) ** 2 + (e.y - py) ** 2 < r2) n += 1;
-        return n;
-    }
-
-    #trackEnemies(enemies: { x: number; y: number; gid?: string | null }[], now: number): void {
-        const seen = new Set<string>();
-        enemies.forEach((e, i) => {
-            const key = e.gid && e.gid.length > 0 ? e.gid : `i${i}`;
-            seen.add(key);
-            const prev = this.#enemyTrack.get(key);
-            if (prev) {
-                const dt = (now - prev.t) / 1000;
-                if (dt > 0.005 && dt < 0.3) prev.v = Math.hypot(e.x - prev.x, e.y - prev.y) / dt;
-            } else {
-                this.#enemyTrack.set(key, { x: e.x, y: e.y, t: now, v: 0 });
-                return;
-            }
-            prev.x = e.x;
-            prev.y = e.y;
-            prev.t = now;
-        });
-        for (const [key, rec] of this.#enemyTrack)
-            if (!seen.has(key) || now - rec.t > CFG.ENEMY_TRACK_STALE_MS)
-                this.#enemyTrack.delete(key);
-    }
-
-    #stoppedNear(px: number, py: number): boolean {
-        const r2 = CFG.COMBAT_RANGE * CFG.COMBAT_RANGE;
-        for (const rec of this.#enemyTrack.values()) {
-            const d = (rec.x - px) ** 2 + (rec.y - py) ** 2;
-            if (d < r2 && rec.v < CFG.STOPPED_V) return true;
-        }
-        return false;
-    }
-
-    #followNeed(px: number, py: number, enemies: { x: number; y: number }[]): number {
-        let need = CFG.INTENT_MIN_LAT + Math.max(0, this.#nearCount(px, py, enemies) - 1) * 0.15;
-        if (this.#stoppedNear(px, py)) need = Math.max(need, CFG.HOT_OPEN);
-        return need;
-    }
-
-    #intentSafe(
-        px: number,
-        py: number,
-        myR: number,
-        dir: Vec,
-        enemies: { x: number; y: number }[],
-    ): boolean {
-        if (this.#wallReach(px, py, myR, dir) < CFG.MIN_REACH) return false;
-        if (this.#expire(px, py, myR, dir, CFG.INTENT_SAFE_T) >= 0) return false;
-        if (this.#openness(px, py, enemies, dir) < this.#followNeed(px, py, enemies)) return false;
-        return (
-            this.#clearanceAt(px + dir.x * CFG.INTENT_AHEAD, py + dir.y * CFG.INTENT_AHEAD, myR) >
-            10
-        );
-    }
-
-    #strafeDir(
-        px: number,
-        py: number,
-        myR: number,
-        enemies: { x: number; y: number }[],
-        intent: Vec,
-    ): Vec | null {
-        let pick: Vec | null = null;
-        let bestScore = -Infinity;
-        let away: Vec = ZERO;
-        let bd = Infinity;
-        for (const e of enemies) {
-            const d = (e.x - px) ** 2 + (e.y - py) ** 2;
-            if (d < bd) {
-                bd = d;
-                away = normalize2d(px - e.x, py - e.y);
-            }
-        }
-        for (const dir of RING) {
-            if (this.#wallReach(px, py, myR, dir) < CFG.STEP_SIZE) continue;
-            const open = this.#openness(px, py, enemies, dir);
-            if (open < CFG.STRAFE_MIN_OPEN) continue;
-            const align = dir.x * intent.x + dir.y * intent.y;
-            const stable = this.#commit ? dir.x * this.#commit.x + dir.y * this.#commit.y : 0;
-            const kite = away.x !== 0 || away.y !== 0 ? dir.x * away.x + dir.y * away.y : 0;
-            const score = open * 1000 + align * 400 + stable * 300 + kite * 250;
-            if (score > bestScore) {
-                bestScore = score;
-                pick = dir;
-            }
-        }
-        return pick;
     }
 
     #urgentThreat(dir: Vec, px: number, py: number, myR: number): boolean {
@@ -734,90 +621,11 @@ class DodgeCore {
     }
 
     #similarDirection(a: Vec, b: Vec): boolean {
-        return a.x * b.x + a.y * b.y > 0.98;
+        return a.x * b.x + a.y * b.y > 0.94;
     }
 
     #sameDirection(a: Vec, b: Vec): boolean {
         return a.x * b.x + a.y * b.y > 0.98;
-    }
-
-    #holdCommit(
-        px: number,
-        py: number,
-        myR: number,
-        threatened: boolean,
-        enemyNear: boolean,
-        intent: Vec,
-        enemies: { x: number; y: number }[],
-    ): Vec | null {
-        const commit = this.#commit;
-        if (!commit || this.#urgentThreat(commit, px, py, myR)) return null;
-        const hasIntent = intent.x !== 0 || intent.y !== 0;
-        const reverse =
-            !threatened &&
-            hasIntent &&
-            intent.x * commit.x + intent.y * commit.y < CFG.INTENT_REVERSE_DOT;
-        let degenerate = false;
-        if (!reverse && !threatened && enemyNear) {
-            const openNow = this.#openness(px, py, enemies, commit);
-            const need = Math.max(CFG.COMMIT_MIN_OPEN, this.#followNeed(px, py, enemies));
-            if (openNow < need) {
-                let altOpen = 0;
-                for (const dir of RING) {
-                    const o = this.#openness(px, py, enemies, dir);
-                    if (o > altOpen) altOpen = o;
-                }
-                degenerate = altOpen > openNow + 0.15;
-            }
-        }
-        let escapeBreak = false;
-        if (threatened && this.#pointThreatened(px, py, myR)) {
-            if (this.#expire(px, py, myR, commit, CFG.ESC_BREAK_WINDOW) >= 0) {
-                escapeBreak = true;
-            } else {
-                let bt: Threat | null = null;
-                let btt = Infinity;
-                for (const t of this.#threats) {
-                    const d = Math.hypot(t.x - px, t.y - py) - t.rNoMove;
-                    const tt = Math.max(0, d) / Math.max(1, t.speed);
-                    if (tt < btt) {
-                        btt = tt;
-                        bt = t;
-                    }
-                }
-                if (bt) {
-                    const nl = Math.hypot(bt.svx, bt.svy) || 1;
-                    const latC = Math.abs(commit.x * (-bt.svy / nl) + commit.y * (bt.svx / nl));
-                    escapeBreak = latC < 0.7;
-                }
-            }
-        }
-        const wallBlocked = this.#wallReach(px, py, myR, commit) < CFG.STEP_SIZE;
-        if (reverse || degenerate || escapeBreak || wallBlocked) {
-            this.#resetCommit();
-            return null;
-        }
-        return commit;
-    }
-
-    #targetFor(px: number, py: number, myR: number, dir: Vec, run: number, hot: boolean): Vec {
-        const ax = this.#safeX;
-        const ay = this.#safeY;
-        const dta = ax ? Math.hypot(ax - px, ay - py) : Infinity;
-        if (hot && (ax === 0 || dta < CFG.REANCHOR_DIST)) {
-            const along = this.#walkOut(px, py, myR, dir, run);
-            if (along) {
-                this.#safeX = Math.round(along.x);
-                this.#safeY = Math.round(along.y);
-                return { x: this.#safeX, y: this.#safeY };
-            }
-            this.#safeX = 0;
-            this.#safeY = 0;
-        }
-        return {
-            x: this.#safeX || Math.round(px + dir.x * run),
-            y: this.#safeY || Math.round(py + dir.y * run),
-        };
     }
 
     #decide(
@@ -827,37 +635,47 @@ class DodgeCore {
         threatened: boolean,
         intent: Vec,
         now: number,
-        enemies: { x: number; y: number }[],
-        enemyNear: boolean,
     ): Vec | null {
-        const hasIntent = intent.x !== 0 || intent.y !== 0;
-        const held = this.#holdCommit(px, py, myR, threatened, enemyNear, intent, enemies);
-        if (held) return held;
+        if (this.#commit && !this.#urgentThreat(this.#commit, px, py, myR)) return this.#commit;
         let dir: Vec | null = null;
-        if (threatened) dir = this.#escapeDir(px, py, myR, intent, enemies);
-        if (enemyNear && !dir)
-            dir =
-                hasIntent && this.#intentSafe(px, py, myR, intent, enemies)
-                    ? snapDir(intent)
-                    : this.#strafeDir(px, py, myR, enemies, intent);
-        if (threatened && !dir) {
-            const parsedRaw = this.#parse(px, py, myR, intent);
-            const parsed = parsedRaw ? snapDir(parsedRaw) : null;
+        if (threatened) {
+            const parsed = this.#parse(px, py, myR, intent);
             const safe = this.#findSafe(px, py, myR, parsed ?? intent);
             if (safe) {
                 const nx = Math.round(safe.x);
                 const ny = Math.round(safe.y);
                 const newDir = normalize2d(nx - px, ny - py);
-                if (this.#commit && this.#similarDirection(this.#commit, newDir) && this.#safeX)
-                    return this.#commit;
-                this.#safeX = nx;
-                this.#safeY = ny;
-                dir =
-                    this.#lastDir && this.#keepCommitted(this.#lastDir, newDir, px, py, myR, intent)
-                        ? this.#lastDir
-                        : newDir;
+                const commit = this.#commit;
+                const similar = !!commit && this.#similarDirection(commit, newDir) && !!this.#safeX;
+                const arrived =
+                    similar &&
+                    Math.hypot(px - this.#safeX, py - this.#safeY) <= CFG.ARRIVAL_THRESHOLD;
+                if (similar && !arrived) {
+                    dir = commit;
+                } else if (similar && arrived) {
+                    const reach = this.#wallReach(px, py, myR, commit);
+                    if (reach > CFG.ARRIVAL_THRESHOLD + CFG.STEP_SIZE) {
+                        this.#safeX = Math.round(this.#safeX + commit.x * CFG.STEP_SIZE);
+                        this.#safeY = Math.round(this.#safeY + commit.y * CFG.STEP_SIZE);
+                        dir = commit;
+                    } else {
+                        this.#safeX = 0;
+                        this.#safeY = 0;
+                        dir = parsed;
+                    }
+                } else {
+                    this.#safeX = nx;
+                    this.#safeY = ny;
+                    dir =
+                        this.#lastDir &&
+                        this.#keepCommitted(this.#lastDir, newDir, px, py, myR, intent)
+                            ? this.#lastDir
+                            : newDir;
+                }
             } else if (parsed) {
                 dir = parsed;
+                this.#safeX = 0;
+                this.#safeY = 0;
             }
         }
         if (!dir || !this.#commit || this.#similarDirection(this.#commit, dir)) return dir;
@@ -865,8 +683,9 @@ class DodgeCore {
         const keep = this.#collect(this.#commit, px, py, myR, intent);
         const next = this.#collect(dir, px, py, myR, intent);
         const urgent = this.#urgentThreat(this.#commit, px, py, myR);
-        if (urgent) return next < keep * CFG.URGENT_MARGIN ? dir : this.#commit;
-        return settled && next > keep * CFG.SWITCH_MARGIN ? dir : this.#commit;
+        return (urgent && next < keep) || (settled && next > keep * CFG.SWITCH_MARGIN)
+            ? dir
+            : this.#commit;
     }
 
     #resetCommit(): void {
@@ -889,25 +708,33 @@ class DodgeCore {
         this.#charSpeed = world.speed > 0 ? world.speed : CFG.CHAR_SPEED;
         const myR = world.radius > 0 ? world.radius : 60;
         const projectiles = world.projectiles;
-        const enemies = world.enemies;
-        const enemyNear = enemies.some(
-            (e) =>
-                (e.x - px) * (e.x - px) + (e.y - py) * (e.y - py) <
-                CFG.COMBAT_RANGE * CFG.COMBAT_RANGE,
-        );
+        this.#enemies = world.enemies;
         this.#track(projectiles, now);
         this.#choose(px, py, myR);
-        this.#trackEnemies(enemies, now);
-        if (projectiles.length === 0 && this.#threats.length === 0 && !this.#commit && !enemyNear) {
+        if (projectiles.length === 0 && this.#threats.length === 0 && !this.#commit) {
             this.#safeX = 0;
             this.#safeY = 0;
+            if (now - this.#lastActiveMs < CFG.DRIFT_AFTER_MS) {
+                const drift = this.#driftDir(px, py, myR);
+                if (drift) {
+                    this.#lastDir = drift;
+                    this.#lastActiveMs = now;
+                    return {
+                        active: true,
+                        targetX: Math.round(px + drift.x * CFG.DODGE_RANGE),
+                        targetY: Math.round(py + drift.y * CFG.DODGE_RANGE),
+                        send: true,
+                    };
+                }
+            }
             return { active: false };
         }
+        this.#lastActiveMs = now;
         const intent = world.intent;
         const tMin = this.#expire(px, py, myR, intent, this.#urgent());
         const threatened = tMin >= 0 || this.#pointThreatened(px, py, myR);
         if (this.#commit) {
-            const clear = this.#expire(px, py, myR, ZERO, CFG.T_RELEASE + 0.1) < 0 && !enemyNear;
+            const clear = this.#expire(px, py, myR, ZERO, CFG.T_RELEASE + 0.1) < 0;
             if (threatened || !clear) this.#clearSince = 0;
             else if (this.#clearSince === 0) this.#clearSince = now;
             if (
@@ -919,42 +746,33 @@ class DodgeCore {
                 return { active: false };
             }
         }
-        let dir = this.#decide(px, py, myR, threatened, intent, now, enemies, enemyNear);
-        if (!dir && this.#commit) dir = this.#commit;
+        const dir = this.#decide(px, py, myR, threatened, intent, now);
         if (!dir) {
             this.#resetCommit();
             return { active: false };
         }
         this.#lastDir = dir;
-        const preX = this.#safeX;
-        const preY = this.#safeY;
-        const fresh = !this.#commit || !this.#sameDirection(this.#commit, dir);
-        if (fresh) {
+        if (!this.#commit || !this.#sameDirection(this.#commit, dir)) {
             this.#commit = dir;
             this.#commitAt = now;
             this.#commitUntil = now + CFG.DODGE_COMMIT_MS;
-            if (this.#safeX === preX && this.#safeY === preY) this.#safeX = this.#safeY = 0;
         }
-        const run = Math.min(
-            CFG.DODGE_RANGE,
-            Math.max(CFG.STEP_SIZE, this.#wallReach(px, py, myR, dir)),
-        );
-        const hot = threatened || enemyNear;
-        const tgt = this.#targetFor(px, py, myR, dir, run, hot);
-        if (!hot && Math.hypot(tgt.x - px, tgt.y - py) <= CFG.ARRIVAL_THRESHOLD) {
+        const targetX = this.#safeX || Math.round(px + dir.x * CFG.DODGE_RANGE);
+        const targetY = this.#safeY || Math.round(py + dir.y * CFG.DODGE_RANGE);
+        if (Math.hypot(targetX - px, targetY - py) <= CFG.ARRIVAL_THRESHOLD && !threatened) {
             this.#resetCommit();
             return { active: false };
         }
-        return { active: true, targetX: tgt.x, targetY: tgt.y, send: true, hot };
+        return { active: true, targetX, targetY, send: true };
     }
 
     reset(): void {
         this.#mem.clear();
-        this.#enemyTrack.clear();
         this.#threats.length = 0;
         this.#maxSpeed = 0;
         this.#charSpeed = CFG.CHAR_SPEED;
         this.#lastDir = null;
+        this.#enemies = [];
         this.#urgentAt = 0;
         this.#urgentValue = 0;
         this.#resetCommit();
@@ -968,36 +786,17 @@ class AutoDodge {
     #hasSent = false;
     #radiusMemoData: NativePointer | null = null;
     #radiusMemoValue = 0;
-    #selfSend = false;
-    #hookX = 0;
-    #hookY = 0;
-    #hookAt = 0;
     #playerDir: Vec = ZERO;
     #playerDirAt = 0;
 
     #core = new DodgeCore();
 
-    #readIntent(px: number, py: number, now: number): Vec {
-        let ix = this.#hookX;
-        let iy = this.#hookY;
-        let at = this.#hookAt;
+    #readIntent(now: number): Vec {
         const sx = Math.trunc(scanData.inputX);
         const sy = Math.trunc(scanData.inputY);
         if (sx !== 0 || sy !== 0) {
-            ix = sx;
-            iy = sy;
-            at = now;
-        }
-        const ownWrite =
-            this.#hasSent && Math.hypot(ix - this.#lastSentX, iy - this.#lastSentY) < 120;
-        if (!ownWrite && (ix !== 0 || iy !== 0) && now - at < CFG.INTENT_STALE_MS) {
-            const dx = ix - px;
-            const dy = iy - py;
-            const d = Math.hypot(dx, dy);
-            if (d > CFG.INTENT_MIN_DIST) {
-                this.#playerDir = { x: dx / d, y: dy / d };
-                this.#playerDirAt = now;
-            }
+            this.#playerDir = normalize2d(sx, sy);
+            this.#playerDirAt = now;
         }
         return now - this.#playerDirAt < CFG.INTENT_STALE_MS ? this.#playerDir : ZERO;
     }
@@ -1034,15 +833,10 @@ class AutoDodge {
     }
 
     #moveCommand(x: number, y: number): boolean {
-        this.#selfSend = true;
-        try {
-            return sendCommand(MOVE_INPUT_TYPE, (ci) => {
-                ci.add(OFFSETS.ClientInput_x).writeS32(x);
-                ci.add(OFFSETS.ClientInput_y).writeS32(y);
-            });
-        } finally {
-            this.#selfSend = false;
-        }
+        return sendCommand(MOVE_INPUT_TYPE, (ci) => {
+            ci.add(OFFSETS.ClientInput_x).writeS32(x);
+            ci.add(OFFSETS.ClientInput_y).writeS32(y);
+        });
     }
 
     #issueMove(x: number, y: number): boolean {
@@ -1070,15 +864,15 @@ class AutoDodge {
             speed: Math.trunc(scanData.mySpeed),
             radius: Math.trunc(this.#hitbox),
             projectiles: scanData.projectiles,
-            enemies: scanData.enemies,
-            intent: this.#readIntent(scanData.myX, scanData.myY, now),
+            enemies: scanData.enemies.map((enemy) => ({ x: enemy.x, y: enemy.y })),
+            intent: this.#readIntent(now),
         });
         if (!d.active || !d.send) return;
         if (!isFinite(d.targetX) || !isFinite(d.targetY)) return;
-        const minShift = d.hot ? 0 : CFG.SEND_MIN_SHIFT;
         if (
             this.#hasSent &&
-            Math.hypot(d.targetX - this.#lastSentX, d.targetY - this.#lastSentY) < minShift
+            Math.hypot(d.targetX - this.#lastSentX, d.targetY - this.#lastSentY) <
+                CFG.SEND_MIN_SHIFT
         )
             return;
         this.#lastSentX = d.targetX;
@@ -1097,29 +891,12 @@ class AutoDodge {
         this.#core.reset();
         this.#invalidateOwnMetrics();
         this.#hasSent = false;
-        this.#playerDir = ZERO;
-        this.#playerDirAt = 0;
-        this.#hookX = 0;
-        this.#hookY = 0;
-        this.#hookAt = 0;
     }
 
     setup(): void {
         try {
             enableProjectileTracking();
             onDataReload(() => this.#invalidateOwnMetrics());
-            attachOffset(getBase(), OFFSETS.ClientInputManager_addInput, {
-                onEnter: (args) => {
-                    try {
-                        if (this.#selfSend) return;
-                        const ci = args[1];
-                        if (ci.add(OFFSETS.ClientInput_type).readU32() !== MOVE_INPUT_TYPE) return;
-                        this.#hookX = ci.add(OFFSETS.ClientInput_x).readS32();
-                        this.#hookY = ci.add(OFFSETS.ClientInput_y).readS32();
-                        this.#hookAt = Date.now();
-                    } catch {}
-                },
-            });
         } catch {}
     }
 }
