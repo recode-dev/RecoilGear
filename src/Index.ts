@@ -1,24 +1,24 @@
-import { attachOffset, initFunctions } from "./core/functions.js";
-import { offsets } from "./core/offsets.js";
-import { initScanner, resetScannerCache, updateScanner } from "./core/scan.js";
-import { resetAutoAim, setupAutoAim, updateAutoAim } from "./features/autoaim.js";
-import { resetAutoDodge, setupAutoDodge, updateAutoDodge } from "./features/autododge.js";
-import { setupLicense } from "./utils/license.js";
-import { notifyBattleModeChanged, watchTileChanges, maybeRefreshWallCache } from "./utils/walls.js";
+import { attachOffset, initFunctions } from "./core/Functions";
+import { OFFSETS } from "./core/Offsets";
+import { initScanner, resetScannerCache, updateScanner } from "./core/Scan";
+import { resetAutoAim, setupAutoAim, updateAutoAim } from "./features/AutoAim";
+import { resetAutoDodge, setupAutoDodge, updateAutoDodge } from "./features/AutoDodge";
+import { setupLicense } from "./utils/License";
+import { maybeRefreshWallCache, notifyBattleModeChanged, watchTileChanges } from "./utils/Walls";
 
-const retryIntervalMs = 500;
-const retryMaxAttempts = 40;
+const RETRY_INTERVAL_MS = 500;
+const RETRY_MAX_ATTEMPTS = 40;
 
 class RecoilGearAgent {
-    #lastBattle = null;
+    #lastBattle: NativePointer | null = null;
     #installed = false;
     #attempts = 0;
-    #retryTimer = null;
+    #retryTimer: TimeoutId | null = null;
     #lastTickAt = 0;
     #lastAimAt = 0;
     #lastDodgeAt = 0;
 
-    #findModule() {
+    #findModule(): Module | null {
         try {
             return Process.getModuleByName("Nulls Brawl");
         } catch {}
@@ -29,7 +29,7 @@ class RecoilGearAgent {
         return null;
     }
 
-    #tick(bm) {
+    #tick(bm: NativePointer): void {
         if (!bm || bm.isNull()) return;
         if (!this.#lastBattle || !this.#lastBattle.equals(bm)) {
             this.#lastBattle = bm;
@@ -61,7 +61,7 @@ class RecoilGearAgent {
         }
     }
 
-    #finishInstall(mod) {
+    #finishInstall(mod: Module): boolean {
         initFunctions(mod.base, mod);
         try {
             setupLicense();
@@ -70,7 +70,7 @@ class RecoilGearAgent {
         watchTileChanges(mod.base);
         setupAutoDodge();
         setupAutoAim();
-        attachOffset(mod.base, offsets.LogicBattleModeClient_update, {
+        attachOffset(mod.base, OFFSETS.LogicBattleModeClient_update, {
             onEnter: (args) => {
                 this.#tick(args[0]);
             }
@@ -79,19 +79,19 @@ class RecoilGearAgent {
         return true;
     }
 
-    #scheduleRetry() {
+    #scheduleRetry(): void {
         if (this.#retryTimer !== null) return;
         this.#retryTimer = setTimeout(() => {
             this.#retryTimer = null;
-            if (this.#installed || this.#attempts >= retryMaxAttempts) return;
+            if (this.#installed || this.#attempts >= RETRY_MAX_ATTEMPTS) return;
             this.#attempts++;
             const mod = this.#findModule();
             if (mod) this.#finishInstall(mod);
             else this.#scheduleRetry();
-        }, retryIntervalMs);
+        }, RETRY_INTERVAL_MS);
     }
 
-    install() {
+    install(): boolean {
         if (this.#installed) return true;
         const mod = this.#findModule();
         if (mod) return this.#finishInstall(mod);

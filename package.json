@@ -1,0 +1,15 @@
+{
+    "name": "recoilgear",
+    "version": "1.0.0",
+    "private": true,
+    "type": "module",
+    "scripts": {
+        "typecheck": "tsc --noEmit",
+        "build": "frida-compile src/Index.ts -o dist/agent.js -B iife"
+    },
+    "devDependencies": {
+        "@types/frida-gum": "^19.13.0",
+        "frida-compile": "^19.1.0",
+        "typescript": "5.9.3"
+    }
+}

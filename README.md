@@ -5,8 +5,14 @@ Frida agent for **Nulls Brawl** `v69.252`
 ## Build
 
 ```
-npm install frida-compile
-npx frida-compile agent/index.js -o dist/agent.js -B iife
+npm ci
+npx frida-compile src/Index.ts -o dist/agent.js -B iife
+```
+
+## Typecheck
+
+```
+npx tsc --noEmit
 ```
 
 ### License

@@ -1,30 +1,57 @@
-import { attachOffset, getFunctions, isValidPtr, ptrFromU32 } from "../core/functions.js";
-import { offsets } from "../core/offsets.js";
+import { attachOffset, getFunctions, isValidPtr, ptrFromU32 } from "../core/Functions";
+import { OFFSETS } from "../core/Offsets";
 
-const maxMapTiles = 120;
-const maxTotalTiles = maxMapTiles * maxMapTiles;
-const retryMs = 2000;
-const pfMemoMax = 256;
-const pfBucketMs = 40;
+const MAX_MAP_TILES = 120;
+const MAX_TOTAL_TILES = MAX_MAP_TILES * MAX_MAP_TILES;
+const RETRY_MS = 2000;
+const PF_MEMO_MAX = 256;
+const PF_BUCKET_MS = 40;
 
-export const movementBit = 128;
-export const projectileBit = 64;
+export const MOVEMENT_BIT = 128;
+export const PROJECTILE_BIT = 64;
+
+export interface WallRayOptions {
+    bit: number;
+    radius: number;
+}
+
+export interface WallsApi {
+    firstWallHit(wx0: number, wy0: number, wx1: number, wy1: number, size?: number): number;
+    rayHitDistance(
+        wx0: number,
+        wy0: number,
+        wx1: number,
+        wy1: number,
+        opts: WallRayOptions
+    ): number;
+    movementBit: number;
+}
+
+interface PfQuery {
+    size: number;
+    x1: number;
+    y1: number;
+    x2: number;
+    y2: number;
+    f1: number;
+    f2: number;
+}
 
 class WallGrid {
     tileSize = 300;
-    #pathFinder = null;
-    #probeOut = null;
-    #walls = null;
+    #pathFinder: NativePointer | null = null;
+    #probeOut: NativePointer | null = null;
+    #walls: Uint8Array | null = null;
     #width = 0;
     #height = 0;
     #needsRebuild = true;
-    #lastFailedTs = -retryMs;
+    #lastFailedTs = -RETRY_MS;
     #tileWatchInstalled = false;
     #pfHookInstalled = false;
-    #pfMemo = new Map();
+    #pfMemo = new Map<string, number>();
     #pfMemoTs = 0;
 
-    #syncTileSize() {
+    #syncTileSize(): void {
         try {
             const fn = getFunctions().LogicTileMap_tileToLogic;
             const a = Math.trunc(fn(0));
@@ -34,34 +61,34 @@ class WallGrid {
         } catch {}
     }
 
-    #syncPathFinder(tileMap) {
+    #syncPathFinder(tileMap: NativePointer): void {
         try {
-            const pf = tileMap.add(offsets.LogicTileMap_pathFinder).readPointer();
+            const pf = tileMap.add(OFFSETS.LogicTileMap_pathFinder).readPointer();
             this.#pathFinder = isValidPtr(pf) ? pf : null;
         } catch {
             this.#pathFinder = null;
         }
     }
 
-    #flagsFor(tileType, flagsByType) {
+    #flagsFor(tileType: NativePointer, flagsByType: Map<string, number>): number {
         const key = tileType.toString();
         let flags = flagsByType.get(key);
         if (flags !== undefined) return flags;
         flags = 0;
         try {
-            const packed = tileType.add(offsets.LogicTileData_blocksMovement).readU16();
-            if (packed & 0xff) flags |= movementBit;
-            if (packed >> 8) flags |= projectileBit;
+            const packed = tileType.add(OFFSETS.LogicTileData_blocksMovement).readU16();
+            if (packed & 0xff) flags |= MOVEMENT_BIT;
+            if (packed >> 8) flags |= PROJECTILE_BIT;
         } catch {}
         flagsByType.set(key, flags);
         return flags;
     }
 
-    #tileFlags(view, i, flagsByType) {
+    #tileFlags(view: DataView, i: number, flagsByType: Map<string, number>): number {
         const lo = view.getUint32(i * Process.pointerSize, true);
         const hi = view.getUint32(i * Process.pointerSize + 4, true);
         if (lo === 0 && hi === 0) return 0;
-        let tileType = null;
+        let tileType: NativePointer | null = null;
         try {
             tileType = ptrFromU32(lo, hi).readPointer();
         } catch {
@@ -71,27 +98,27 @@ class WallGrid {
         return this.#flagsFor(tileType, flagsByType);
     }
 
-    #readGrid(tiles, total) {
+    #readGrid(tiles: NativePointer, total: number): Uint8Array | null {
         const raw = tiles.readByteArray(total * Process.pointerSize);
         if (!raw) return null;
         const view = new DataView(raw);
         const gridData = new Uint8Array(total);
-        const flagsByType = new Map();
+        const flagsByType = new Map<string, number>();
         for (let i = 0; i < total; i++) gridData[i] = this.#tileFlags(view, i, flagsByType);
         return gridData;
     }
 
-    #rebuildFrom(tileMap) {
+    #rebuildFrom(tileMap: NativePointer): boolean {
         if (!isValidPtr(tileMap)) return false;
         try {
             this.#syncTileSize();
             this.#syncPathFinder(tileMap);
-            const width = tileMap.add(offsets.LogicTileMap_width).readS32();
-            const height = tileMap.add(offsets.LogicTileMap_height).readS32();
-            if (width <= 0 || width > maxMapTiles || height <= 0 || height > maxMapTiles)
+            const width = tileMap.add(OFFSETS.LogicTileMap_width).readS32();
+            const height = tileMap.add(OFFSETS.LogicTileMap_height).readS32();
+            if (width <= 0 || width > MAX_MAP_TILES || height <= 0 || height > MAX_MAP_TILES)
                 return false;
-            if (width * height > maxTotalTiles) return false;
-            const tiles = tileMap.add(offsets.LogicTileMap_tiles).readPointer();
+            if (width * height > MAX_TOTAL_TILES) return false;
+            const tiles = tileMap.add(OFFSETS.LogicTileMap_tiles).readPointer();
             if (!isValidPtr(tiles)) return false;
             const gridData = this.#readGrid(tiles, width * height);
             if (!gridData) return false;
@@ -105,20 +132,20 @@ class WallGrid {
         }
     }
 
-    notifyBattleModeChanged(battleMode) {
+    notifyBattleModeChanged(battleMode: NativePointer): void {
         this.#pfMemo.clear();
         this.#pfMemoTs = 0;
         this.#walls = null;
         this.#width = 0;
         this.#height = 0;
         this.#needsRebuild = true;
-        this.#lastFailedTs = -retryMs;
+        this.#lastFailedTs = -RETRY_MS;
         this.maybeRefreshWallCache(battleMode, Date.now());
     }
 
-    maybeRefreshWallCache(battleMode, now = Date.now()) {
+    maybeRefreshWallCache(battleMode: NativePointer, now: number = Date.now()): void {
         if (!this.#needsRebuild || !isValidPtr(battleMode)) return;
-        if (now - this.#lastFailedTs < retryMs) return;
+        if (now - this.#lastFailedTs < RETRY_MS) return;
         try {
             const tileMap = getFunctions().LogicBattleModeClient_getTileMap(battleMode);
             if (this.#rebuildFrom(tileMap)) return;
@@ -126,28 +153,28 @@ class WallGrid {
         this.#lastFailedTs = now;
     }
 
-    #pfKey(q) {
+    #pfKey(q: PfQuery): string {
         return `${q.size}|${q.x1}|${q.y1}|${q.x2}|${q.y2}|${q.f1}|${q.f2}`;
     }
 
-    #pfRemember(q, dist) {
+    #pfRemember(q: PfQuery, dist: number): void {
         const now = Date.now();
-        if (now - this.#pfMemoTs > pfBucketMs || this.#pfMemo.size > pfMemoMax) {
+        if (now - this.#pfMemoTs > PF_BUCKET_MS || this.#pfMemo.size > PF_MEMO_MAX) {
             this.#pfMemo.clear();
             this.#pfMemoTs = now;
         }
         this.#pfMemo.set(this.#pfKey(q), dist);
     }
 
-    #pfLookup(q) {
-        if (Date.now() - this.#pfMemoTs > pfBucketMs) return -1;
+    #pfLookup(q: PfQuery): number {
+        if (Date.now() - this.#pfMemoTs > PF_BUCKET_MS) return -1;
         const hit = this.#pfMemo.get(this.#pfKey(q));
         return hit === undefined ? -1 : hit;
     }
 
-    watchTileChanges(base) {
+    watchTileChanges(base: NativePointer): void {
         if (!this.#tileWatchInstalled) {
-            const listener = attachOffset(base, offsets.LogicTile_setData, {
+            const listener = attachOffset(base, OFFSETS.LogicTile_setData, {
                 onEnter: () => {
                     this.#needsRebuild = true;
                     this.#pfMemo.clear();
@@ -158,11 +185,11 @@ class WallGrid {
         this.#installPathHook(base);
     }
 
-    #installPathHook(base) {
+    #installPathHook(base: NativePointer): void {
         if (this.#pfHookInstalled) return;
         this.#pfHookInstalled = true;
-        const remember = (q, dist) => this.#pfRemember(q, dist);
-        attachOffset(base, offsets.LogicGamePlayUtil_getClosestPathfinderCollision, {
+        const remember = (q: PfQuery, dist: number): void => this.#pfRemember(q, dist);
+        attachOffset(base, OFFSETS.LogicGamePlayUtil_getClosestPathfinderCollision, {
             onEnter(args) {
                 this.size = args[0].toInt32();
                 this.x1 = args[1].toInt32();
@@ -181,13 +208,13 @@ class WallGrid {
                         const hy = Math.trunc(this.out.add(4).readS32());
                         dist = Math.max(0, Math.round(Math.hypot(hx - this.x1, hy - this.y1)));
                     }
-                    remember(this, dist);
+                    remember(this as unknown as PfQuery, dist);
                 } catch {}
             }
         });
     }
 
-    #circleTouchesTile(wx, wy, r, tx, ty) {
+    #circleTouchesTile(wx: number, wy: number, r: number, tx: number, ty: number): boolean {
         const size = this.tileSize;
         const cx = Math.max(tx * size, Math.min(wx, (tx + 1) * size));
         const cy = Math.max(ty * size, Math.min(wy, (ty + 1) * size));
@@ -196,7 +223,7 @@ class WallGrid {
         return dx * dx + dy * dy <= r * r;
     }
 
-    segBlocked(wx0, wy0, wx1, wy1, opts) {
+    segBlocked(wx0: number, wy0: number, wx1: number, wy1: number, opts: WallRayOptions): boolean {
         if (!this.#walls) return false;
         const radius = Math.max(opts.radius, 0);
         const checkBit = opts.bit;
@@ -212,11 +239,17 @@ class WallGrid {
         return false;
     }
 
-    losCheckWide(wx0, wy0, wx1, wy1, opts) {
+    losCheckWide(
+        wx0: number,
+        wy0: number,
+        wx1: number,
+        wy1: number,
+        opts: WallRayOptions
+    ): boolean {
         return !this.segBlocked(wx0, wy0, wx1, wy1, opts);
     }
 
-    isBlockedAt(wx, wy, checkBit) {
+    isBlockedAt(wx: number, wy: number, checkBit: number): boolean {
         const gridData = this.#walls;
         if (!gridData) return false;
         const width = this.#width;
@@ -228,7 +261,7 @@ class WallGrid {
         return !!(gridData[ty * width + tx] & checkBit);
     }
 
-    #queryFor(size, wx0, wy0, wx1, wy1) {
+    #queryFor(size: number, wx0: number, wy0: number, wx1: number, wy1: number): PfQuery {
         return {
             size,
             x1: Math.trunc(wx0),
@@ -240,7 +273,7 @@ class WallGrid {
         };
     }
 
-    firstWallHit(wx0, wy0, wx1, wy1, size) {
+    firstWallHit(wx0: number, wy0: number, wx1: number, wy1: number, size?: number): number {
         const fn = getFunctions().LogicGamePlayUtil_getClosestPathfinderCollision;
         if (!isValidPtr(this.#pathFinder)) return -1;
         const bodySize = typeof size === "number" ? Math.trunc(size) : 0;
@@ -267,7 +300,7 @@ class WallGrid {
         }
     }
 
-    isBlockedCircle(wx, wy, radius, checkBit) {
+    isBlockedCircle(wx: number, wy: number, radius: number, checkBit: number): boolean {
         const gridData = this.#walls;
         if (!gridData) return false;
         const width = this.#width;
@@ -289,7 +322,13 @@ class WallGrid {
         return false;
     }
 
-    rayHitDistance(wx0, wy0, wx1, wy1, opts) {
+    rayHitDistance(
+        wx0: number,
+        wy0: number,
+        wx1: number,
+        wy1: number,
+        opts: WallRayOptions
+    ): number {
         if (!this.#walls) return -1;
         const radius = Math.max(opts.radius, 0);
         const checkBit = opts.bit;
@@ -320,13 +359,29 @@ class WallGrid {
 
 const wallGrid = new WallGrid();
 
-export const notifyBattleModeChanged = (battleMode) => wallGrid.notifyBattleModeChanged(battleMode);
-export const maybeRefreshWallCache = (battleMode, now) =>
+export const notifyBattleModeChanged = (battleMode: NativePointer): void =>
+    wallGrid.notifyBattleModeChanged(battleMode);
+export const maybeRefreshWallCache = (battleMode: NativePointer, now: number): void =>
     wallGrid.maybeRefreshWallCache(battleMode, now);
-export const watchTileChanges = (base) => wallGrid.watchTileChanges(base);
-export const losCheckWide = (wx0, wy0, wx1, wy1, opts) =>
-    wallGrid.losCheckWide(wx0, wy0, wx1, wy1, opts);
-export const firstWallHit = (wx0, wy0, wx1, wy1, size) =>
-    wallGrid.firstWallHit(wx0, wy0, wx1, wy1, size);
-export const rayHitDistance = (wx0, wy0, wx1, wy1, opts) =>
-    wallGrid.rayHitDistance(wx0, wy0, wx1, wy1, opts);
+export const watchTileChanges = (base: NativePointer): void => wallGrid.watchTileChanges(base);
+export const losCheckWide = (
+    wx0: number,
+    wy0: number,
+    wx1: number,
+    wy1: number,
+    opts: WallRayOptions
+): boolean => wallGrid.losCheckWide(wx0, wy0, wx1, wy1, opts);
+export const firstWallHit = (
+    wx0: number,
+    wy0: number,
+    wx1: number,
+    wy1: number,
+    size?: number
+): number => wallGrid.firstWallHit(wx0, wy0, wx1, wy1, size);
+export const rayHitDistance = (
+    wx0: number,
+    wy0: number,
+    wx1: number,
+    wy1: number,
+    opts: WallRayOptions
+): number => wallGrid.rayHitDistance(wx0, wy0, wx1, wy1, opts);

@@ -1,53 +1,129 @@
+import { attachOffset, getBase, getFunctions, isValidPtr, readClampedS32 } from "../core/Functions";
+import { OFFSETS } from "../core/Offsets";
 import {
-    attachOffset,
-    getBase,
-    getFunctions,
-    isValidPtr,
-    readClampedS32
-} from "../core/functions.js";
-import { offsets } from "../core/offsets.js";
-import {
-    beamTicks,
+    BEAM_TICKS,
     enableProjectileTracking,
     onDataReload,
     scanData,
-    ticksPerSec,
+    TICKS_PER_SEC,
     travelDistance,
     travelTicksFor,
-    weaponRangeUnits
-} from "../core/scan.js";
-import { losCheckWide, projectileBit } from "../utils/walls.js";
+    weaponRangeUnits,
+    type EnemyInfo
+} from "../core/Scan";
+import { losCheckWide, PROJECTILE_BIT } from "../utils/Walls";
 
-const speedRefreshMs = 500;
-const speedFailRetryMs = 250;
-const histCap = 16;
-const vhistCap = 12;
-const trackPruneMs = 2000;
-const skipNameParts = ["BALL"];
-const serverTickMs = 50;
-const minTrackMs = serverTickMs * 2;
-const maxSpeedEst = 1600;
-const maxAccel = 6000;
-const leadPasses = 3;
-const maxFlightS = 3;
-const stickyMargin = 1.12;
-const tickS = 1 / ticksPerSec;
-const steerLeadFactor = 0.75;
-const lineupBonus = 220;
-const walkbackFracs = [0.55, 0.25, 0];
+const SPEED_REFRESH_MS = 500;
+const SPEED_FAIL_RETRY_MS = 250;
+const HIST_CAP = 16;
+const VHIST_CAP = 12;
+const TRACK_PRUNE_MS = 2000;
+const SKIP_NAME_PARTS = ["BALL"];
+const SERVER_TICK_MS = 50;
+const MIN_TRACK_MS = SERVER_TICK_MS * 2;
+const MAX_SPEED_EST = 1600;
+const MAX_ACCEL = 6000;
+const LEAD_PASSES = 3;
+const MAX_FLIGHT_S = 3;
+const STICKY_MARGIN = 1.12;
+const TICK_S = 1 / TICKS_PER_SEC;
+const STEER_LEAD_FACTOR = 0.75;
+const LINEUP_BONUS = 220;
+const WALKBACK_FRACS = [0.55, 0.25, 0];
 
-const length = (x, y) => Math.floor(Math.hypot(x, y));
+const length = (x: number, y: number): number => Math.floor(Math.hypot(x, y));
 
-const lengthSquared = (x, y) => x * x + y * y;
+const lengthSquared = (x: number, y: number): number => x * x + y * y;
 
-const distance = (x1, y1, x2, y2) => length(x2 - x1, y2 - y1);
+const distance = (x1: number, y1: number, x2: number, y2: number): number =>
+    length(x2 - x1, y2 - y1);
+
+interface TrackPoint {
+    x: number;
+    y: number;
+    t: number;
+}
+
+interface TargetTrack {
+    hist: TrackPoint[];
+    histHead: number;
+    histLen: number;
+    vhist: TrackPoint[];
+    vHead: number;
+    vLen: number;
+    lastSeen: number;
+}
+
+interface VelocityWindow {
+    vx: number;
+    vy: number;
+    magnitude: number;
+}
+
+interface DirectionVelocity {
+    vx: number;
+    vy: number;
+}
+
+interface Acceleration {
+    ax: number;
+    ay: number;
+}
+
+interface Prediction {
+    x: number;
+    y: number;
+    vx: number;
+    vy: number;
+    ax: number;
+    ay: number;
+    rad: number;
+    leadVx: number;
+    leadVy: number;
+    leadAx: number;
+    leadAy: number;
+}
+
+interface AimPoint {
+    x: number;
+    y: number;
+    t: number;
+}
+
+interface TargetPos {
+    x: number;
+    y: number;
+}
+
+interface PickCandidate {
+    e: EnemyInfo | null;
+    pred: Prediction | null;
+    d: number;
+}
+
+interface HeldCandidate {
+    e: EnemyInfo;
+    pred: Prediction | null;
+    d: number;
+}
+
+interface PickState {
+    best: PickCandidate;
+    calm: PickCandidate;
+    cur: HeldCandidate | null;
+}
+
+interface PickResult {
+    pick: EnemyInfo | null;
+    pred: Prediction | null;
+}
 
 class AutoAim {
-    #target = null;
-    #gameTarget = null;
-    #aimPt = null;
+    #target: EnemyInfo | null = null;
+    #gameTarget: NativePointer | null = null;
+    #aimPt: AimPoint | null = null;
     #aimStamp = 0;
-    #track = new Map();
+    #track = new Map<string | null, TargetTrack>();
     #projectileSpeed = 0;
     #speedAt = 0;
     #speedFailAt = 0;
@@ -62,16 +138,16 @@ class AutoAim {
     #rangeAt = 0;
     #hooks = false;
 
-    #isSkipped(name) {
+    #isSkipped(name: string | null): boolean {
         if (!name) return true;
-        for (const skipNamePart of skipNameParts) {
+        for (const skipNamePart of SKIP_NAME_PARTS) {
             if (name.includes(skipNamePart)) return true;
         }
         return false;
     }
 
-    #newTrack(now) {
-        const track = {
+    #newTrack(now: number): TargetTrack {
+        const track: TargetTrack = {
             hist: [],
             histHead: 0,
             histLen: 0,
@@ -80,12 +156,12 @@ class AutoAim {
             vLen: 0,
             lastSeen: now
         };
-        for (let i = 0; i < histCap; i++) track.hist.push({ x: 0, y: 0, t: 0 });
-        for (let i = 0; i < vhistCap; i++) track.vhist.push({ x: 0, y: 0, t: 0 });
+        for (let i = 0; i < HIST_CAP; i++) track.hist.push({ x: 0, y: 0, t: 0 });
+        for (let i = 0; i < VHIST_CAP; i++) track.vhist.push({ x: 0, y: 0, t: 0 });
         return track;
     }
 
-    #trackFor(gid, now) {
+    #trackFor(gid: string | null, now: number): TargetTrack {
         let track = this.#track.get(gid);
         if (track) return track;
         track = this.#newTrack(now);
@@ -93,11 +169,17 @@ class AutoAim {
         return track;
     }
 
-    #windowVelocity(track, x, y, moveAngle, now) {
+    #windowVelocity(
+        track: TargetTrack,
+        x: number,
+        y: number,
+        moveAngle: number,
+        now: number
+    ): VelocityWindow | null {
         const h = track.hist;
-        const oldest = h[(track.histHead - track.histLen + histCap) % histCap];
+        const oldest = h[(track.histHead - track.histLen + HIST_CAP) % HIST_CAP];
         const span = (now - oldest.t) / 1000;
-        if (now - oldest.t < minTrackMs || span <= 0) return null;
+        if (now - oldest.t < MIN_TRACK_MS || span <= 0) return null;
         let vxWindow = (x - oldest.x) / span;
         let vyWindow = (y - oldest.y) / span;
         const magnitude = length(vxWindow, vyWindow);
@@ -112,12 +194,18 @@ class AutoAim {
         return { vx: vxWindow, vy: vyWindow, magnitude };
     }
 
-    #directionSpeed(track, x, y, moveSpeed, window) {
+    #directionSpeed(
+        track: TargetTrack,
+        x: number,
+        y: number,
+        moveSpeed: number,
+        window: VelocityWindow
+    ): DirectionVelocity | null {
         const h = track.hist;
         let dx = 0;
         let dy = 0;
         for (let k = track.histLen - 2; k >= 0; k--) {
-            const point = h[(track.histHead - 1 - k + 2 * histCap) % histCap];
+            const point = h[(track.histHead - 1 - k + 2 * HIST_CAP) % HIST_CAP];
             if (point.x === x && point.y === y) continue;
             dx = x - point.x;
             dy = y - point.y;
@@ -128,54 +216,54 @@ class AutoAim {
             window.magnitude,
             moveSpeed >= 200 && moveSpeed <= 1500 ? moveSpeed : window.magnitude
         );
-        if (direction < 0.5 || speed > maxSpeedEst) return null;
+        if (direction < 0.5 || speed > MAX_SPEED_EST) return null;
         return { vx: (dx / direction) * speed, vy: (dy / direction) * speed };
     }
 
-    #accelAt(track, vx, vy, now) {
+    #accelAt(track: TargetTrack, vx: number, vy: number, now: number): Acceleration {
         const vh = track.vhist;
         const vslot = vh[track.vHead];
         vslot.x = vx;
         vslot.y = vy;
         vslot.t = now;
-        track.vHead = (track.vHead + 1) % vhistCap;
-        track.vLen = track.vLen < vhistCap ? track.vLen + 1 : vhistCap;
+        track.vHead = (track.vHead + 1) % VHIST_CAP;
+        track.vLen = track.vLen < VHIST_CAP ? track.vLen + 1 : VHIST_CAP;
         let ax = 0;
         let ay = 0;
         for (let k = 0; k < track.vLen; k++) {
-            const past = vh[(track.vHead - track.vLen + k + 2 * vhistCap) % vhistCap];
+            const past = vh[(track.vHead - track.vLen + k + 2 * VHIST_CAP) % VHIST_CAP];
             const dt = (now - past.t) / 1000;
             if (dt < 0.12) continue;
             ax = (vx - past.x) / dt;
             ay = (vy - past.y) / dt;
             break;
         }
-        if (lengthSquared(ax, ay) > maxAccel * maxAccel) {
+        if (lengthSquared(ax, ay) > MAX_ACCEL * MAX_ACCEL) {
             ax = 0;
             ay = 0;
         }
         return { ax, ay };
     }
 
-    #sample(e, x, y, now) {
+    #sample(e: EnemyInfo, x: number, y: number, now: number): Prediction | null {
         const track = this.#trackFor(e.gid, now);
         track.lastSeen = now;
         const slot = track.hist[track.histHead];
         slot.x = x;
         slot.y = y;
         slot.t = now;
-        track.histHead = (track.histHead + 1) % histCap;
-        track.histLen = track.histLen < histCap ? track.histLen + 1 : histCap;
+        track.histHead = (track.histHead + 1) % HIST_CAP;
+        track.histLen = track.histLen < HIST_CAP ? track.histLen + 1 : HIST_CAP;
         const window = this.#windowVelocity(track, x, y, e.moveAngle, now);
         if (!window) return null;
-        if (window.magnitude < 30) return { x, y, vx: 0, vy: 0, ax: 0, ay: 0 };
+        if (window.magnitude < 30) return { x, y, vx: 0, vy: 0, ax: 0, ay: 0 } as Prediction;
         const dir = this.#directionSpeed(track, x, y, e.moveSpeed, window);
         if (!dir) return null;
         const accel = this.#accelAt(track, dir.vx, dir.vy, now);
-        return { x, y, vx: dir.vx, vy: dir.vy, ax: accel.ax, ay: accel.ay };
+        return { x, y, vx: dir.vx, vy: dir.vy, ax: accel.ax, ay: accel.ay } as Prediction;
     }
 
-    #flightTime(rx, ry, vx, vy, speed) {
+    #flightTime(rx: number, ry: number, vx: number, vy: number, speed: number): number {
         const a = vx * vx + vy * vy - speed * speed;
         const b = rx * vx + ry * vy;
         const c = rx * rx + ry * ry;
@@ -191,25 +279,31 @@ class AutoAim {
         return best;
     }
 
-    #snapTicks(t) {
+    #snapTicks(t: number): number {
         if (!(this.#ownTicks > 0) || !isFinite(t) || t <= 0) return t;
         const maxT =
-            this.#ownTicks >= beamTicks ? maxFlightS : this.#ownTicks / (ticksPerSec * 1000);
-        const snapped = Math.round(t / tickS) * tickS;
-        return Math.min(snapped > 0 ? snapped : tickS, maxT);
+            this.#ownTicks >= BEAM_TICKS ? MAX_FLIGHT_S : this.#ownTicks / (TICKS_PER_SEC * 1000);
+        const snapped = Math.round(t / TICK_S) * TICK_S;
+        return Math.min(snapped > 0 ? snapped : TICK_S, maxT);
     }
 
-    #applyLead(pred, lead) {
+    #applyLead(pred: Prediction, lead: number): void {
         pred.leadVx = pred.vx * lead;
         pred.leadVy = pred.vy * lead;
         pred.leadAx = pred.ax * lead;
         pred.leadAy = pred.ay * lead;
     }
 
-    #solveFlying(pred, speed, range, pocket, t) {
+    #solveFlying(
+        pred: Prediction,
+        speed: number,
+        range: number,
+        pocket: number,
+        t: number
+    ): AimPoint | null {
         let px = pred.x;
         let py = pred.y;
-        for (let pass = 0; pass < leadPasses; pass++) {
+        for (let pass = 0; pass < LEAD_PASSES; pass++) {
             px = pred.x + pred.leadVx * t + 0.5 * pred.leadAx * t * t;
             py = pred.y + pred.leadVy * t + 0.5 * pred.leadAy * t * t;
             const flown = distance(px, py, scanData.myX, scanData.myY) - pocket;
@@ -217,25 +311,30 @@ class AutoAim {
             t = this.#snapTicks(flown / speed);
         }
         if (range > 0 && distance(px, py, scanData.myX, scanData.myY) - pocket > range) return null;
-        if (t > maxFlightS) return null;
+        if (t > MAX_FLIGHT_S) return null;
         return { x: Math.round(px), y: Math.round(py), t };
     }
 
-    #solveIncremental(pred, speed, range, pocket) {
+    #solveIncremental(
+        pred: Prediction,
+        speed: number,
+        range: number,
+        pocket: number
+    ): AimPoint | null {
         let px = pred.x;
         let py = pred.y;
-        for (let pass = 0; pass < leadPasses; pass++) {
+        for (let pass = 0; pass < LEAD_PASSES; pass++) {
             const flightTo = distance(px, py, scanData.myX, scanData.myY) - pocket;
             if (range > 0 && flightTo > range) return null;
             const flight = flightTo > 0 ? this.#snapTicks(flightTo / speed) : 0;
-            if (flight > maxFlightS) return null;
+            if (flight > MAX_FLIGHT_S) return null;
             px = pred.x + pred.leadVx * flight + 0.5 * pred.leadAx * flight * flight;
             py = pred.y + pred.leadVy * flight + 0.5 * pred.leadAy * flight * flight;
         }
         return { x: Math.round(px), y: Math.round(py), t: 0 };
     }
 
-    #solve(pred, speed, range) {
+    #solve(pred: Prediction, speed: number, range: number): AimPoint | null {
         const pocket = Math.max(this.#ownShotR, 0) + Math.max(pred.rad, 0);
         if (this.#ownBeam) return { x: Math.round(pred.x), y: Math.round(pred.y), t: 0 };
         if (range > 0) {
@@ -243,7 +342,7 @@ class AutoAim {
             if (d0 > range) return null;
         }
         if (!(speed > 0)) return { x: Math.round(pred.x), y: Math.round(pred.y), t: 0 };
-        this.#applyLead(pred, this.#ownSteerLife > 0 ? steerLeadFactor : 1);
+        this.#applyLead(pred, this.#ownSteerLife > 0 ? STEER_LEAD_FACTOR : 1);
         const t = this.#flightTime(
             pred.x - scanData.myX,
             pred.y - scanData.myY,
@@ -255,15 +354,15 @@ class AutoAim {
         return this.#solveIncremental(pred, speed, range, pocket);
     }
 
-    #ownProjectileData(own) {
+    #ownProjectileData(own: NativePointer): NativePointer | null {
         const fns = getFunctions();
         const skill = fns.LogicCharacterClient_getWeaponSkill(own);
         const data = skill && !skill.isNull() ? fns.LogicSkillData_getProjectileData(skill) : null;
         return data && !data.isNull() ? data : null;
     }
 
-    #shotRadius(data) {
-        let rad = readClampedS32(data, offsets.LogicProjectileData_radius, 1, 2000);
+    #shotRadius(data: NativePointer): number {
+        let rad = readClampedS32(data, OFFSETS.LogicProjectileData_radius, 1, 2000);
         if (!(rad > 0)) {
             try {
                 const start = Math.trunc(
@@ -275,34 +374,34 @@ class AutoAim {
         return rad;
     }
 
-    #learnSteer(data) {
+    #learnSteer(data: NativePointer): void {
         try {
-            const steer = data.add(offsets.LogicProjectileData_steerStrength).readFloat();
-            const life = readClampedS32(data, offsets.LogicProjectileData_steerLifeTime, 1, 20000);
+            const steer = data.add(OFFSETS.LogicProjectileData_steerStrength).readFloat();
+            const life = readClampedS32(data, OFFSETS.LogicProjectileData_steerLifeTime, 1, 20000);
             this.#ownSteerLife = steer > 0 && life > 0 ? life : 0;
         } catch {
             this.#ownSteerLife = 0;
         }
     }
 
-    #learnTravelTicks(data, engineSpeed, own) {
+    #learnTravelTicks(data: NativePointer, engineSpeed: number, own: NativePointer): void {
         const tiles = weaponRangeUnits(own);
         const speedForTicks = engineSpeed > 0 ? engineSpeed : this.#projectileSpeed;
         this.#ownTicks =
             speedForTicks > 0 && tiles > 0 ? travelTicksFor(data, tiles, speedForTicks) : 0;
         this.#ownTravel = this.#ownTicks > 0 ? travelDistance(this.#ownTicks, speedForTicks) : 0;
-        if (this.#ownTicks === beamTicks) this.#ownBeam = true;
+        if (this.#ownTicks === BEAM_TICKS) this.#ownBeam = true;
     }
 
-    #learnWeaponState(data, own) {
-        const engineSpeed = readClampedS32(data, offsets.LogicProjectileData_speed, 300, 8500);
-        this.#ownBeam = data.add(offsets.LogicProjectileData_isBeamField).readU8() > 0;
-        const passes = data.add(offsets.LogicProjectileData_passesEnvironment).readU8() & 1;
-        const pierces = data.add(offsets.LogicProjectileData_piercesEnvironmentField).readU8() & 1;
+    #learnWeaponState(data: NativePointer, own: NativePointer): number {
+        const engineSpeed = readClampedS32(data, OFFSETS.LogicProjectileData_speed, 300, 8500);
+        this.#ownBeam = data.add(OFFSETS.LogicProjectileData_isBeamField).readU8() > 0;
+        const passes = data.add(OFFSETS.LogicProjectileData_passesEnvironment).readU8() & 1;
+        const pierces = data.add(OFFSETS.LogicProjectileData_piercesEnvironmentField).readU8() & 1;
         this.#ownPierces = (passes | pierces) === 1;
         try {
             this.#ownPiercesChars =
-                (data.add(offsets.LogicProjectileData_piercesCharacters).readU8() & 1) === 1;
+                (data.add(OFFSETS.LogicProjectileData_piercesCharacters).readU8() & 1) === 1;
         } catch {
             this.#ownPiercesChars = false;
         }
@@ -312,7 +411,7 @@ class AutoAim {
         return engineSpeed;
     }
 
-    #refreshWeapon(now) {
+    #refreshWeapon(now: number): void {
         let engineSpeed = 0;
         try {
             const own = scanData.ownCharacter;
@@ -330,23 +429,23 @@ class AutoAim {
         }
     }
 
-    #ownProjectileSpeed() {
+    #ownProjectileSpeed(): number {
         const now = Date.now();
-        if (this.#projectileSpeed >= 300 && now - this.#speedAt < speedRefreshMs)
+        if (this.#projectileSpeed >= 300 && now - this.#speedAt < SPEED_REFRESH_MS)
             return this.#projectileSpeed;
         if (
             this.#projectileSpeed < 300 &&
             this.#speedFailAt > 0 &&
-            now - this.#speedFailAt < speedFailRetryMs
+            now - this.#speedFailAt < SPEED_FAIL_RETRY_MS
         )
             return this.#projectileSpeed;
         this.#refreshWeapon(now);
         return this.#projectileSpeed;
     }
 
-    #ownRange() {
+    #ownRange(): number {
         const now = Date.now();
-        if (now - this.#rangeAt < speedRefreshMs) return this.#rangeCache;
+        if (now - this.#rangeAt < SPEED_REFRESH_MS) return this.#rangeCache;
         this.#rangeAt = now;
         this.#rangeCache = 0;
         const own = scanData.ownCharacter;
@@ -361,7 +460,7 @@ class AutoAim {
         return this.#rangeCache;
     }
 
-    #targetPos(enemy) {
+    #targetPos(enemy: EnemyInfo): TargetPos | null {
         const fns = getFunctions();
         const target = isValidPtr(enemy.body) ? enemy.body : enemy.ptr;
         let ex = enemy.x;
@@ -378,7 +477,7 @@ class AutoAim {
         return { x: ex, y: ey };
     }
 
-    #inBounds(x, y, mx, my) {
+    #inBounds(x: number, y: number, mx: number, my: number): boolean {
         if (!isFinite(x) || !isFinite(y)) return false;
         if (x === 0 && y === 0) return false;
         if (x < -100000 || x > 100000 || y < -100000 || y > 100000) return false;
@@ -386,19 +485,25 @@ class AutoAim {
         return true;
     }
 
-    #finishAim(aim, mx, my) {
+    #finishAim(aim: AimPoint, mx: number, my: number): AimPoint | null {
         const ax = Math.trunc(aim.x);
         const ay = Math.trunc(aim.y);
         if (!this.#inBounds(ax, ay, mx, my)) return null;
         return { x: ax, y: ay, t: aim.t };
     }
 
-    #blockedWalkback(pred, aim, mx, my, pocketR) {
-        for (const frac of walkbackFracs) {
+    #blockedWalkback(
+        pred: Prediction,
+        aim: AimPoint,
+        mx: number,
+        my: number,
+        pocketR: number
+    ): AimPoint | null {
+        for (const frac of WALKBACK_FRACS) {
             const cx = pred.x + (aim.x - pred.x) * frac;
             const cy = pred.y + (aim.y - pred.y) * frac;
             if (!isFinite(cx) || !isFinite(cy)) continue;
-            if (losCheckWide(mx, my, cx, cy, { bit: projectileBit, radius: pocketR })) {
+            if (losCheckWide(mx, my, cx, cy, { bit: PROJECTILE_BIT, radius: pocketR })) {
                 const x = Math.round(cx);
                 const y = Math.round(cy);
                 if (!this.#inBounds(x, y, mx, my)) return null;
@@ -408,33 +513,34 @@ class AutoAim {
         return null;
     }
 
-    #aimAt(enemy, now) {
+    #aimAt(enemy: EnemyInfo, now: number): AimPoint | null {
         if (!enemy || !enemy.ptr || enemy.ptr.isNull()) return null;
         const pos = this.#targetPos(enemy);
         if (!pos) return null;
         const mx = scanData.myX;
         const my = scanData.myY;
         const speed = this.#ownProjectileSpeed();
-        const pred = this.#sample(enemy, pos.x, pos.y, now) || {
-            x: pos.x,
-            y: pos.y,
-            vx: 0,
-            vy: 0,
-            ax: 0,
-            ay: 0
-        };
+        const pred =
+            this.#sample(enemy, pos.x, pos.y, now) ||
+            ({ x: pos.x, y: pos.y, vx: 0, vy: 0, ax: 0, ay: 0 } as Prediction);
         pred.rad = Math.trunc(enemy.radius);
         const aim = this.#solve(pred, speed, this.#ownRange());
         if (!aim) return null;
         if (this.#ownPierces) return this.#finishAim(aim, mx, my);
         const pocketR = this.#ownShotR > 0 ? this.#ownShotR : 40;
         if (!isFinite(aim.x) || !isFinite(aim.y)) return null;
-        if (losCheckWide(mx, my, aim.x, aim.y, { bit: projectileBit, radius: pocketR }))
+        if (losCheckWide(mx, my, aim.x, aim.y, { bit: PROJECTILE_BIT, radius: pocketR }))
             return this.#finishAim(aim, mx, my);
         return this.#blockedWalkback(pred, aim, mx, my, pocketR);
     }
 
-    #lineupHits(list, mx, my, target, pocket) {
+    #lineupHits(
+        list: EnemyInfo[],
+        mx: number,
+        my: number,
+        target: EnemyInfo,
+        pocket: number
+    ): number {
         const ax = target.x - mx;
         const ay = target.y - my;
         const len = length(ax, ay);
@@ -456,7 +562,7 @@ class AutoAim {
         return hits;
     }
 
-    #enemyByPtr(candidate) {
+    #enemyByPtr(candidate: NativePointer | null): EnemyInfo | null {
         if (!candidate || candidate.isNull()) return null;
         const list = scanData.enemies || [];
         for (const e of list) {
@@ -465,7 +571,7 @@ class AutoAim {
         return null;
     }
 
-    #aimPoint() {
+    #aimPoint(): AimPoint | null {
         const now = Date.now();
         if (now - this.#aimStamp < 25) return this.#aimPt;
         this.#aimStamp = now;
@@ -473,7 +579,7 @@ class AutoAim {
         return this.#aimPt;
     }
 
-    #aimPointNow() {
+    #aimPointNow(): AimPoint | null {
         const now = Date.now();
         const live = this.#target ? this.#enemyByPtr(this.#target.ptr) : null;
         let enemy = live ? this.#target : this.#pickTarget(now);
@@ -485,32 +591,32 @@ class AutoAim {
         return this.#aimAt(enemy, now);
     }
 
-    #enemyEligible(e, mx, my) {
+    #enemyEligible(e: EnemyInfo, mx: number, my: number): boolean {
         if (!e || !e.ptr || e.ptr.isNull()) return false;
         if (e.kind !== "player") return false;
         if (this.#isSkipped(e.brawlerName)) return false;
         if (this.#ownPierces) return true;
         const pocketR = this.#ownShotR > 0 ? this.#ownShotR : 40;
-        return losCheckWide(mx, my, e.x, e.y, { bit: projectileBit, radius: pocketR }) !== false;
+        return losCheckWide(mx, my, e.x, e.y, { bit: PROJECTILE_BIT, radius: pocketR }) !== false;
     }
 
-    #consider(state, e, pred, score) {
+    #consider(state: PickState, e: EnemyInfo, pred: Prediction, score: number): void {
         if (score < state.calm.d) state.calm = { e, pred, d: score };
         if (score < state.best.d) state.best = { e, pred, d: score };
         if (this.#target && e.gid === this.#target.gid) state.cur = { e, pred, d: score };
     }
 
-    #pruneTracks(now) {
+    #pruneTracks(now: number): void {
         if (this.#track.size <= 24) return;
         for (const [key, tr] of this.#track) {
-            if (now - tr.lastSeen > trackPruneMs) this.#track.delete(key);
+            if (now - tr.lastSeen > TRACK_PRUNE_MS) this.#track.delete(key);
         }
     }
 
-    #selectPick(state, now) {
+    #selectPick(state: PickState, now: number): PickResult {
         let best = state.best;
         if (state.calm.e && state.calm.d <= state.best.d * 1.4) best = state.calm;
-        if (!state.cur || !best.e || state.cur.d > best.d * stickyMargin)
+        if (!state.cur || !best.e || state.cur.d > best.d * STICKY_MARGIN)
             return { pick: best.e, pred: best.pred };
         const pred =
             state.cur.e.gid === best.e.gid
@@ -520,33 +626,28 @@ class AutoAim {
         return { pick: state.cur.e, pred };
     }
 
-    #pickTarget(now) {
+    #pickTarget(now: number): EnemyInfo | null {
         const list = scanData.enemies || [];
         const mx = scanData.myX;
         const my = scanData.myY;
         const speed = this.#ownProjectileSpeed();
         const range = this.#ownRange();
-        const state = {
+        const state: PickState = {
             best: { e: null, pred: null, d: Infinity },
             calm: { e: null, pred: null, d: Infinity },
             cur: null
         };
         for (const e of list) {
             if (!this.#enemyEligible(e, mx, my)) continue;
-            const pred = this.#sample(e, e.x, e.y, now) || {
-                x: e.x,
-                y: e.y,
-                vx: 0,
-                vy: 0,
-                ax: 0,
-                ay: 0
-            };
+            const pred =
+                this.#sample(e, e.x, e.y, now) ||
+                ({ x: e.x, y: e.y, vx: 0, vy: 0, ax: 0, ay: 0 } as Prediction);
             pred.rad = Math.trunc(e.radius);
             const d = distance(e.x, e.y, mx, my);
             const pocket = Math.max(this.#ownShotR, 0) + pred.rad;
             if (range > 0 && d - pocket > range) continue;
             const score = this.#ownPiercesChars
-                ? d - this.#lineupHits(list, mx, my, e, pocket) * lineupBonus
+                ? d - this.#lineupHits(list, mx, my, e, pocket) * LINEUP_BONUS
                 : d;
             this.#consider(state, e, pred, score);
         }
@@ -557,7 +658,7 @@ class AutoAim {
         return pick;
     }
 
-    #resetWeaponCache() {
+    #resetWeaponCache(): void {
         this.#projectileSpeed = 0;
         this.#speedAt = 0;
         this.#speedFailAt = 0;
@@ -572,7 +673,7 @@ class AutoAim {
         this.#ownPiercesChars = false;
     }
 
-    setup() {
+    setup(): void {
         if (this.#hooks) return;
         this.#hooks = true;
         const base = getBase();
@@ -580,7 +681,7 @@ class AutoAim {
             enableProjectileTracking();
             onDataReload(() => this.#resetWeaponCache());
         } catch {}
-        attachOffset(base, offsets.BattleScreen_getClosestTargetForAutoshoot, {
+        attachOffset(base, OFFSETS.BattleScreen_getClosestTargetForAutoshoot, {
             onLeave: (retval) => {
                 try {
                     if (retval.isNull()) return;
@@ -588,7 +689,7 @@ class AutoAim {
                 } catch {}
             }
         });
-        attachOffset(base, offsets.BattleScreen_activateSkill, {
+        attachOffset(base, OFFSETS.BattleScreen_activateSkill, {
             onEnter: (args) => {
                 const aim = this.#aimPoint();
                 if (!aim) return;
@@ -607,7 +708,7 @@ class AutoAim {
         });
     }
 
-    update() {
+    update(): void {
         if (scanData.lastUpdate === 0) {
             this.#target = null;
             return;
@@ -616,7 +717,7 @@ class AutoAim {
         this.#aimPoint();
     }
 
-    reset() {
+    reset(): void {
         this.#target = null;
         this.#aimPt = null;
         this.#aimStamp = 0;
@@ -627,6 +728,6 @@ class AutoAim {
 
 const autoAim = new AutoAim();
 
-export const setupAutoAim = () => autoAim.setup();
-export const updateAutoAim = () => autoAim.update();
-export const resetAutoAim = () => autoAim.reset();
+export const setupAutoAim = (): void => autoAim.setup();
+export const updateAutoAim = (): void => autoAim.update();
+export const resetAutoAim = (): void => autoAim.reset();

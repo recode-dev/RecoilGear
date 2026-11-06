@@ -1,25 +1,25 @@
-import { getBase, getImage } from "../core/functions.js";
-import { offsets } from "../core/offsets.js";
+import { getBase, getImage } from "../core/Functions";
+import { OFFSETS } from "../core/Offsets";
 
-const requestBodyPtrOffset = 192;
-const requestBodySizeOffset = 200;
-const licensePath = "/res/license.bin";
+const REQUEST_BODY_PTR_OFFSET = 192;
+const REQUEST_BODY_SIZE_OFFSET = 200;
+const LICENSE_PATH = "/res/license.bin";
 
 class LicenseProvider {
-    #listener = null;
-    #body = JSON.stringify({ features: [], connection: "Keep-Alive" });
-    #bodyBytes = null;
+    #listener: InvocationListener | null = null;
+    #body: string = JSON.stringify({ features: [], connection: "Keep-Alive" });
+    #bodyBytes: ArrayBuffer | null = null;
     #total = 0;
 
-    setup() {
+    setup(): void {
         if (this.#listener) return;
         try {
-            const off = offsets.LogicHttpRequest_encode;
+            const off = OFFSETS.LogicHttpRequest_encode;
             if (typeof off !== "number" || off <= 0) return;
             const image = getImage();
             if (!image) return;
             const dir = image.path.slice(0, image.path.lastIndexOf("/"));
-            const license = File.readAllBytes(dir + licensePath);
+            const license = File.readAllBytes(dir + LICENSE_PATH);
             if (!license || license.byteLength === 0) return;
             const mallocAddr = Module.findGlobalExportByName("malloc");
             if (!mallocAddr || mallocAddr.isNull()) return;
@@ -32,10 +32,10 @@ class LicenseProvider {
                         if (!args[0] || args[0].isNull()) return;
                         const buf = malloc(this.#total);
                         if (!buf || buf.isNull()) return;
-                        Memory.copy(buf, this.#bodyBytes.unwrap(), this.#bodyBytes.byteLength);
-                        buf.add(this.#bodyBytes.byteLength).writeUtf8String(this.#body);
-                        args[0].add(requestBodyPtrOffset).writePointer(buf);
-                        args[0].add(requestBodySizeOffset).writeS32(this.#total);
+                        Memory.copy(buf, this.#bodyBytes!.unwrap(), this.#bodyBytes!.byteLength);
+                        buf.add(this.#bodyBytes!.byteLength).writeUtf8String(this.#body);
+                        args[0].add(REQUEST_BODY_PTR_OFFSET).writePointer(buf);
+                        args[0].add(REQUEST_BODY_SIZE_OFFSET).writeS32(this.#total);
                     } catch {}
                 }
             });
@@ -48,4 +48,4 @@ class LicenseProvider {
 
 const licenseProvider = new LicenseProvider();
 
-export const setupLicense = () => licenseProvider.setup();
+export const setupLicense = (): void => licenseProvider.setup();

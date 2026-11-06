@@ -1,13 +1,28 @@
-import { sendCommand } from "../core/commands.js";
-import { getFunctions } from "../core/functions.js";
-import { offsets } from "../core/offsets.js";
-import { collisionRadius, enableProjectileTracking, onDataReload, scanData } from "../core/scan.js";
-import { firstWallHit, movementBit, rayHitDistance } from "../utils/walls.js";
+import { sendCommand } from "../core/Commands";
+import { getFunctions } from "../core/Functions";
+import { OFFSETS } from "../core/Offsets";
+import {
+    collisionRadius,
+    enableProjectileTracking,
+    onDataReload,
+    type ProjectileOutput,
+    scanData
+} from "../core/Scan";
+import { firstWallHit, MOVEMENT_BIT, rayHitDistance, type WallsApi } from "../utils/Walls";
 
-const moveInputType = 2;
-const deg2rad = Math.PI / 180;
+const MOVE_INPUT_TYPE = 2;
+const DEG2RAD = Math.PI / 180;
 
-const tune = {
+interface TuneOptions {
+    dirCount: number;
+    horizonS: number;
+    aware: number;
+    skin: number;
+    wallPenalty: number;
+    momentum: number;
+}
+
+const TUNE: TuneOptions = {
     dirCount: 64,
     horizonS: 1.2,
     aware: 3600,
@@ -16,39 +31,169 @@ const tune = {
     momentum: 110
 };
 
-const ring = [];
-for (let i = 0; i < tune.dirCount; i++) ring.push(Math.round((360 * i) / tune.dirCount));
+const RING: number[] = [];
+for (let i = 0; i < TUNE.dirCount; i++) RING.push(Math.round((360 * i) / TUNE.dirCount));
 
-const wrap360 = (a) => {
+const wrap360 = (a: number): number => {
     const r = a % 360;
     return r < 0 ? r + 360 : r;
 };
 
-const angDiff = (a, b) => {
+const angDiff = (a: number, b: number): number => {
     const d = Math.abs(wrap360(a) - wrap360(b));
     return d > 180 ? 360 - d : d;
 };
 
-const bearingDeg = (dx, dy) => wrap360((Math.atan2(dy, dx) * 180) / Math.PI);
+const bearingDeg = (dx: number, dy: number): number =>
+    wrap360((Math.atan2(dy, dx) * 180) / Math.PI);
+
+interface StepPoint {
+    x: number;
+    y: number;
+}
+
+interface VelocityPoint {
+    vx: number;
+    vy: number;
+}
+
+interface StickyHazard {
+    kind: "sticky";
+    x: number;
+    y: number;
+    r: number;
+    fuse: number;
+    gid: string;
+}
+
+interface ZoneHazard {
+    kind: "zone";
+    x: number;
+    y: number;
+    r: number;
+    fuse: number;
+    approach: number;
+    gid: string;
+}
+
+interface ConeHazard {
+    kind: "cone";
+    key: string;
+    ax: number;
+    ay: number;
+    bis: number;
+    half: number;
+    range: number;
+    speed: number;
+    seg: number;
+    gid: string;
+}
+
+interface LinearHazard {
+    kind: "linear";
+    x: number;
+    y: number;
+    vx: number;
+    vy: number;
+    hitR: number;
+    left: number;
+    gid: string;
+}
+
+type Hazard = StickyHazard | ZoneHazard | ConeHazard | LinearHazard;
+
+type PointHazard = StickyHazard | ZoneHazard | LinearHazard;
+
+interface ZoneSnapshot {
+    x: number;
+    y: number;
+    r: number;
+    sticky: boolean;
+    fuseMs: number;
+}
+
+interface ZoneMemo {
+    x: number;
+    y: number;
+    r: number;
+    until: number;
+    fuseMs: number;
+}
+
+interface Assessment {
+    danger: boolean;
+    prepMs: number;
+    tMin?: number;
+}
+
+interface HeadingCandidate {
+    deg: number;
+    sep: number;
+}
+
+interface HeadingPick {
+    deg: number;
+    score: number;
+}
+
+interface RetreatPoint {
+    hx: number;
+    hy: number;
+}
+
+interface DodgeCommand {
+    headingDeg: number;
+    tx: number;
+    ty: number;
+    startedAt: number;
+    lastDangerAt: number;
+    lastCheckAt: number;
+}
+
+interface DodgeWorld {
+    now: number;
+    x: number;
+    y: number;
+    speed: number;
+    radius: number;
+    projectiles: ProjectileOutput[];
+    walls: WallsApi;
+}
+
+interface DodgeIdleResult {
+    active: false;
+    stopped?: boolean;
+}
+
+interface DodgeRunResult {
+    active: true;
+    started?: boolean;
+    targetX: number;
+    targetY: number;
+    headingDeg: number;
+    send: boolean;
+}
+
+type DodgeResult = DodgeIdleResult | DodgeRunResult;
 
 class DodgeCore {
-    #walls = null;
-    #world = { projectiles: [] };
+    #walls: WallsApi | null = null;
+    #world: Pick<DodgeWorld, "projectiles"> = { projectiles: [] };
     #myR = 60;
     #myX = 0;
     #myY = 0;
     #speed = 0;
     #now = 0;
-    #cmd = null;
+    #cmd: DodgeCommand | null = null;
     #curDeg = NaN;
-    #zoneMem = new Map();
-    #lastZones = new Map();
+    #zoneMem = new Map<string, ZoneMemo>();
+    #lastZones = new Map<string, ZoneSnapshot>();
 
-    #dist(ax, ay, bx, by) {
+    #dist(ax: number, ay: number, bx: number, by: number): number {
         return Math.hypot(bx - ax, by - ay);
     }
 
-    #classify(p) {
+    #classify(p: ProjectileOutput): "sticky" | "zone" | "cone" | "linear" {
         const travelType = Math.trunc(p.travelType);
         const indirect = !!p.isIndirect || travelType > 0 || Math.trunc(p.gravity) > 0;
         const delayed = Math.trunc(p.triggerMs) > 0 || !!p.attachArea;
@@ -62,12 +207,12 @@ class DodgeCore {
         return "linear";
     }
 
-    #blastRadius(p) {
+    #blastRadius(p: ProjectileOutput): number {
         const r = Math.trunc(p.radius) > 0 ? Math.trunc(p.radius) : 110;
         return r >= 110 ? r * 1.02 : 110 * 1.15;
     }
 
-    #linearVelocity(p) {
+    #linearVelocity(p: ProjectileOutput): VelocityPoint | null {
         let vx = p.vx;
         let vy = p.vy;
         if (!isFinite(vx) || !isFinite(vy)) {
@@ -90,7 +235,7 @@ class DodgeCore {
         return null;
     }
 
-    #stickyHazard(p) {
+    #stickyHazard(p: ProjectileOutput): StickyHazard {
         const r = this.#blastRadius(p);
         const flightS = Math.trunc(p.seg0) > 0 && Math.trunc(p.speed) > 0 ? p.seg0 / p.speed : 0;
         const fuseS = Math.max(
@@ -107,7 +252,7 @@ class DodgeCore {
         return { kind: "sticky", x: p.x, y: p.y, r, fuse: fuseS, gid: p.gid };
     }
 
-    #zoneLanding(p) {
+    #zoneLanding(p: ProjectileOutput): StepPoint {
         const dx = p.targetX - p.x;
         const dy = p.targetY - p.y;
         const dd = Math.hypot(dx, dy);
@@ -115,15 +260,15 @@ class DodgeCore {
         return { x: p.x + dx * k, y: p.y + dy * k };
     }
 
-    #zoneDrift(p) {
+    #zoneDrift(p: ProjectileOutput): StepPoint | null {
         const v = this.#linearVelocity(p);
         const spd = v ? Math.hypot(v.vx, v.vy) : 0;
         if (!(spd > 1)) return null;
         const k = Math.min(1, p.seg / spd);
-        return { x: p.x + v.vx * k, y: p.y + v.vy * k };
+        return { x: p.x + v!.vx * k, y: p.y + v!.vy * k };
     }
 
-    #zoneHazard(p) {
+    #zoneHazard(p: ProjectileOutput): ZoneHazard {
         const r = this.#blastRadius(p);
         const fuseS = Math.trunc(p.preMs) / 1000;
         let lx = p.x;
@@ -141,18 +286,18 @@ class DodgeCore {
         return { kind: "zone", x: lx, y: ly, r, fuse: fuseS, approach, gid: p.gid };
     }
 
-    #coneKey(p) {
+    #coneKey(p: ProjectileOutput): string {
         return `${p.ownerIndex}:${Math.trunc(p.spawnX)}:${Math.trunc(p.spawnY)}`;
     }
 
-    #coneReach(p) {
+    #coneReach(p: ProjectileOutput): number {
         const flownFromApex = this.#dist(p.spawnX, p.spawnY, p.x, p.y);
         if (Math.trunc(p.seg) > 0) return flownFromApex + p.seg;
         if (Math.trunc(p.seg0) > 0) return p.seg0 + 60;
-        return Math.min(tune.aware, this.#dist(p.spawnX, p.spawnY, this.#myX, this.#myY) + 400);
+        return Math.min(TUNE.aware, this.#dist(p.spawnX, p.spawnY, this.#myX, this.#myY) + 400);
     }
 
-    #coneHazard(p, list) {
+    #coneHazard(p: ProjectileOutput, list: Hazard[]): void {
         const key = this.#coneKey(p);
         for (const element of list) {
             if (element.kind !== "cone" || element.key !== key) continue;
@@ -170,7 +315,7 @@ class DodgeCore {
             ax: p.spawnX,
             ay: p.spawnY,
             bis: bearingDeg(this.#myX - p.spawnX, this.#myY - p.spawnY),
-            half: half * deg2rad,
+            half: half * DEG2RAD,
             range: this.#coneReach(p),
             speed: Math.max(1, observedSpeed > 1 ? observedSpeed : Math.trunc(p.speed)),
             seg: Math.trunc(p.seg) > 0 ? p.seg : -1,
@@ -178,7 +323,7 @@ class DodgeCore {
         });
     }
 
-    #pathHazard(p) {
+    #pathHazard(p: ProjectileOutput): ZoneHazard | LinearHazard {
         const v = this.#linearVelocity(p);
         const stun = Math.trunc(p.stunMs) > 0 || Math.trunc(p.silenceMs) > 0;
         const hitR = Math.trunc(p.radius) + this.#myR + (stun ? 70 : 0);
@@ -187,7 +332,7 @@ class DodgeCore {
                 kind: "zone",
                 x: p.x,
                 y: p.y,
-                r: Math.max(hitR + tune.skin, 110),
+                r: Math.max(hitR + TUNE.skin, 110),
                 fuse: 0,
                 approach: 0,
                 gid: p.gid
@@ -205,12 +350,12 @@ class DodgeCore {
         };
     }
 
-    #collectShots(seen) {
-        const list = [];
+    #collectShots(seen: Set<string>): Hazard[] {
+        const list: Hazard[] = [];
         const shots = this.#world.projectiles || [];
         for (const p of shots) {
             if (!p || !p.gid) continue;
-            if (this.#dist(p.x, p.y, this.#myX, this.#myY) > tune.aware) continue;
+            if (this.#dist(p.x, p.y, this.#myX, this.#myY) > TUNE.aware) continue;
             seen.add(p.gid);
             const kind = this.#classify(p);
             if (kind === "sticky") list.push(this.#stickyHazard(p));
@@ -221,7 +366,7 @@ class DodgeCore {
         return list;
     }
 
-    #forgetZones(seen) {
+    #forgetZones(seen: Set<string>): void {
         for (const [gid, z] of this.#lastZones) {
             if (seen.has(gid)) continue;
             this.#lastZones.delete(gid);
@@ -241,8 +386,8 @@ class DodgeCore {
         }
     }
 
-    #memoHazards() {
-        const list = [];
+    #memoHazards(): Hazard[] {
+        const list: Hazard[] = [];
         for (const [gid, z] of this.#zoneMem) {
             if (z.until <= this.#now) {
                 this.#zoneMem.delete(gid);
@@ -264,15 +409,15 @@ class DodgeCore {
         return list;
     }
 
-    #collectHazards() {
-        const seen = new Set();
+    #collectHazards(): Hazard[] {
+        const seen = new Set<string>();
         const list = this.#collectShots(seen);
         this.#forgetZones(seen);
         for (const h of this.#memoHazards()) list.push(h);
         return list;
     }
 
-    #linearTimeToHurt(h) {
+    #linearTimeToHurt(h: LinearHazard): number {
         const spd = Math.hypot(h.vx, h.vy);
         if (!(spd > 1)) return this.#dist(h.x, h.y, this.#myX, this.#myY) <= h.hitR ? 0 : Infinity;
         const closing = (this.#myX - h.x) * h.vx + (this.#myY - h.y) * h.vy;
@@ -283,7 +428,7 @@ class DodgeCore {
         return t;
     }
 
-    #coneTimeToHurt(h) {
+    #coneTimeToHurt(h: ConeHazard): number {
         const d = this.#dist(h.ax, h.ay, this.#myX, this.#myY);
         if (d > h.range) return Infinity;
         if (angDiff(bearingDeg(this.#myX - h.ax, this.#myY - h.ay), h.bis) > h.half + 1e-6)
@@ -292,32 +437,32 @@ class DodgeCore {
         return d / Math.max(1, h.speed);
     }
 
-    #stickyTimeToHurt(h) {
+    #stickyTimeToHurt(h: StickyHazard): number {
         const d = this.#dist(h.x, h.y, this.#myX, this.#myY);
         if (d <= h.r + 20) return 0;
         return h.fuse;
     }
 
-    #timeToHurt(h) {
+    #timeToHurt(h: Hazard): number {
         if (h.kind === "linear") return this.#linearTimeToHurt(h);
         if (h.kind === "cone") return this.#coneTimeToHurt(h);
         if (h.kind === "sticky") return this.#stickyTimeToHurt(h);
         return Math.max(h.approach, 0) + h.fuse;
     }
 
-    #clearanceNeed(h) {
-        if (h.kind === "linear") return h.hitR + tune.skin;
+    #clearanceNeed(h: Hazard): number {
+        if (h.kind === "linear") return h.hitR + TUNE.skin;
         if (h.kind === "cone") {
             const d = this.#dist(h.ax, h.ay, this.#myX, this.#myY);
             const lateral = d * Math.sin(h.half);
             const radial = Math.max(0, h.range - d);
-            return Math.min(lateral, radial) + tune.skin;
+            return Math.min(lateral, radial) + TUNE.skin;
         }
         const d = this.#dist(h.x, h.y, this.#myX, this.#myY);
-        return Math.max(60, h.r + tune.skin - d);
+        return Math.max(60, h.r + TUNE.skin - d);
     }
 
-    #assess(hazards) {
+    #assess(hazards: Hazard[]): Assessment {
         if (!hazards.length) return { danger: false, prepMs: 0 };
         let tMin = Infinity;
         let need = 0;
@@ -331,15 +476,15 @@ class DodgeCore {
         return { danger: tMin <= prepMs / 1000, prepMs, tMin };
     }
 
-    #wallRoom(deg) {
-        const rad = deg * deg2rad;
+    #wallRoom(deg: number): number {
+        const rad = deg * DEG2RAD;
         const ex = this.#myX + Math.cos(rad) * 1000;
         const ey = this.#myY + Math.sin(rad) * 1000;
-        let hit = this.#walls.firstWallHit(this.#myX, this.#myY, ex, ey, this.#myR > 200 ? 2 : 1);
+        let hit = this.#walls!.firstWallHit(this.#myX, this.#myY, ex, ey, this.#myR > 200 ? 2 : 1);
         if (hit < 0) {
-            hit = this.#walls.rayHitDistance(this.#myX, this.#myY, ex, ey, {
+            hit = this.#walls!.rayHitDistance(this.#myX, this.#myY, ex, ey, {
                 radius: this.#myR,
-                bit: this.#walls.movementBit
+                bit: this.#walls!.movementBit
             });
         }
         if (hit < 0) return 1000;
@@ -347,15 +492,15 @@ class DodgeCore {
         return Math.max(0, hit - this.#myR - 40);
     }
 
-    #anchor(deg) {
+    #anchor(deg: number): StepPoint | null {
         const room = this.#wallRoom(deg);
         if (room <= 240) return null;
         const run = Math.min(room, 1000);
-        const rad = deg * deg2rad;
+        const rad = deg * DEG2RAD;
         return { x: this.#myX + Math.cos(rad) * run, y: this.#myY + Math.sin(rad) * run };
     }
 
-    #wedgeSep(h, px, py) {
+    #wedgeSep(h: ConeHazard, px: number, py: number): number {
         const dx = px - h.ax;
         const dy = py - h.ay;
         const d = Math.hypot(dx, dy);
@@ -365,10 +510,10 @@ class DodgeCore {
             if (d > h.range) return d - h.range;
             return -(h.range - d) * 0.3;
         }
-        return d * Math.sin((a - h.half) * deg2rad);
+        return d * Math.sin((a - h.half) * DEG2RAD);
     }
 
-    #sepPointMin(hazard, wx, wy, tMax) {
+    #sepPointMin(hazard: PointHazard, wx: number, wy: number, tMax: number): number {
         const hr = hazard.kind === "linear" ? hazard.hitR : hazard.r;
         const rx = this.#myX - hazard.x;
         const ry = this.#myY - hazard.y;
@@ -381,17 +526,17 @@ class DodgeCore {
         return Math.hypot(rx + wx * t, ry + wy * t) - hr;
     }
 
-    #linearSep(hazard, vx, vy) {
+    #linearSep(hazard: LinearHazard, vx: number, vy: number): number {
         const spd = Math.hypot(hazard.vx, hazard.vy);
-        let tMax = tune.horizonS;
+        let tMax = TUNE.horizonS;
         if (hazard.left > 0 && spd > 1) tMax = Math.min(tMax, hazard.left / spd);
         return this.#sepPointMin(hazard, vx - hazard.vx, vy - hazard.vy, tMax);
     }
 
-    #coneSep(hazard, vx, vy) {
+    #coneSep(hazard: ConeHazard, vx: number, vy: number): number {
         let sep = 420;
         for (let s = 1; s <= 8; s++) {
-            const t = tune.horizonS * (s / 8) * (s / 8);
+            const t = TUNE.horizonS * (s / 8) * (s / 8);
             const d = this.#wedgeSep(hazard, this.#myX + vx * t, this.#myY + vy * t);
             if (d < sep) sep = d;
             if (sep <= -200) break;
@@ -399,16 +544,16 @@ class DodgeCore {
         return sep;
     }
 
-    #separationScore(hazards, deg) {
-        const rad = deg * deg2rad;
+    #separationScore(hazards: Hazard[], deg: number): number {
+        const rad = deg * DEG2RAD;
         const vx = Math.cos(rad) * this.#speed;
         const vy = Math.sin(rad) * this.#speed;
         let total = 0;
         for (const hazard of hazards) {
-            let sep;
+            let sep: number;
             if (hazard.kind === "linear") sep = this.#linearSep(hazard, vx, vy);
             else if (hazard.kind === "cone") sep = this.#coneSep(hazard, vx, vy);
-            else sep = this.#sepPointMin(hazard, vx, vy, tune.horizonS);
+            else sep = this.#sepPointMin(hazard, vx, vy, TUNE.horizonS);
             if (sep < -200) sep = -200;
             else if (sep > 420) sep = 420;
             total += sep;
@@ -417,15 +562,15 @@ class DodgeCore {
         return total;
     }
 
-    #headingScore(cand, room, refDeg) {
-        let score = cand.sep - (tune.wallPenalty * Math.max(0, 1000 - room)) / 1000;
-        if (refDeg != null) score -= (tune.momentum * angDiff(cand.deg, refDeg)) / 180;
+    #headingScore(cand: HeadingCandidate, room: number, refDeg: number | null): number {
+        let score = cand.sep - (TUNE.wallPenalty * Math.max(0, 1000 - room)) / 1000;
+        if (refDeg != null) score -= (TUNE.momentum * angDiff(cand.deg, refDeg)) / 180;
         return score;
     }
 
-    #bestHeading(hazards, refDeg) {
-        const cands = [];
-        for (const deg of ring) {
+    #bestHeading(hazards: Hazard[], refDeg: number | null): HeadingPick | null {
+        const cands: HeadingCandidate[] = [];
+        for (const deg of RING) {
             cands.push({ deg, sep: this.#separationScore(hazards, deg) });
         }
         cands.sort((a, b) => b.sep - a.sep);
@@ -444,8 +589,8 @@ class DodgeCore {
         return outDeg < 0 ? null : { deg: outDeg, score: outScore };
     }
 
-    #retreatHeading(hazards) {
-        let near = null;
+    #retreatHeading(hazards: Hazard[]): number {
+        let near: RetreatPoint | null = null;
         let nd = Infinity;
         for (const h of hazards) {
             const hx = h.kind === "cone" ? h.ax : h.x;
@@ -460,41 +605,41 @@ class DodgeCore {
         return wrap360(bearingDeg(this.#myX - near.hx, this.#myY - near.hy));
     }
 
-    #scoreOf(hazards, deg, refDeg) {
+    #scoreOf(hazards: Hazard[], deg: number, refDeg: number | null): number {
         const room = this.#wallRoom(deg);
         if (room <= 240) return -Infinity;
         let score = this.#separationScore(hazards, deg);
-        score -= (tune.wallPenalty * Math.max(0, 1000 - room)) / 1000;
-        if (refDeg != null) score -= (tune.momentum * angDiff(deg, refDeg)) / 180;
+        score -= (TUNE.wallPenalty * Math.max(0, 1000 - room)) / 1000;
+        if (refDeg != null) score -= (TUNE.momentum * angDiff(deg, refDeg)) / 180;
         return score;
     }
 
-    #snapHeading(away) {
-        let best = ring[0];
-        for (const deg of ring) {
+    #snapHeading(away: number): number {
+        let best = RING[0];
+        for (const deg of RING) {
             if (angDiff(deg, away) < angDiff(best, away)) best = deg;
         }
         return best;
     }
 
-    #stepBlocked(step) {
+    #stepBlocked(step: StepPoint): boolean {
         return (
-            this.#walls.rayHitDistance(this.#myX, this.#myY, step.x, step.y, {
+            this.#walls!.rayHitDistance(this.#myX, this.#myY, step.x, step.y, {
                 radius: this.#myR,
-                bit: this.#walls.movementBit
+                bit: this.#walls!.movementBit
             }) >= 0
         );
     }
 
-    #lastResortHeading(hazards) {
+    #lastResortHeading(hazards: Hazard[]): number {
         let bestDeg = -1;
         let bestScore = -Infinity;
-        for (const element of ring) {
+        for (const element of RING) {
             const room = this.#wallRoom(element);
             if (room <= 240) continue;
             const score =
                 this.#separationScore(hazards, element) -
-                (tune.wallPenalty * Math.max(0, 1000 - room)) / 1000;
+                (TUNE.wallPenalty * Math.max(0, 1000 - room)) / 1000;
             if (score > bestScore) {
                 bestScore = score;
                 bestDeg = element;
@@ -503,11 +648,11 @@ class DodgeCore {
         return bestDeg;
     }
 
-    #engage(hazards) {
+    #engage(hazards: Hazard[]): DodgeResult {
         const now = this.#now;
         this.#curDeg = NaN;
-        let deg = null;
-        let anchor = null;
+        let deg: number | null = null;
+        let anchor: StepPoint | null = null;
         const picked = this.#bestHeading(hazards, null);
         if (picked) anchor = this.#anchor(picked.deg);
         if (picked && anchor) deg = picked.deg;
@@ -542,7 +687,7 @@ class DodgeCore {
         };
     }
 
-    #revalidate(cmd, hazards) {
+    #revalidate(cmd: DodgeCommand, hazards: Hazard[]): void {
         if (this.#now - cmd.lastCheckAt < 200) return;
         cmd.lastCheckAt = this.#now;
         const cur = this.#scoreOf(hazards, cmd.headingDeg, cmd.headingDeg);
@@ -552,7 +697,7 @@ class DodgeCore {
         cmd.headingDeg = alt.deg;
     }
 
-    #releaseCheck(cmd, danger) {
+    #releaseCheck(cmd: DodgeCommand, danger: boolean): boolean {
         if (danger) return false;
         if (this.#now - cmd.lastDangerAt <= 170) return false;
         if (this.#now - cmd.startedAt <= 260) return false;
@@ -560,17 +705,17 @@ class DodgeCore {
         return true;
     }
 
-    #stepTarget(deg) {
+    #stepTarget(deg: number): StepPoint {
         const step = Math.max(150, Math.min(320, Math.round(this.#speed * 0.34)));
         this.#curDeg = this.#slewDeg(deg);
-        const rad = this.#curDeg * deg2rad;
+        const rad = this.#curDeg * DEG2RAD;
         return {
             x: this.#myX + Math.cos(rad) * step,
             y: this.#myY + Math.sin(rad) * step
         };
     }
 
-    #slewDeg(deg) {
+    #slewDeg(deg: number): number {
         if (!isFinite(this.#curDeg)) return deg;
         const diff = wrap360(deg - this.#curDeg);
         const delta = diff > 180 ? diff - 360 : diff;
@@ -580,8 +725,8 @@ class DodgeCore {
         return wrap360(deg);
     }
 
-    #hold(hazards, danger) {
-        const cmd = this.#cmd;
+    #hold(hazards: Hazard[], danger: boolean): DodgeResult {
+        const cmd = this.#cmd!;
         if (danger) cmd.lastDangerAt = this.#now;
         this.#revalidate(cmd, hazards);
         if (this.#releaseCheck(cmd, danger)) return { active: false, stopped: true };
@@ -602,7 +747,7 @@ class DodgeCore {
         };
     }
 
-    tick(world) {
+    tick(world: DodgeWorld): DodgeResult {
         this.#walls = world.walls;
         this.#world = world;
         this.#now = world.now;
@@ -621,7 +766,7 @@ class DodgeCore {
         return this.#engage(hazards);
     }
 
-    reset() {
+    reset(): void {
         this.#cmd = null;
         this.#curDeg = NaN;
         this.#zoneMem.clear();
@@ -632,14 +777,14 @@ class DodgeCore {
 
 class AutoDodge {
     #hitbox = 0;
-    #radiusMemoData = null;
+    #radiusMemoData: NativePointer | null = null;
     #radiusMemoValue = 0;
     #stopSent = false;
-    #wallsApi = { firstWallHit, rayHitDistance, movementBit };
+    #wallsApi: WallsApi = { firstWallHit, rayHitDistance, movementBit: MOVEMENT_BIT };
 
     #core = new DodgeCore();
 
-    #characterCollisionRadius(data) {
+    #characterCollisionRadius(data: NativePointer): number {
         if (!data || data.isNull()) return 0;
         if (
             this.#radiusMemoData !== null &&
@@ -656,7 +801,7 @@ class AutoDodge {
         return value;
     }
 
-    #learnOwnHitbox() {
+    #learnOwnHitbox(): boolean {
         try {
             const own = scanData.ownCharacter;
             if (!own || own.isNull()) return false;
@@ -670,14 +815,14 @@ class AutoDodge {
         }
     }
 
-    #moveCommand(x, y) {
-        return sendCommand(moveInputType, (ci) => {
-            ci.add(offsets.ClientInput_x).writeS32(x);
-            ci.add(offsets.ClientInput_y).writeS32(y);
+    #moveCommand(x: number, y: number): boolean {
+        return sendCommand(MOVE_INPUT_TYPE, (ci) => {
+            ci.add(OFFSETS.ClientInput_x).writeS32(x);
+            ci.add(OFFSETS.ClientInput_y).writeS32(y);
         });
     }
 
-    #issueMove(x, y) {
+    #issueMove(x: number, y: number): boolean {
         try {
             const logic = scanData.battleModeClient;
             if (!logic || logic.isNull()) return false;
@@ -688,7 +833,7 @@ class AutoDodge {
         }
     }
 
-    #issueStop() {
+    #issueStop(): boolean {
         try {
             const logic = scanData.battleModeClient;
             if (!logic || logic.isNull()) return false;
@@ -698,7 +843,7 @@ class AutoDodge {
         }
     }
 
-    update() {
+    update(): void {
         if (scanData.lastUpdate === 0) return;
         const now = Date.now();
         if (!this.#learnOwnHitbox()) {
@@ -726,19 +871,19 @@ class AutoDodge {
         }
     }
 
-    #invalidateOwnMetrics() {
+    #invalidateOwnMetrics(): void {
         this.#hitbox = 0;
         this.#radiusMemoData = null;
         this.#radiusMemoValue = 0;
     }
 
-    reset() {
+    reset(): void {
         this.#core.reset();
         this.#invalidateOwnMetrics();
         this.#stopSent = false;
     }
 
-    setup() {
+    setup(): void {
         try {
             enableProjectileTracking();
             onDataReload(() => this.#invalidateOwnMetrics());
@@ -748,6 +893,6 @@ class AutoDodge {
 
 const autoDodge = new AutoDodge();
 
-export const updateAutoDodge = () => autoDodge.update();
-export const resetAutoDodge = () => autoDodge.reset();
-export const setupAutoDodge = () => autoDodge.setup();
+export const updateAutoDodge = (): void => autoDodge.update();
+export const resetAutoDodge = (): void => autoDodge.reset();
+export const setupAutoDodge = (): void => autoDodge.setup();

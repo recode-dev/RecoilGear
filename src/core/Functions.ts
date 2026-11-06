@@ -1,15 +1,80 @@
-import { offsets } from "./offsets.js";
+import { OFFSETS, type OffsetTable } from "./Offsets";
 
-export const isValidPtr = (value) => !!value && !value.isNull();
+export interface NativeFunctions {
+    BattleMode_getInstance(): NativePointer;
+    LogicGameObjectClient_getX(self: NativePointer): number;
+    LogicGameObjectClient_getY(self: NativePointer): number;
+    LogicGameObjectClient_getData(self: NativePointer): NativePointer;
+    LogicGameObjectClient_getTeam(self: NativePointer, manager: NativePointer): number;
+    LogicGamePlayUtil_isEnemy(self: NativePointer): number;
+    LogicBattleModeClient_getOwnCharacter(self: NativePointer): NativePointer;
+    LogicBattleModeClient_getTileMap(self: NativePointer): NativePointer;
+    LogicBattleModeClient_setClientPredictionMoveTo(
+        self: NativePointer,
+        x: number,
+        y: number,
+        enabled: number
+    ): void;
+    LogicGameObjectManagerClient_findGameObject(
+        self: NativePointer,
+        index: number,
+        fallback: number
+    ): NativePointer;
+    ClientInput_constructor_int(self: NativePointer, type: number): void;
+    ClientInputManager_addInput(self: NativePointer, input: NativePointer): void;
+    operator_new(size: number): NativePointer;
+    LogicTileMap_tileToLogic(value: number): number;
+    LogicGamePlayUtil_getClosestPathfinderCollision(
+        size: number,
+        x1: number,
+        y1: number,
+        x2: number,
+        y2: number,
+        pathFinder: NativePointer,
+        out: NativePointer,
+        flags: number,
+        mode: number
+    ): number;
+    LogicCharacterData_getCollisionRadius(data: NativePointer): number;
+    LogicCharacterData_getProjectileStartRadius(): number;
+    LogicCharacterClient_getWeaponSkill(self: NativePointer): NativePointer;
+    LogicSkillData_getCastingRange(data: NativePointer): number;
+    LogicSkillData_getProjectileData(data: NativePointer): NativePointer;
+    LogicSkillData_getSpread(data: NativePointer): number;
+    LogicSkillData_getNumBulletsInOneAttack(data: NativePointer): number;
+    LogicSkillData_getMsBetweenAttacks(data: NativePointer): number;
+    LogicProjectileClient_getTargetX(self: NativePointer): number;
+    LogicProjectileClient_getTargetY(self: NativePointer): number;
+    LogicProjectileClient_getTravelTicks(
+        data: NativePointer,
+        rangeUnits: number,
+        speed: number
+    ): number;
+    LogicData_getName(data: NativePointer): NativePointer;
+}
 
-export const ptrFromU32 = (lo, hi) => {
+type NativeSpecEntry = readonly [
+    keyof OffsetTable,
+    NativeFunctionReturnType,
+    NativeFunctionArgumentType[]
+];
+
+export const isValidPtr = (value: NativePointer | null | undefined): value is NativePointer =>
+    !!value && !value.isNull();
+
+export const ptrFromU32 = (lo: number, hi: number): NativePointer => {
     if (!lo && !hi) return ptr(0);
     return ptr(
         `0x${(hi >>> 0).toString(16).padStart(8, "0")}${(lo >>> 0).toString(16).padStart(8, "0")}`
     );
 };
 
-export const readClampedS32 = (obj, off, min, max) => {
+export const readClampedS32 = (
+    obj: NativePointer,
+    off: number,
+    min: number,
+    max: number
+): number => {
     try {
         const v = Math.trunc(obj.add(off).readS32());
         return v >= min && v <= max ? v : 0;
@@ -18,7 +83,11 @@ export const readClampedS32 = (obj, off, min, max) => {
     }
 };
 
-export const attachOffset = (base, off, listeners) => {
+export const attachOffset = (
+    base: NativePointer,
+    off: number,
+    listeners: InvocationListenerCallbacks
+): InvocationListener | null => {
     try {
         return Interceptor.attach(base.add(off), listeners);
     } catch {
@@ -26,7 +95,7 @@ export const attachOffset = (base, off, listeners) => {
     }
 };
 
-const nativeSpecs = {
+const NATIVE_SPECS: Record<keyof NativeFunctions, NativeSpecEntry> = {
     BattleMode_getInstance: ["BattleMode_getInstance", "pointer", []],
     LogicGameObjectClient_getX: ["LogicGameObjectClient_getX", "int32", ["pointer"]],
     LogicGameObjectClient_getY: ["LogicGameObjectClient_getY", "int32", ["pointer"]],
@@ -101,43 +170,46 @@ const nativeSpecs = {
 };
 
 class FunctionTable {
-    #base = null;
-    #image = null;
-    #table = null;
+    #base: NativePointer | null = null;
+    #image: Module | null = null;
+    #table: Readonly<NativeFunctions> | null = null;
 
-    init(baseIn, imageIn) {
+    init(baseIn: NativePointer, imageIn: Module | null): Readonly<NativeFunctions> {
         if (this.#table) return this.#table;
         this.#base = baseIn;
         this.#image = imageIn || null;
-        const built = {};
-        for (const [key, [name, ret, args]] of Object.entries(nativeSpecs)) {
-            const off = offsets[name];
+        const built: Record<string, unknown> = {};
+        for (const [key, [name, ret, args]] of Object.entries(NATIVE_SPECS)) {
+            const off = OFFSETS[name];
             if (typeof off !== "number" || off <= 0)
                 throw new Error(`functions: missing offset ${name}`);
             built[key] = new NativeFunction(this.#base.add(off), ret, args);
         }
-        this.#table = Object.freeze(built);
+        this.#table = Object.freeze(built) as unknown as Readonly<NativeFunctions>;
         return this.#table;
     }
 
-    get table() {
+    get table(): Readonly<NativeFunctions> {
         if (!this.#table) throw new Error("FunctionTable not initialized: call init(base) first");
         return this.#table;
     }
 
-    get base() {
+    get base(): NativePointer {
         if (!this.#base) throw new Error("FunctionTable not initialized: call init(base) first");
         return this.#base;
     }
 
-    get image() {
+    get image(): Module | null {
         return this.#image;
     }
 }
 
 const functions = new FunctionTable();
 
-export const initFunctions = (baseIn, imageIn) => functions.init(baseIn, imageIn);
-export const getFunctions = () => functions.table;
-export const getBase = () => functions.base;
-export const getImage = () => functions.image;
+export const initFunctions = (
+    baseIn: NativePointer,
+    imageIn: Module | null
+): Readonly<NativeFunctions> => functions.init(baseIn, imageIn);
+export const getFunctions = (): Readonly<NativeFunctions> => functions.table;
+export const getBase = (): NativePointer => functions.base;
+export const getImage = (): Module | null => functions.image;
