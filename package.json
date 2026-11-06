@@ -5,11 +5,21 @@
     "type": "module",
     "scripts": {
         "typecheck": "tsc --noEmit",
-        "build": "frida-compile src/Index.ts -o dist/agent.js -B iife"
+        "build": "frida-compile src/Index.ts -o dist/agent.js -B iife",
+        "format": "prettier --write src",
+        "format:check": "prettier --check src"
+    },
+    "prettier": {
+        "printWidth": 100,
+        "tabWidth": 4,
+        "trailingComma": "all",
+        "endOfLine": "lf"
     },
     "devDependencies": {
         "@types/frida-gum": "^19.13.0",
+        "frida": "17.2.11",
         "frida-compile": "^19.1.0",
+        "prettier": "^3.9.10",
         "typescript": "5.9.3"
     }
 }
