@@ -14,6 +14,9 @@ class RecoilGearAgent {
     #installed = false;
     #attempts = 0;
     #retryTimer = null;
+    #lastTickAt = 0;
+    #lastAimAt = 0;
+    #lastDodgeAt = 0;
 
     #findModule() {
         try {
@@ -36,18 +39,26 @@ class RecoilGearAgent {
             notifyBattleModeChanged(bm);
         }
         const now = Date.now();
+        if (now - this.#lastTickAt < 6) return;
+        this.#lastTickAt = now;
         try {
             updateScanner(bm, now);
         } catch {}
         try {
             maybeRefreshWallCache(bm, now);
         } catch {}
-        try {
-            updateAutoAim();
-        } catch {}
-        try {
-            updateAutoDodge();
-        } catch {}
+        if (now - this.#lastAimAt >= 18) {
+            this.#lastAimAt = now;
+            try {
+                updateAutoAim();
+            } catch {}
+        }
+        if (now - this.#lastDodgeAt >= 45) {
+            this.#lastDodgeAt = now;
+            try {
+                updateAutoDodge();
+            } catch {}
+        }
     }
 
     #finishInstall(mod) {

@@ -40,6 +40,8 @@ const distance = (x1, y1, x2, y2) => length(x2 - x1, y2 - y1);
 class AutoAim {
     #target = null;
     #gameTarget = null;
+    #aimPt = null;
+    #aimStamp = 0;
     #track = new Map();
     #projectileSpeed = 0;
     #speedAt = 0;
@@ -496,6 +498,14 @@ class AutoAim {
         return null;
     }
 
+    #aimPoint() {
+        const now = Date.now();
+        if (now - this.#aimStamp < 25) return this.#aimPt;
+        this.#aimStamp = now;
+        this.#aimPt = this.#aimPointNow();
+        return this.#aimPt;
+    }
+
     #aimPointNow() {
         const now = Date.now();
         const live = this.#target ? this.#ptrAlive(this.#target.ptr) : null;
@@ -616,7 +626,7 @@ class AutoAim {
         try {
             Interceptor.attach(base.add(offsets.BattleScreen_activateSkill), {
                 onEnter: (args) => {
-                    const aim = this.#aimPointNow();
+                    const aim = this.#aimPoint();
                     if (!aim) return;
                     try {
                         const ax = Math.trunc(aim.x);
@@ -640,10 +650,13 @@ class AutoAim {
             return;
         }
         this.#target = this.#pickTarget(Date.now());
+        this.#aimPoint();
     }
 
     reset() {
         this.#target = null;
+        this.#aimPt = null;
+        this.#aimStamp = 0;
         this.#track.clear();
         this.#resetWeaponCache();
     }

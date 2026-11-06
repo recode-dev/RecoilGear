@@ -29,6 +29,8 @@ class Scanner {
     #metaBudget = 0;
     #outArr = [];
     #moduleBase = null;
+    #vtableProj = null;
+    #vtableProjClient = null;
     state = {
         ownCharacter: ptr(0),
         battleModeClient: ptr(0),
@@ -987,13 +989,19 @@ class Scanner {
     }
 
     #isProjectileObj(obj, data) {
-        const vtableProj = this.#moduleBase.add(offsets.LogicProjectileData_vtable);
-        const vtableProjClient = this.#moduleBase.add(offsets.LogicProjectileClient_vtable);
+        const vtableProj = this.#vtableProj;
+        const vtableProjClient = this.#vtableProjClient;
+        if (!vtableProj || !vtableProjClient) return false;
         let objVt = null;
         try {
             objVt = obj.readPointer();
         } catch {}
-        return !!(objVt && objVt.equals(vtableProjClient)) || data.readPointer().equals(vtableProj);
+        if (objVt && objVt.equals(vtableProjClient)) return true;
+        try {
+            return data.readPointer().equals(vtableProj);
+        } catch {
+            return false;
+        }
     }
 
     #brawlerNameOf(data) {
@@ -1117,6 +1125,8 @@ class Scanner {
 
     init(base) {
         this.#moduleBase = base;
+        this.#vtableProj = base.add(offsets.LogicProjectileData_vtable);
+        this.#vtableProjClient = base.add(offsets.LogicProjectileClient_vtable);
         this.#installCoreHooks(base);
     }
 

@@ -23,6 +23,7 @@ class CommandSigner {
     #hooked = false;
     #signing = false;
     #tries = 0;
+    #calibAt = 0;
 
     #bytesAt(address, size) {
         const raw = address.readByteArray(size);
@@ -121,7 +122,9 @@ class CommandSigner {
     }
 
     #observe(input) {
-        if (this.#variant || this.#tries > 400 || !input || input.isNull()) return;
+        if (this.#variant || this.#tries > 30 || !input || input.isNull()) return;
+        const now = Date.now();
+        if (now - this.#calibAt < 400) return;
         const fns = getFunctions();
         const battle = fns.BattleMode_getInstance();
         if (!battle || battle.isNull()) return;
@@ -129,6 +132,7 @@ class CommandSigner {
         if (!this.#loadSigning()) return;
         const token = input.add(offsets.ClientInput_token).readU32() >>> 0;
         if (token < 2) return;
+        this.#calibAt = now;
         this.#tries++;
         const secrets = {
             key16: this.#bytesAt(battle.add(offsets.BattleMode_hashKey), maskSize),
