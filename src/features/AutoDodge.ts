@@ -23,7 +23,8 @@ const CFG = {
     DODGE_COMMIT_MS: 110,
     DODGE_DWELL_MS: 200,
     SWITCH_MARGIN: 1.25,
-    BREAK_WINDOW_S: 0.2,
+    URGENT_MARGIN: 0.6,
+    BREAK_WINDOW_S: 0.15,
     N_DIRECTIONS: 24,
     STEP_SIZE: 150,
     MAX_SEARCH_DIST: 1500,
@@ -41,7 +42,7 @@ const CFG = {
     HOLD_AFTER_CLEAR_MS: 15,
     VOLLEY_WINDOW_MS: 200,
     SPAWN_BUCKET: 128,
-    SEND_MIN_SHIFT: 55,
+    SEND_MIN_SHIFT: 80,
     WALK_OUT: 750,
     MIN_REACH: 300,
 } as const;
@@ -541,7 +542,7 @@ class DodgeCore {
     }
 
     #similarDirection(a: Vec, b: Vec): boolean {
-        return a.x * b.x + a.y * b.y > 0.94;
+        return a.x * b.x + a.y * b.y > 0.98;
     }
 
     #sameDirection(a: Vec, b: Vec): boolean {
@@ -590,7 +591,8 @@ class DodgeCore {
         const keep = this.#collect(this.#commit, px, py, myR, intent);
         const next = this.#collect(dir, px, py, myR, intent);
         const urgent = this.#urgentThreat(this.#commit, px, py, myR);
-        return urgent || (settled && next > keep * CFG.SWITCH_MARGIN) ? dir : this.#commit;
+        if (urgent) return next < keep * CFG.URGENT_MARGIN ? dir : this.#commit;
+        return settled && next > keep * CFG.SWITCH_MARGIN ? dir : this.#commit;
     }
 
     #resetCommit(): void {
@@ -647,8 +649,12 @@ class DodgeCore {
             this.#commitAt = now;
             this.#commitUntil = now + CFG.DODGE_COMMIT_MS;
         }
-        const targetX = this.#safeX || Math.round(px + dir.x * CFG.DODGE_RANGE);
-        const targetY = this.#safeY || Math.round(py + dir.y * CFG.DODGE_RANGE);
+        const run = Math.min(
+            CFG.DODGE_RANGE,
+            Math.max(CFG.STEP_SIZE, this.#wallReach(px, py, myR, dir)),
+        );
+        const targetX = this.#safeX || Math.round(px + dir.x * run);
+        const targetY = this.#safeY || Math.round(py + dir.y * run);
         if (Math.hypot(targetX - px, targetY - py) <= CFG.ARRIVAL_THRESHOLD && !threatened) {
             this.#resetCommit();
             return { active: false };
