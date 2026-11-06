@@ -13,12 +13,12 @@ export interface NativeFunctions {
         self: NativePointer,
         x: number,
         y: number,
-        enabled: number
+        enabled: number,
     ): void;
     LogicGameObjectManagerClient_findGameObject(
         self: NativePointer,
         index: number,
-        fallback: number
+        fallback: number,
     ): NativePointer;
     ClientInput_constructor_int(self: NativePointer, type: number): void;
     ClientInputManager_addInput(self: NativePointer, input: NativePointer): void;
@@ -33,7 +33,7 @@ export interface NativeFunctions {
         pathFinder: NativePointer,
         out: NativePointer,
         flags: number,
-        mode: number
+        mode: number,
     ): number;
     LogicCharacterData_getCollisionRadius(data: NativePointer): number;
     LogicCharacterData_getProjectileStartRadius(): number;
@@ -48,7 +48,7 @@ export interface NativeFunctions {
     LogicProjectileClient_getTravelTicks(
         data: NativePointer,
         rangeUnits: number,
-        speed: number
+        speed: number,
     ): number;
     LogicData_getName(data: NativePointer): NativePointer;
 }
@@ -56,7 +56,7 @@ export interface NativeFunctions {
 type NativeSpecEntry = readonly [
     keyof OffsetTable,
     NativeFunctionReturnType,
-    NativeFunctionArgumentType[]
+    NativeFunctionArgumentType[],
 ];
 
 export const isValidPtr = (value: NativePointer | null | undefined): value is NativePointer =>
@@ -65,7 +65,7 @@ export const isValidPtr = (value: NativePointer | null | undefined): value is Na
 export const ptrFromU32 = (lo: number, hi: number): NativePointer => {
     if (!lo && !hi) return ptr(0);
     return ptr(
-        `0x${(hi >>> 0).toString(16).padStart(8, "0")}${(lo >>> 0).toString(16).padStart(8, "0")}`
+        `0x${(hi >>> 0).toString(16).padStart(8, "0")}${(lo >>> 0).toString(16).padStart(8, "0")}`,
     );
 };
 
@@ -73,7 +73,7 @@ export const readClampedS32 = (
     obj: NativePointer,
     off: number,
     min: number,
-    max: number
+    max: number,
 ): number => {
     try {
         const v = Math.trunc(obj.add(off).readS32());
@@ -86,7 +86,7 @@ export const readClampedS32 = (
 export const attachOffset = (
     base: NativePointer,
     off: number,
-    listeners: InvocationListenerCallbacks
+    listeners: InvocationListenerCallbacks,
 ): InvocationListener | null => {
     try {
         return Interceptor.attach(base.add(off), listeners);
@@ -103,24 +103,24 @@ const NATIVE_SPECS: Record<keyof NativeFunctions, NativeSpecEntry> = {
     LogicGameObjectClient_getTeam: [
         "LogicGameObjectClient_getTeam",
         "int32",
-        ["pointer", "pointer"]
+        ["pointer", "pointer"],
     ],
     LogicGamePlayUtil_isEnemy: ["LogicGamePlayUtil_isEnemy", "int32", ["pointer"]],
     LogicBattleModeClient_getOwnCharacter: [
         "LogicBattleModeClient_getOwnCharacter",
         "pointer",
-        ["pointer"]
+        ["pointer"],
     ],
     LogicBattleModeClient_getTileMap: ["LogicBattleModeClient_getTileMap", "pointer", ["pointer"]],
     LogicBattleModeClient_setClientPredictionMoveTo: [
         "LogicBattleModeClient_setClientPredictionMoveTo",
         "void",
-        ["pointer", "int", "int", "bool"]
+        ["pointer", "int", "int", "bool"],
     ],
     LogicGameObjectManagerClient_findGameObject: [
         "LogicGameObjectManagerClient_findGameObject",
         "pointer",
-        ["pointer", "int", "int"]
+        ["pointer", "int", "int"],
     ],
     ClientInput_constructor_int: ["ClientInput_constructor_int", "void", ["pointer", "int"]],
     ClientInputManager_addInput: ["ClientInputManager_addInput", "void", ["pointer", "pointer"]],
@@ -129,22 +129,22 @@ const NATIVE_SPECS: Record<keyof NativeFunctions, NativeSpecEntry> = {
     LogicGamePlayUtil_getClosestPathfinderCollision: [
         "LogicGamePlayUtil_getClosestPathfinderCollision",
         "uint32",
-        ["int32", "int32", "int32", "int32", "int32", "pointer", "pointer", "uint32", "uint8"]
+        ["int32", "int32", "int32", "int32", "int32", "pointer", "pointer", "uint32", "uint8"],
     ],
     LogicCharacterData_getCollisionRadius: [
         "LogicCharacterData_getCollisionRadius",
         "int32",
-        ["pointer"]
+        ["pointer"],
     ],
     LogicCharacterData_getProjectileStartRadius: [
         "LogicCharacterData_getProjectileStartRadius",
         "int32",
-        []
+        [],
     ],
     LogicCharacterClient_getWeaponSkill: [
         "LogicCharacterClient_getWeaponSkill",
         "pointer",
-        ["pointer"]
+        ["pointer"],
     ],
     LogicSkillData_getCastingRange: ["LogicSkillData_getCastingRangeTiles", "int32", ["pointer"]],
     LogicSkillData_getProjectileData: ["LogicSkillData_getProjectileData", "pointer", ["pointer"]],
@@ -152,21 +152,21 @@ const NATIVE_SPECS: Record<keyof NativeFunctions, NativeSpecEntry> = {
     LogicSkillData_getNumBulletsInOneAttack: [
         "LogicSkillData_getNumBulletsInOneAttack",
         "int32",
-        ["pointer"]
+        ["pointer"],
     ],
     LogicSkillData_getMsBetweenAttacks: [
         "LogicSkillData_getMsBetweenAttacks",
         "int32",
-        ["pointer"]
+        ["pointer"],
     ],
     LogicProjectileClient_getTargetX: ["LogicProjectileClient_getTargetX", "int32", ["pointer"]],
     LogicProjectileClient_getTargetY: ["LogicProjectileClient_getTargetY", "int32", ["pointer"]],
     LogicProjectileClient_getTravelTicks: [
         "LogicProjectileClient_getTravelTicks",
         "int32",
-        ["pointer", "int32", "int32"]
+        ["pointer", "int32", "int32"],
     ],
-    LogicData_getName: ["LogicData_getName", "pointer", ["pointer"]]
+    LogicData_getName: ["LogicData_getName", "pointer", ["pointer"]],
 };
 
 class FunctionTable {
@@ -208,7 +208,7 @@ const functions = new FunctionTable();
 
 export const initFunctions = (
     baseIn: NativePointer,
-    imageIn: Module | null
+    imageIn: Module | null,
 ): Readonly<NativeFunctions> => functions.init(baseIn, imageIn);
 export const getFunctions = (): Readonly<NativeFunctions> => functions.table;
 export const getBase = (): NativePointer => functions.base;

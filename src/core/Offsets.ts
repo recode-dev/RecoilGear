@@ -209,5 +209,5 @@ export const OFFSETS: Readonly<OffsetTable> = Object.freeze({
 
     LogicData_getName: 0x9a4f1c,
 
-    LogicHttpRequest_encode: 0xbd5f3c
+    LogicHttpRequest_encode: 0xbd5f3c,
 });

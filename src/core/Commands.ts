@@ -59,7 +59,7 @@ class CommandSigner {
             this.#outerMask = this.#bytesAt(base.add(OFFSETS.ClientInput_hashOuterMask), MASK_SIZE);
             this.#typeTable = this.#readU32Table(
                 base.add(OFFSETS.ClientInput_typeConstantTable),
-                TABLE_ENTRIES
+                TABLE_ENTRIES,
             );
             if (!this.#tableSane(this.#typeTable)) {
                 this.#typeTable = null;
@@ -88,7 +88,7 @@ class CommandSigner {
             const secrets = {
                 key16: this.#bytesAt(battle.add(OFFSETS.BattleMode_hashKey), MASK_SIZE),
                 maskIn: this.#innerMask!,
-                maskOut: this.#outerMask!
+                maskOut: this.#outerMask!,
             };
             const snapshot = this.#bytesAt(input.add(DATA16_OFFSET), MASK_SIZE);
             const type = input.add(OFFSETS.ClientInput_type).readU32() >>> 0;

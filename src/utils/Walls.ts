@@ -22,7 +22,7 @@ export interface WallsApi {
         wy0: number,
         wx1: number,
         wy1: number,
-        opts: WallRayOptions
+        opts: WallRayOptions,
     ): number;
     movementBit: number;
 }
@@ -178,7 +178,7 @@ class WallGrid {
                 onEnter: () => {
                     this.#needsRebuild = true;
                     this.#pfMemo.clear();
-                }
+                },
             });
             this.#tileWatchInstalled = listener !== null;
         }
@@ -210,7 +210,7 @@ class WallGrid {
                     }
                     remember(this as unknown as PfQuery, dist);
                 } catch {}
-            }
+            },
         });
     }
 
@@ -244,7 +244,7 @@ class WallGrid {
         wy0: number,
         wx1: number,
         wy1: number,
-        opts: WallRayOptions
+        opts: WallRayOptions,
     ): boolean {
         return !this.segBlocked(wx0, wy0, wx1, wy1, opts);
     }
@@ -269,7 +269,7 @@ class WallGrid {
             x2: Math.trunc(wx1),
             y2: Math.trunc(wy1),
             f1: 0,
-            f2: 0
+            f2: 0,
         };
     }
 
@@ -285,7 +285,7 @@ class WallGrid {
             this.#probeOut.writeS32(0);
             this.#probeOut.add(4).writeS32(0);
             const hit = Math.trunc(
-                fn(bodySize, q.x1, q.y1, q.x2, q.y2, this.#pathFinder, this.#probeOut, 0, 0)
+                fn(bodySize, q.x1, q.y1, q.x2, q.y2, this.#pathFinder, this.#probeOut, 0, 0),
             );
             const hx = Math.trunc(this.#probeOut.readS32());
             const hy = Math.trunc(this.#probeOut.add(4).readS32());
@@ -327,7 +327,7 @@ class WallGrid {
         wy0: number,
         wx1: number,
         wy1: number,
-        opts: WallRayOptions
+        opts: WallRayOptions,
     ): number {
         if (!this.#walls) return -1;
         const radius = Math.max(opts.radius, 0);
@@ -369,19 +369,19 @@ export const losCheckWide = (
     wy0: number,
     wx1: number,
     wy1: number,
-    opts: WallRayOptions
+    opts: WallRayOptions,
 ): boolean => wallGrid.losCheckWide(wx0, wy0, wx1, wy1, opts);
 export const firstWallHit = (
     wx0: number,
     wy0: number,
     wx1: number,
     wy1: number,
-    size?: number
+    size?: number,
 ): number => wallGrid.firstWallHit(wx0, wy0, wx1, wy1, size);
 export const rayHitDistance = (
     wx0: number,
     wy0: number,
     wx1: number,
     wy1: number,
-    opts: WallRayOptions
+    opts: WallRayOptions,
 ): number => wallGrid.rayHitDistance(wx0, wy0, wx1, wy1, opts);

@@ -73,7 +73,7 @@ class RecoilGearAgent {
         attachOffset(mod.base, OFFSETS.LogicBattleModeClient_update, {
             onEnter: (args) => {
                 this.#tick(args[0]);
-            }
+            },
         });
         this.#installed = true;
         return true;

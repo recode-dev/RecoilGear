@@ -6,7 +6,7 @@ import {
     enableProjectileTracking,
     onDataReload,
     type ProjectileOutput,
-    scanData
+    scanData,
 } from "../core/Scan";
 import { firstWallHit, MOVEMENT_BIT, rayHitDistance, type WallsApi } from "../utils/Walls";
 
@@ -28,7 +28,7 @@ const TUNE: TuneOptions = {
     aware: 3600,
     skin: 60,
     wallPenalty: 1500,
-    momentum: 110
+    momentum: 110,
 };
 
 const RING: number[] = [];
@@ -240,14 +240,14 @@ class DodgeCore {
         const flightS = Math.trunc(p.seg0) > 0 && Math.trunc(p.speed) > 0 ? p.seg0 / p.speed : 0;
         const fuseS = Math.max(
             0.4,
-            Math.trunc(p.triggerMs) / 1000 - Math.max(0, Math.trunc(p.ageMs) / 1000 - flightS)
+            Math.trunc(p.triggerMs) / 1000 - Math.max(0, Math.trunc(p.ageMs) / 1000 - flightS),
         );
         this.#lastZones.set(p.gid, {
             x: p.x,
             y: p.y,
             r,
             sticky: true,
-            fuseMs: fuseS * 1000
+            fuseMs: fuseS * 1000,
         });
         return { kind: "sticky", x: p.x, y: p.y, r, fuse: fuseS, gid: p.gid };
     }
@@ -319,7 +319,7 @@ class DodgeCore {
             range: this.#coneReach(p),
             speed: Math.max(1, observedSpeed > 1 ? observedSpeed : Math.trunc(p.speed)),
             seg: Math.trunc(p.seg) > 0 ? p.seg : -1,
-            gid: p.gid
+            gid: p.gid,
         });
     }
 
@@ -335,7 +335,7 @@ class DodgeCore {
                 r: Math.max(hitR + TUNE.skin, 110),
                 fuse: 0,
                 approach: 0,
-                gid: p.gid
+                gid: p.gid,
             };
         }
         return {
@@ -346,7 +346,7 @@ class DodgeCore {
             vy: v.vy,
             hitR,
             left: Math.trunc(p.seg) > 0 ? p.seg : -1,
-            gid: p.gid
+            gid: p.gid,
         };
     }
 
@@ -381,7 +381,7 @@ class DodgeCore {
                 y: my,
                 r: z.r,
                 until: this.#now + (z.sticky ? Math.max(500, z.fuseMs || 0) : 3500),
-                fuseMs: z.sticky ? Math.max(0, z.fuseMs || 0) : 0
+                fuseMs: z.sticky ? Math.max(0, z.fuseMs || 0) : 0,
             });
         }
     }
@@ -400,7 +400,7 @@ class DodgeCore {
                     y: z.y,
                     r: z.r,
                     fuse: (z.until - this.#now) / 1000,
-                    gid
+                    gid,
                 });
             } else {
                 list.push({ kind: "zone", x: z.x, y: z.y, r: z.r, fuse: 0, approach: 0, gid });
@@ -484,7 +484,7 @@ class DodgeCore {
         if (hit < 0) {
             hit = this.#walls!.rayHitDistance(this.#myX, this.#myY, ex, ey, {
                 radius: this.#myR,
-                bit: this.#walls!.movementBit
+                bit: this.#walls!.movementBit,
             });
         }
         if (hit < 0) return 1000;
@@ -626,7 +626,7 @@ class DodgeCore {
         return (
             this.#walls!.rayHitDistance(this.#myX, this.#myY, step.x, step.y, {
                 radius: this.#myR,
-                bit: this.#walls!.movementBit
+                bit: this.#walls!.movementBit,
             }) >= 0
         );
     }
@@ -675,7 +675,7 @@ class DodgeCore {
             ty: step.y,
             startedAt: now,
             lastDangerAt: now,
-            lastCheckAt: now
+            lastCheckAt: now,
         };
         return {
             active: true,
@@ -683,7 +683,7 @@ class DodgeCore {
             targetX: this.#cmd.tx,
             targetY: this.#cmd.ty,
             headingDeg: deg,
-            send: true
+            send: true,
         };
     }
 
@@ -711,7 +711,7 @@ class DodgeCore {
         const rad = this.#curDeg * DEG2RAD;
         return {
             x: this.#myX + Math.cos(rad) * step,
-            y: this.#myY + Math.sin(rad) * step
+            y: this.#myY + Math.sin(rad) * step,
         };
     }
 
@@ -743,7 +743,7 @@ class DodgeCore {
             targetX: cmd.tx,
             targetY: cmd.ty,
             headingDeg: cmd.headingDeg,
-            send: true
+            send: true,
         };
     }
 
@@ -857,7 +857,7 @@ class AutoDodge {
             speed: Math.trunc(scanData.mySpeed),
             radius: Math.trunc(this.#hitbox),
             projectiles: scanData.projectiles,
-            walls: this.#wallsApi
+            walls: this.#wallsApi,
         });
         if (d.active) {
             this.#stopSent = false;

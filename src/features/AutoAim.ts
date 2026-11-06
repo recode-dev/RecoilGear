@@ -9,7 +9,7 @@ import {
     travelDistance,
     travelTicksFor,
     weaponRangeUnits,
-    type EnemyInfo
+    type EnemyInfo,
 } from "../core/Scan";
 import { losCheckWide, PROJECTILE_BIT } from "../utils/Walls";
 
@@ -154,7 +154,7 @@ class AutoAim {
             vhist: [],
             vHead: 0,
             vLen: 0,
-            lastSeen: now
+            lastSeen: now,
         };
         for (let i = 0; i < HIST_CAP; i++) track.hist.push({ x: 0, y: 0, t: 0 });
         for (let i = 0; i < VHIST_CAP; i++) track.vhist.push({ x: 0, y: 0, t: 0 });
@@ -174,7 +174,7 @@ class AutoAim {
         x: number,
         y: number,
         moveAngle: number,
-        now: number
+        now: number,
     ): VelocityWindow | null {
         const h = track.hist;
         const oldest = h[(track.histHead - track.histLen + HIST_CAP) % HIST_CAP];
@@ -199,7 +199,7 @@ class AutoAim {
         x: number,
         y: number,
         moveSpeed: number,
-        window: VelocityWindow
+        window: VelocityWindow,
     ): DirectionVelocity | null {
         const h = track.hist;
         let dx = 0;
@@ -214,7 +214,7 @@ class AutoAim {
         const direction = length(dx, dy);
         const speed = Math.min(
             window.magnitude,
-            moveSpeed >= 200 && moveSpeed <= 1500 ? moveSpeed : window.magnitude
+            moveSpeed >= 200 && moveSpeed <= 1500 ? moveSpeed : window.magnitude,
         );
         if (direction < 0.5 || speed > MAX_SPEED_EST) return null;
         return { vx: (dx / direction) * speed, vy: (dy / direction) * speed };
@@ -299,7 +299,7 @@ class AutoAim {
         speed: number,
         range: number,
         pocket: number,
-        t: number
+        t: number,
     ): AimPoint | null {
         let px = pred.x;
         let py = pred.y;
@@ -319,7 +319,7 @@ class AutoAim {
         pred: Prediction,
         speed: number,
         range: number,
-        pocket: number
+        pocket: number,
     ): AimPoint | null {
         let px = pred.x;
         let py = pred.y;
@@ -348,7 +348,7 @@ class AutoAim {
             pred.y - scanData.myY,
             pred.leadVx,
             pred.leadVy,
-            speed
+            speed,
         );
         if (t > 0) return this.#solveFlying(pred, speed, range, pocket, t);
         return this.#solveIncremental(pred, speed, range, pocket);
@@ -366,7 +366,7 @@ class AutoAim {
         if (!(rad > 0)) {
             try {
                 const start = Math.trunc(
-                    getFunctions().LogicCharacterData_getProjectileStartRadius()
+                    getFunctions().LogicCharacterData_getProjectileStartRadius(),
                 );
                 if (start >= 1 && start <= 2000) rad = start;
             } catch {}
@@ -497,7 +497,7 @@ class AutoAim {
         aim: AimPoint,
         mx: number,
         my: number,
-        pocketR: number
+        pocketR: number,
     ): AimPoint | null {
         for (const frac of WALKBACK_FRACS) {
             const cx = pred.x + (aim.x - pred.x) * frac;
@@ -539,7 +539,7 @@ class AutoAim {
         mx: number,
         my: number,
         target: EnemyInfo,
-        pocket: number
+        pocket: number,
     ): number {
         const ax = target.x - mx;
         const ay = target.y - my;
@@ -635,7 +635,7 @@ class AutoAim {
         const state: PickState = {
             best: { e: null, pred: null, d: Infinity },
             calm: { e: null, pred: null, d: Infinity },
-            cur: null
+            cur: null,
         };
         for (const e of list) {
             if (!this.#enemyEligible(e, mx, my)) continue;
@@ -687,7 +687,7 @@ class AutoAim {
                     if (retval.isNull()) return;
                     this.#gameTarget = retval;
                 } catch {}
-            }
+            },
         });
         attachOffset(base, OFFSETS.BattleScreen_activateSkill, {
             onEnter: (args) => {
@@ -704,7 +704,7 @@ class AutoAim {
                     args[1] = ptr(ax);
                     args[2] = ptr(ay);
                 } catch {}
-            }
+            },
         });
     }
 

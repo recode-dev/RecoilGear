@@ -2,7 +2,7 @@ const DEFAULT_MAX_LENGTH = 256;
 
 export const readScString = (
     value: NativePointer | null,
-    maxLength: number = DEFAULT_MAX_LENGTH
+    maxLength: number = DEFAULT_MAX_LENGTH,
 ): string | null => {
     try {
         if (!value || value.isNull()) return null;

@@ -37,7 +37,7 @@ class LicenseProvider {
                         args[0].add(REQUEST_BODY_PTR_OFFSET).writePointer(buf);
                         args[0].add(REQUEST_BODY_SIZE_OFFSET).writeS32(this.#total);
                     } catch {}
-                }
+                },
             });
             Interceptor.flush();
         } catch {

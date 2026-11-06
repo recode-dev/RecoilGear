@@ -143,7 +143,7 @@ class Scanner {
         myRadius: 0,
         enemies: [],
         projectiles: [],
-        lastUpdate: 0
+        lastUpdate: 0,
     };
 
     #ptrKey(value: NativePointer): string | null {
@@ -288,7 +288,7 @@ class Scanner {
         if (!isValidPtr(data) || !(rangeUnits > 0) || !(speed > 0)) return 0;
         try {
             return Math.trunc(
-                getFunctions().LogicProjectileClient_getTravelTicks(data, rangeUnits, speed)
+                getFunctions().LogicProjectileClient_getTravelTicks(data, rangeUnits, speed),
             );
         } catch {}
         return 0;
@@ -331,7 +331,7 @@ class Scanner {
     #readProjectileTarget(
         projectile: NativePointer,
         x: number,
-        y: number
+        y: number,
     ): ProjectileTarget | null {
         const fns = getFunctions();
         try {
@@ -339,7 +339,7 @@ class Scanner {
                 Math.trunc(fns.LogicProjectileClient_getTargetX(projectile)),
                 Math.trunc(fns.LogicProjectileClient_getTargetY(projectile)),
                 x,
-                y
+                y,
             );
         } catch {}
         return null;
@@ -393,7 +393,7 @@ class Scanner {
     #newProjectileEntry(
         projectile: NativePointer,
         data: NativePointer,
-        now: number
+        now: number,
     ): ProjectileEntry {
         let radius = readClampedS32(data, OFFSETS.LogicProjectileData_radius, 1, 2000);
         if (!(radius > 0)) radius = DEFAULT_PROJECTILE_RADIUS;
@@ -407,7 +407,7 @@ class Scanner {
         if (travelType === 6 || dynamicRange) isIndirect = 1;
         const targetObj = this.#readPtrField(
             projectile,
-            OFFSETS.LogicProjectileClient_targetObject
+            OFFSETS.LogicProjectileClient_targetObject,
         );
         return {
             gid: this.#ptrKey(projectile),
@@ -442,7 +442,7 @@ class Scanner {
                 data,
                 OFFSETS.LogicProjectileData_triggerWithDelayMs,
                 1,
-                60000
+                60000,
             ),
             gravity: readClampedS32(data, OFFSETS.LogicProjectileData_gravity, 1, 20000),
             attachArea: this.#dataU8(data, OFFSETS.LogicProjectileData_attachAreaEffectToTarget),
@@ -451,8 +451,8 @@ class Scanner {
                 projectile,
                 OFFSETS.LogicProjectileClient_lifeTicks,
                 1,
-                100000
-            )
+                100000,
+            ),
         } as ProjectileEntry;
     }
 
@@ -490,7 +490,7 @@ class Scanner {
         for (const key of [
             "LogicProjectileData_createReferences",
             "LogicSkillData_createReferences",
-            "LogicCharacterData_createReferences"
+            "LogicCharacterData_createReferences",
         ] as const) {
             attachOffset(base, OFFSETS[key], { onLeave: notify });
         }
@@ -500,7 +500,7 @@ class Scanner {
             },
             onLeave() {
                 remember(this.character);
-            }
+            },
         });
     }
 
@@ -516,12 +516,12 @@ class Scanner {
             },
             onLeave() {
                 capture(this.projectile);
-            }
+            },
         });
         attachOffset(base, OFFSETS.LogicProjectileClient_destruct, {
             onEnter: (args) => {
                 remove(args[0]);
-            }
+            },
         });
         attachOffset(base, OFFSETS.LogicProjectileClient_decode, {
             onEnter(args) {
@@ -529,7 +529,7 @@ class Scanner {
             },
             onLeave() {
                 capture(this.projectile);
-            }
+            },
         });
         this.#installDataReloadHooks(base);
     }
@@ -590,7 +590,7 @@ class Scanner {
             const resolved = getFunctions().LogicGameObjectManagerClient_findGameObject(
                 this.#objMgrPtr,
                 entry.ownerIndex,
-                -1
+                -1,
             );
             if (this.#badOwner(resolved, entry)) return null;
             this.#rememberCharacter(entry.ownerIndex, resolved);
@@ -657,7 +657,7 @@ class Scanner {
         entry: ProjectileEntry,
         gid: string,
         now: number,
-        output: ProjectileOutput[]
+        output: ProjectileOutput[],
     ): void {
         const x = this.#posX(entry.ptr);
         const y = this.#posY(entry.ptr);
@@ -727,7 +727,7 @@ class Scanner {
         objects: NativePointer,
         batchView: DataView | null,
         i: number,
-        stride: number
+        stride: number,
     ): NativePointer | null {
         if (batchView) {
             const off = i * stride;
@@ -769,7 +769,7 @@ class Scanner {
         obj: NativePointer,
         own: NativePointer,
         bm: NativePointer,
-        now: number
+        now: number,
     ): EnemyInfo | null {
         const data = this.dataFieldOf(obj);
         if (!isValidPtr(data)) return null;
@@ -803,7 +803,7 @@ class Scanner {
             moveSpeed: this.#characterSpeed(data),
             moveAngle: this.#readMoveAngle(obj),
             radius,
-            kind: brawlerName ? "player" : "spawnable"
+            kind: brawlerName ? "player" : "spawnable",
         };
     }
 
@@ -812,7 +812,7 @@ class Scanner {
         count: number,
         own: NativePointer,
         bm: NativePointer,
-        now: number
+        now: number,
     ): EnemyInfo[] {
         const enemies: EnemyInfo[] = [];
         const stride = OFFSETS.LogicGameObjectManagerClient_ptrStride;
