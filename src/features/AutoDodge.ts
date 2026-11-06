@@ -13,6 +13,15 @@ import { firstWallHit, MOVEMENT_BIT, rayHitDistance, type WallsApi } from "../ut
 const MOVE_INPUT_TYPE = 2;
 const DEG2RAD = Math.PI / 180;
 
+const ANCHOR_RUN = 520;
+const ANCHOR_ARRIVE = 150;
+const SEND_MIN_MS = 130;
+const SEND_MIN_SHIFT = 90;
+const RELEASE_COOL_MS = 320;
+const SLEW_DEG = 16;
+const STOP_REPEAT_MS = 60;
+const STOP_WINDOW_MS = 130;
+
 interface TuneOptions {
     dirCount: number;
     horizonS: number;
@@ -143,11 +152,16 @@ interface RetreatPoint {
 
 interface DodgeCommand {
     headingDeg: number;
+    anchorX: number;
+    anchorY: number;
     tx: number;
     ty: number;
+    sentX: number;
+    sentY: number;
     startedAt: number;
     lastDangerAt: number;
     lastCheckAt: number;
+    lastSendAt: number;
 }
 
 interface DodgeWorld {
@@ -186,6 +200,7 @@ class DodgeCore {
     #now = 0;
     #cmd: DodgeCommand | null = null;
     #curDeg = NaN;
+    #coolUntil = 0;
     #zoneMem = new Map<string, ZoneMemo>();
     #lastZones = new Map<string, ZoneSnapshot>();
 
@@ -403,6 +418,8 @@ class DodgeCore {
                     gid,
                 });
             } else {
+                if (this.#dist(z.x, z.y, this.#myX, this.#myY) > z.r + this.#myR + TUNE.skin)
+                    continue;
                 list.push({ kind: "zone", x: z.x, y: z.y, r: z.r, fuse: 0, approach: 0, gid });
             }
         }
@@ -495,9 +512,29 @@ class DodgeCore {
     #anchor(deg: number): StepPoint | null {
         const room = this.#wallRoom(deg);
         if (room <= 240) return null;
-        const run = Math.min(room, 1000);
+        const run = Math.min(room - 40, ANCHOR_RUN);
         const rad = deg * DEG2RAD;
         return { x: this.#myX + Math.cos(rad) * run, y: this.#myY + Math.sin(rad) * run };
+    }
+
+    #placeAnchor(cmd: DodgeCommand): void {
+        this.#curDeg = this.#slewDeg(cmd.headingDeg);
+        const room = this.#wallRoom(this.#curDeg);
+        const run = Math.max(180, Math.min(room - 40, ANCHOR_RUN));
+        const rad = this.#curDeg * DEG2RAD;
+        cmd.anchorX = this.#myX + Math.cos(rad) * run;
+        cmd.anchorY = this.#myY + Math.sin(rad) * run;
+        cmd.tx = cmd.anchorX;
+        cmd.ty = cmd.anchorY;
+    }
+
+    #shouldSend(cmd: DodgeCommand): boolean {
+        const shift = this.#dist(cmd.tx, cmd.ty, cmd.sentX, cmd.sentY);
+        if (shift < SEND_MIN_SHIFT && this.#now - cmd.lastSendAt < SEND_MIN_MS) return false;
+        cmd.lastSendAt = this.#now;
+        cmd.sentX = cmd.tx;
+        cmd.sentY = cmd.ty;
+        return true;
     }
 
     #wedgeSep(h: ConeHazard, px: number, py: number): number {
@@ -667,21 +704,26 @@ class DodgeCore {
             else deg = null;
         }
         if (deg === null || !anchor) return { active: false };
-        this.#curDeg = deg;
-        const step = this.#stepTarget(deg);
-        this.#cmd = {
+        this.#curDeg = NaN;
+        const cmd: DodgeCommand = {
             headingDeg: deg,
-            tx: step.x,
-            ty: step.y,
+            anchorX: anchor.x,
+            anchorY: anchor.y,
+            tx: anchor.x,
+            ty: anchor.y,
+            sentX: anchor.x,
+            sentY: anchor.y,
             startedAt: now,
             lastDangerAt: now,
             lastCheckAt: now,
+            lastSendAt: now,
         };
+        this.#cmd = cmd;
         return {
             active: true,
             started: true,
-            targetX: this.#cmd.tx,
-            targetY: this.#cmd.ty,
+            targetX: cmd.tx,
+            targetY: cmd.ty,
             headingDeg: deg,
             send: true,
         };
@@ -701,27 +743,28 @@ class DodgeCore {
         if (danger) return false;
         if (this.#now - cmd.lastDangerAt <= 170) return false;
         if (this.#now - cmd.startedAt <= 260) return false;
-        this.#cmd = null;
+        this.#release();
         return true;
     }
 
-    #stepTarget(deg: number): StepPoint {
-        const step = Math.max(150, Math.min(320, Math.round(this.#speed * 0.34)));
-        this.#curDeg = this.#slewDeg(deg);
-        const rad = this.#curDeg * DEG2RAD;
-        return {
-            x: this.#myX + Math.cos(rad) * step,
-            y: this.#myY + Math.sin(rad) * step,
-        };
+    #release(): void {
+        this.#cmd = null;
+        this.#curDeg = NaN;
+        this.#coolUntil = this.#now + RELEASE_COOL_MS;
+    }
+
+    #abort(): DodgeResult {
+        if (!this.#cmd) return { active: false };
+        this.#release();
+        return { active: false, stopped: true };
     }
 
     #slewDeg(deg: number): number {
         if (!isFinite(this.#curDeg)) return deg;
         const diff = wrap360(deg - this.#curDeg);
         const delta = diff > 180 ? diff - 360 : diff;
-        const maxStep = 16;
-        if (delta > maxStep) return wrap360(this.#curDeg + maxStep);
-        if (delta < -maxStep) return wrap360(this.#curDeg - maxStep);
+        if (delta > SLEW_DEG) return wrap360(this.#curDeg + SLEW_DEG);
+        if (delta < -SLEW_DEG) return wrap360(this.#curDeg - SLEW_DEG);
         return wrap360(deg);
     }
 
@@ -730,20 +773,21 @@ class DodgeCore {
         if (danger) cmd.lastDangerAt = this.#now;
         this.#revalidate(cmd, hazards);
         if (this.#releaseCheck(cmd, danger)) return { active: false, stopped: true };
-        const step = this.#stepTarget(cmd.headingDeg);
-        if (this.#stepBlocked(step)) {
+        const before = isFinite(this.#curDeg) ? wrap360(this.#curDeg) : NaN;
+        const want = wrap360(this.#slewDeg(cmd.headingDeg));
+        const arrived = this.#dist(this.#myX, this.#myY, cmd.anchorX, cmd.anchorY) < ANCHOR_ARRIVE;
+        if (want !== before || arrived) this.#placeAnchor(cmd);
+        if (this.#stepBlocked({ x: cmd.anchorX, y: cmd.anchorY })) {
             const repick = this.#engage(hazards);
-            if (!repick.active) return { active: false, stopped: true };
+            if (!repick.active) return this.#abort();
             return repick;
         }
-        cmd.tx = step.x;
-        cmd.ty = step.y;
         return {
             active: true,
             targetX: cmd.tx,
             targetY: cmd.ty,
             headingDeg: cmd.headingDeg,
-            send: true,
+            send: this.#shouldSend(cmd),
         };
     }
 
@@ -753,15 +797,14 @@ class DodgeCore {
         this.#now = world.now;
         this.#myX = world.x;
         this.#myY = world.y;
-        if (!isFinite(this.#myX) || !isFinite(this.#myY))
-            return this.#cmd ? { active: false, stopped: true } : { active: false };
+        if (!isFinite(this.#myX) || !isFinite(this.#myY)) return this.#abort();
         this.#speed = Math.trunc(world.speed);
-        if (!(this.#speed > 0))
-            return this.#cmd ? { active: false, stopped: true } : { active: false };
+        if (!(this.#speed > 0)) return this.#abort();
         this.#myR = world.radius > 0 ? world.radius : this.#myR;
         const hazards = this.#collectHazards();
         const { danger } = this.#assess(hazards);
         if (this.#cmd) return this.#hold(hazards, danger);
+        if (this.#now < this.#coolUntil) return { active: false };
         if (!danger) return { active: false };
         return this.#engage(hazards);
     }
@@ -769,6 +812,7 @@ class DodgeCore {
     reset(): void {
         this.#cmd = null;
         this.#curDeg = NaN;
+        this.#coolUntil = 0;
         this.#zoneMem.clear();
         this.#lastZones.clear();
         this.#world = { projectiles: [] };
@@ -779,7 +823,8 @@ class AutoDodge {
     #hitbox = 0;
     #radiusMemoData: NativePointer | null = null;
     #radiusMemoValue = 0;
-    #stopSent = false;
+    #stopUntil = 0;
+    #lastStopAt = 0;
     #wallsApi: WallsApi = { firstWallHit, rayHitDistance, movementBit: MOVEMENT_BIT };
 
     #core = new DodgeCore();
@@ -837,7 +882,10 @@ class AutoDodge {
         try {
             const logic = scanData.battleModeClient;
             if (!logic || logic.isNull()) return false;
-            return this.#moveCommand(scanData.myX, scanData.myY);
+            const x = Math.trunc(scanData.myX);
+            const y = Math.trunc(scanData.myY);
+            getFunctions().LogicBattleModeClient_setClientPredictionMoveTo(logic, x, y, 1);
+            return this.#moveCommand(x, y);
         } catch {
             return false;
         }
@@ -860,15 +908,23 @@ class AutoDodge {
             walls: this.#wallsApi,
         });
         if (d.active) {
-            this.#stopSent = false;
+            this.#stopUntil = 0;
             if (d.send && isFinite(d.targetX) && isFinite(d.targetY))
                 this.#issueMove(d.targetX, d.targetY);
             return;
         }
-        if (d.stopped && !this.#stopSent) {
-            this.#stopSent = true;
-            this.#issueStop();
+        if (d.stopped) {
+            this.#stopUntil = now + STOP_WINDOW_MS;
+            this.#lastStopAt = 0;
         }
+        if (this.#stopUntil === 0) return;
+        if (now >= this.#stopUntil) {
+            this.#stopUntil = 0;
+            return;
+        }
+        if (now - this.#lastStopAt < STOP_REPEAT_MS) return;
+        this.#lastStopAt = now;
+        this.#issueStop();
     }
 
     #invalidateOwnMetrics(): void {
@@ -880,7 +936,8 @@ class AutoDodge {
     reset(): void {
         this.#core.reset();
         this.#invalidateOwnMetrics();
-        this.#stopSent = false;
+        this.#stopUntil = 0;
+        this.#lastStopAt = 0;
     }
 
     setup(): void {
