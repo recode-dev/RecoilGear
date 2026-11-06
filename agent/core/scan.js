@@ -50,15 +50,23 @@ class Scanner {
     dataFieldOf(obj) {
         if (!isValidPtr(obj)) return ptr(0);
         try {
-            return obj.add(offsets.LogicGameObjectClient_data).readPointer();
+            return getFunctions().LogicGameObjectClient_getData(obj);
         } catch {
             return ptr(0);
         }
     }
 
-    #fieldS32(obj, off) {
+    #posX(obj) {
         try {
-            return Math.trunc(obj.add(off).readS32());
+            return Math.trunc(getFunctions().LogicGameObjectClient_getX(obj));
+        } catch {
+            return 0;
+        }
+    }
+
+    #posY(obj) {
+        try {
+            return Math.trunc(getFunctions().LogicGameObjectClient_getY(obj));
         } catch {
             return 0;
         }
@@ -320,8 +328,8 @@ class Scanner {
     #newProjectileEntry(projectile, data, now) {
         let radius = this.#readProjectileRadius(data);
         if (!(radius > 0)) radius = defaultProjectileRadius;
-        const x = this.#fieldS32(projectile, offsets.LogicGameObjectClient_x);
-        const y = this.#fieldS32(projectile, offsets.LogicGameObjectClient_y);
+        const x = this.#posX(projectile);
+        const y = this.#posY(projectile);
         const spawnReady = x !== 0 || y !== 0;
         const target = this.#readProjectileTarget(projectile, x, y);
         let isIndirect = this.#dataU8(data, offsets.LogicProjectileData_indirect);
@@ -607,8 +615,8 @@ class Scanner {
     }
 
     #refreshEntry(entry, gid, now, output) {
-        const x = this.#fieldS32(entry.ptr, offsets.LogicGameObjectClient_x);
-        const y = this.#fieldS32(entry.ptr, offsets.LogicGameObjectClient_y);
+        const x = this.#posX(entry.ptr);
+        const y = this.#posY(entry.ptr);
         this.#sampleEntryMotion(entry, x, y, now);
         entry.lastX = x;
         entry.lastY = y;
@@ -661,8 +669,8 @@ class Scanner {
         this.#friendlyIdx.add(this.state.myPlayerIndex);
         this.#charsByIndex.clear();
         this.#rememberCharacter(this.state.myPlayerIndex, own);
-        this.state.myX = this.#fieldS32(own, offsets.LogicGameObjectClient_x);
-        this.state.myY = this.#fieldS32(own, offsets.LogicGameObjectClient_y);
+        this.state.myX = this.#posX(own);
+        this.state.myY = this.#posY(own);
         this.state.mySpeed = 0;
         const ownData = this.dataFieldOf(own);
         if (!isValidPtr(ownData)) return;
@@ -733,8 +741,8 @@ class Scanner {
         return {
             gid: this.#ptrKey(obj),
             ptr: obj,
-            x: this.#fieldS32(obj, offsets.LogicGameObjectClient_x),
-            y: this.#fieldS32(obj, offsets.LogicGameObjectClient_y),
+            x: this.#posX(obj),
+            y: this.#posY(obj),
             brawlerName,
             body: obj,
             teamId: this.#teamOf(obj, bm),
