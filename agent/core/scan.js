@@ -234,17 +234,6 @@ class Scanner {
         return this.#isEnemyOf(obj, this.state.battleModeClient, false);
     }
 
-    #roundDiv(a, b) {
-        if (b === 0) return 0;
-        return Math.round(a / b);
-    }
-
-    travelTicks(rangeUnits, speed, beam) {
-        if (beam) return beamTicks;
-        if (!(rangeUnits > 0) || !(speed > 0)) return 0;
-        return Math.max(1, this.#roundDiv(rangeUnits * ticksPerSec, speed));
-    }
-
     travelDistance(ticks, speed) {
         if (!(ticks > 0) || ticks >= beamTicks || !(speed > 0)) return 0;
         return Math.round((ticks * speed) / ticksPerSec);
@@ -1266,8 +1255,6 @@ export const dataOf = (obj) => scanner.dataOf(obj);
 export const moveAppliedSince = (x, y, ms) => scanner.moveAppliedSince(x, y, ms);
 export const inputSentSince = (x, y, ms) => scanner.inputSentSince(x, y, ms);
 export const isEnemyObject = (obj) => scanner.isEnemyObject(obj);
-export const travelTicks = (rangeUnits, speed, beam) =>
-    scanner.travelTicks(rangeUnits, speed, beam);
 export const travelDistance = (ticks, speed) => scanner.travelDistance(ticks, speed);
 export const travelTicksFor = (data, rangeUnits, speed) =>
     scanner.travelTicksFor(data, rangeUnits, speed);

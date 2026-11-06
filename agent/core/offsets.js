@@ -33,8 +33,6 @@ export const offsets = Object.freeze({
     LogicProjectileClient_isBeamCopy: 0x21c,
     LogicProjectileClient_stunMs: 0x220,
     LogicProjectileClient_effectMs: 0x228,
-
-    LogicProjectileData_reader: 0x68,
     LogicProjectileData_indirect: 0x108,
     LogicProjectileData_gravity: 0x118,
     LogicProjectileData_isHomingMissileField: 0x11e,
@@ -114,8 +112,6 @@ export const offsets = Object.freeze({
     LogicGameObjectClient_getX: 0xa23afc,
     LogicGameObjectClient_getY: 0xa23b04,
     LogicGameObjectClient_getData: 0x117050,
-
-    LogicCharacterData_getSpeed: 0x9911ec,
     LogicCharacterData_getCollisionRadius: 0x9913e8,
     LogicCharacterData_getProjectileStartRadius: 0x9917d0,
     LogicCharacterClient_getWeaponSkill: 0x9fc440,
@@ -125,21 +121,9 @@ export const offsets = Object.freeze({
 
     LogicProjectileClient_getTargetX: 0x9cdaac,
     LogicProjectileClient_getTargetY: 0x9cdab4,
-    LogicProjectileData_isBeam: 0x9cda6c,
-    LogicProjectileData_piercesEnvironment: 0x9cda94,
-    LogicProjectileData_isHomingMissile: 0x9cdd40,
-    LogicProjectileData_isBouncing: 0x9cda84,
-    LogicProjectileData_getPreExplosionTimeMs: 0x9cdd08,
-    LogicProjectileData_getUniqueProperty: 0x9cdd70,
     LogicProjectileClient_getTravelTicks: 0xa3192c,
     LogicProjectileClient_decode: 0xa314e0,
-
-    LogicProjectileData_getSpeed: 0x9cd834,
-    LogicProjectileData_getRadius: 0x9cd894,
     LogicProjectileData_createReferences: 0x9cb388,
-    LogicProjectileData_getIntValueFromColumn: 0x9cd5e0,
-    LogicProjectileData_getBoolValueFromColumn: 0x9cd678,
-    LogicProjectileData_getBoolValueFromColumn2: 0x9cd710,
     LogicProjectileData_getTravelType: 0x9cdd48,
 
     LogicSkillData_getSpread: 0x9dec84,
@@ -148,12 +132,7 @@ export const offsets = Object.freeze({
     LogicSkillData_createReferences: 0x9dd114,
 
     LogicCharacterData_createReferences: 0x993660,
-    LogicCharacterClient_getMoveAngle: 0x9fbf50,
     LogicCharacterClient_decode: 0x9f9b44,
-
-    LogicData_getBooleanValueAt: 0xbc6dec,
-    LogicData_getIntegerValueAt: 0xbc6dfc,
-    CalculateProjectilePath: 0x7b3ae8,
 
     LogicData_getName: 0x9a4f1c,
 
