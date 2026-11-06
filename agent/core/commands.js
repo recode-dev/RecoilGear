@@ -20,7 +20,7 @@ class CommandSigner {
     #outerMask = null;
     #skillTypeTable = null;
     #priorityTable = null;
-    #fallbackType = 0xDEADBEEF;
+    #fallbackType = 0xdeadbeef;
     #lastToken = 0;
 
     #bytesAt(address, size) {
