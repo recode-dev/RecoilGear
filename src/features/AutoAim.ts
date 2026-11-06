@@ -349,7 +349,7 @@ class AutoAim {
     #ownProjectileData(own: NativePointer): NativePointer | null {
         const fns = getFunctions();
         const skill = fns.LogicCharacterClient_getWeaponSkill(own);
-        const data = skill && !skill.isNull() ? fns.LogicSkillData_getProjectileData(skill) : null;
+        const data = !skill.isNull() ? fns.LogicSkillData_getProjectileData(skill) : null;
         return data && !data.isNull() ? data : null;
     }
 
@@ -484,14 +484,14 @@ class AutoAim {
     }
 
     #aimAt(enemy: EnemyInfo, now: number): AimPoint | null {
-        if (!enemy || !enemy.ptr || enemy.ptr.isNull()) return null;
+        if (enemy.ptr.isNull()) return null;
         const pos = this.#targetPos(enemy);
         if (!pos) return null;
         const mx = scanData.myX;
         const my = scanData.myY;
         const speed = this.#ownProjectileSpeed();
         const pred =
-            this.#sample(enemy, pos.x, pos.y, now) ||
+            this.#sample(enemy, pos.x, pos.y, now) ??
             ({ x: pos.x, y: pos.y, vx: 0, vy: 0, ax: 0, ay: 0 } as Prediction);
         pred.radius = Math.trunc(enemy.radius);
         const aim = this.#solve(pred, speed, this.#ownRange());
@@ -505,10 +505,9 @@ class AutoAim {
 
     #enemyByPtr(candidate: NativePointer | null): EnemyInfo | null {
         if (!candidate || candidate.isNull()) return null;
-        const list = scanData.enemies || [];
+        const list = scanData.enemies;
         for (const enemy of list) {
-            if (enemy && enemy.ptr && !enemy.ptr.isNull() && enemy.ptr.equals(candidate))
-                return enemy;
+            if (!enemy.ptr.isNull() && enemy.ptr.equals(candidate)) return enemy;
         }
         return null;
     }
@@ -534,7 +533,7 @@ class AutoAim {
     }
 
     #enemyEligible(enemy: EnemyInfo, mx: number, my: number): boolean {
-        if (!enemy || !enemy.ptr || enemy.ptr.isNull()) return false;
+        if (enemy.ptr.isNull()) return false;
         if (enemy.kind !== "player") return false;
         if (this.#isSkipped(enemy.brawlerName)) return false;
         const pocketR = this.#ownShotR > 0 ? this.#ownShotR : 40;
@@ -569,7 +568,7 @@ class AutoAim {
     }
 
     #pickTarget(now: number): EnemyInfo | null {
-        const list = scanData.enemies || [];
+        const list = scanData.enemies;
         const mx = scanData.myX;
         const my = scanData.myY;
         const speed = this.#ownProjectileSpeed();
@@ -582,7 +581,7 @@ class AutoAim {
         for (const enemy of list) {
             if (!this.#enemyEligible(enemy, mx, my)) continue;
             const pred =
-                this.#sample(enemy, enemy.x, enemy.y, now) ||
+                this.#sample(enemy, enemy.x, enemy.y, now) ??
                 ({ x: enemy.x, y: enemy.y, vx: 0, vy: 0, ax: 0, ay: 0 } as Prediction);
             pred.radius = Math.trunc(enemy.radius);
             const dist = distance(enemy.x, enemy.y, mx, my);

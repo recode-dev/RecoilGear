@@ -217,11 +217,11 @@ class Scanner {
     }
 
     #isEnemyOf(obj: NativePointer, unknownAsEnemy: boolean): boolean {
-        if (!isValidPtr(obj)) return unknownAsEnemy === true;
+        if (!isValidPtr(obj)) return unknownAsEnemy;
         try {
             return getFunctions().LogicGamePlayUtil_isEnemy(obj) !== 0;
         } catch {
-            return unknownAsEnemy === true;
+            return unknownAsEnemy;
         }
     }
 
@@ -300,7 +300,8 @@ class Scanner {
 
     #weaponForOwner(ownerIndex: number): WeaponStats | null {
         if (ownerIndex < 0) return null;
-        if (this.#weaponMeta.has(ownerIndex)) return this.#weaponMeta.get(ownerIndex)!;
+        const cached = this.#weaponMeta.get(ownerIndex);
+        if (cached) return cached;
         const owner = this.#charsByIndex.get(ownerIndex);
         if (!isValidPtr(owner)) return null;
         const out: WeaponStats = { spread: 0, bullets: 0, msBetween: 0 };
@@ -435,7 +436,7 @@ class Scanner {
     }
 
     onDataReload(callback: () => void): void {
-        if (typeof callback === "function") this.#reloadCallbacks.push(callback);
+        this.#reloadCallbacks.push(callback);
     }
 
     #notifyDataReload(): void {
@@ -544,10 +545,10 @@ class Scanner {
 
     #badOwner(resolved: NativePointer, entry: ProjectileEntry): boolean {
         if (!isValidPtr(resolved) || resolved.equals(entry.ptr)) return true;
+        const base = this.#moduleBase;
+        if (!base) return false;
         try {
-            return resolved
-                .readPointer()
-                .equals(this.#moduleBase!.add(OFFSETS.LogicProjectileClient_vtable));
+            return resolved.readPointer().equals(base.add(OFFSETS.LogicProjectileClient_vtable));
         } catch {
             return false;
         }
@@ -595,8 +596,8 @@ class Scanner {
         output.stunMs = entry.stunMs || 0;
         output.silenceMs = entry.silenceMs || 0;
         const weapon = this.#weaponForOwner(entry.ownerIndex);
-        output.volleyBullets = (weapon && weapon.bullets) || 0;
-        output.volleySpread = (weapon && weapon.spread) || 0;
+        output.volleyBullets = (weapon && weapon.bullets) ?? 0;
+        output.volleySpread = (weapon && weapon.spread) ?? 0;
         return output;
     }
 
@@ -641,7 +642,7 @@ class Scanner {
         const flown = this.#traveled(entry, x, y);
         entry.seg = this.#segmentLeft(entry, flown);
         if (!this.#entryVisible(entry, this.#resolveOwner(entry))) return;
-        const o = entry.out || this.#newOutput(entry, gid);
+        const o = entry.out ?? this.#newOutput(entry, gid);
         this.#refreshOutput(entry, o, x, y);
         output.push(o);
     }

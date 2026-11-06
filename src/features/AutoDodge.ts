@@ -169,7 +169,7 @@ class DodgeCore {
 
     #track(list: ProjectileOutput[], now: number): void {
         for (const p of list) {
-            if (!p || !p.gid) continue;
+            if (!p.gid) continue;
             let dir: Vec | null = null;
             const v = Math.hypot(p.vx, p.vy);
             if (v > 1) {
@@ -420,7 +420,7 @@ class DodgeCore {
             const reach = this.#wallReach(px, py, myR, dir);
             if (reach < CFG.STEP_SIZE) continue;
             for (
-                let step = CFG.STEP_SIZE;
+                let step: number = CFG.STEP_SIZE;
                 step <= reach && step <= CFG.MAX_SEARCH_DIST && !(step > nearest);
                 step += CFG.STEP_SIZE
             ) {
@@ -551,7 +551,7 @@ class DodgeCore {
         }
         this.#charSpeed = world.speed > 0 ? world.speed : CFG.CHAR_SPEED;
         const myR = world.radius > 0 ? world.radius : 60;
-        const projectiles = world.projectiles || [];
+        const projectiles = world.projectiles;
         this.#track(projectiles, now);
         this.#choose(px, py, myR);
         if (projectiles.length === 0 && this.#threats.length === 0 && !this.#commit) {
@@ -629,7 +629,7 @@ class AutoDodge {
     #core = new DodgeCore();
 
     #characterCollisionRadius(data: NativePointer): number {
-        if (!data || data.isNull()) return 0;
+        if (data.isNull()) return 0;
         if (
             this.#radiusMemoData !== null &&
             data.equals(this.#radiusMemoData) &&

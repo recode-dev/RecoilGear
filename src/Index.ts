@@ -32,7 +32,7 @@ class RecoilGearAgent {
     }
 
     #tick(bm: NativePointer): void {
-        if (!bm || bm.isNull()) return;
+        if (bm.isNull()) return;
         if (!this.#lastBattle || !this.#lastBattle.equals(bm)) {
             this.#lastBattle = bm;
             resetScannerCache();

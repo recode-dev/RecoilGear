@@ -53,7 +53,6 @@ class CommandSigner {
     #loadSigning(): boolean {
         if (this.#typeTable) return true;
         const base = getBase();
-        if (!base) return false;
         try {
             this.#innerMask = this.#bytesAt(base.add(OFFSETS.ClientInput_hashInnerMask), MASK_SIZE);
             this.#outerMask = this.#bytesAt(base.add(OFFSETS.ClientInput_hashOuterMask), MASK_SIZE);
@@ -74,25 +73,29 @@ class CommandSigner {
         }
     }
 
-    #typeConstBytes(type: number): Uint8Array {
-        const raw = this.#typeTable![type];
+    #typeConstBytes(table: Uint32Array, type: number): Uint8Array {
+        const raw = table[type];
         return new Uint8Array([raw & 0xff, (raw >>> 16) & 0xff, 0, 0]);
     }
 
     #signClientInput(input: NativePointer, battle: NativePointer): number {
-        if (!input || input.isNull()) return 0;
-        if (!battle || battle.isNull()) return 0;
+        if (input.isNull()) return 0;
+        if (battle.isNull()) return 0;
         try {
             if (battle.add(OFFSETS.BattleMode_hashEnabled).readU8() !== 1) return 0;
             if (!this.#loadSigning()) return 0;
+            const innerMask = this.#innerMask;
+            const outerMask = this.#outerMask;
+            const typeTable = this.#typeTable;
+            if (!innerMask || !outerMask || !typeTable) return 0;
             const secrets = {
                 key16: this.#bytesAt(battle.add(OFFSETS.BattleMode_hashKey), MASK_SIZE),
-                maskIn: this.#innerMask!,
-                maskOut: this.#outerMask!,
+                maskIn: innerMask,
+                maskOut: outerMask,
             };
             const snapshot = this.#bytesAt(input.add(DATA16_OFFSET), MASK_SIZE);
             const type = input.add(OFFSETS.ClientInput_type).readU32() >>> 0;
-            const value = inputToken(secrets, this.#typeConstBytes(type), snapshot);
+            const value = inputToken(secrets, this.#typeConstBytes(typeTable, type), snapshot);
             input.add(OFFSETS.ClientInput_token).writeU32(value);
             return value;
         } catch {
@@ -104,11 +107,11 @@ class CommandSigner {
         try {
             const fns = getFunctions();
             const battle = fns.BattleMode_getInstance();
-            if (!battle || battle.isNull()) return false;
+            if (battle.isNull()) return false;
             const mgr = battle.add(OFFSETS.BattleMode_clientInputManager).readPointer();
-            if (!mgr || mgr.isNull()) return false;
+            if (mgr.isNull()) return false;
             const ci = fns.operator_new(CMD_BUF_SIZE);
-            if (!ci || ci.isNull()) return false;
+            if (ci.isNull()) return false;
             ci.writeByteArray(this.#zeroBuf);
             fns.ClientInput_constructor_int(ci, Math.trunc(cmdType));
             if (fillFn) fillFn(ci, battle);

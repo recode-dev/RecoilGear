@@ -177,12 +177,11 @@ class FunctionTable {
     init(base: NativePointer, image: Module | null): Readonly<NativeFunctions> {
         if (this.#table) return this.#table;
         this.#base = base;
-        this.#image = image || null;
+        this.#image = image;
         const table: Record<string, unknown> = {};
         for (const [key, [name, ret, args]] of Object.entries(NATIVE_SPECS)) {
             const off = OFFSETS[name];
-            if (typeof off !== "number" || off <= 0)
-                throw new Error(`functions: missing offset ${name}`);
+            if (off <= 0) throw new Error(`functions: missing offset ${name}`);
             table[key] = new NativeFunction(this.#base.add(off), ret, args);
         }
         this.#table = Object.freeze(table) as unknown as Readonly<NativeFunctions>;

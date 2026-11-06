@@ -88,7 +88,7 @@ class WallGrid {
         const lo = view.getUint32(i * Process.pointerSize, true);
         const hi = view.getUint32(i * Process.pointerSize + 4, true);
         if (lo === 0 && hi === 0) return 0;
-        let tileType: NativePointer | null = null;
+        let tileType: NativePointer;
         try {
             tileType = ptrFromU32(lo, hi).readPointer();
         } catch {
@@ -168,8 +168,7 @@ class WallGrid {
 
     #pfLookup(query: PfQuery): number {
         if (Date.now() - this.#pfMemoTs > PF_BUCKET_MS) return -1;
-        const hit = this.#pfMemo.get(this.#pfKey(query));
-        return hit === undefined ? -1 : hit;
+        return this.#pfMemo.get(this.#pfKey(query)) ?? -1;
     }
 
     watchTileChanges(base: NativePointer): void {
