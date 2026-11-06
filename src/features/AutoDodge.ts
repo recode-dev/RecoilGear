@@ -8,155 +8,68 @@ import {
     type ProjectileOutput,
     scanData,
 } from "../core/Scan";
-import { firstWallHit, MOVEMENT_BIT, rayHitDistance, type WallsApi } from "../utils/Walls";
 
 const MOVE_INPUT_TYPE = 2;
-const DEG2RAD = Math.PI / 180;
 
-const ANCHOR_RUN = 520;
-const ANCHOR_ARRIVE = 150;
-const SEND_MIN_MS = 200;
-const SEND_MIN_SHIFT = 90;
+const CFG = {
+    SAFETY_MARGIN: 60,
+    MOVING_EXTRA_MARGIN: 20,
+    T_URGENT_MIN: 0.42,
+    T_URGENT_MAX: 0.78,
+    T_FIELD: 1.05,
+    T_RELEASE: 0.2,
+    MIN_CLEARANCE: 70,
+    DODGE_COMMIT_MS: 70,
+    N_DIRECTIONS: 24,
+    STEP_SIZE: 150,
+    MAX_SEARCH_DIST: 1500,
+    ARRIVAL_THRESHOLD: 42,
+    STALE_MS: 300,
+    PERP_WEIGHT: 1.8,
+    AWAY_WEIGHT: 2.2,
+    INTENT_WEIGHT: 1,
+    CHAR_SPEED: 720,
+    LAG_COMPENSATION_S: 0.03,
+    DODGE_RANGE: 900,
+    URGENT_CACHE_MS: 16,
+    URGENT_FAST_SPEED: 1800,
+    URGENT_FAST_BONUS: 0.25,
+} as const;
 
-interface TuneOptions {
-    dirCount: number;
-    horizonS: number;
-    aware: number;
-    skin: number;
-    wallPenalty: number;
-    momentum: number;
-}
-
-const TUNE: TuneOptions = {
-    dirCount: 64,
-    horizonS: 1.2,
-    aware: 3600,
-    skin: 60,
-    wallPenalty: 1500,
-    momentum: 110,
-};
-
-const RING: number[] = [];
-for (let i = 0; i < TUNE.dirCount; i++) RING.push(Math.round((360 * i) / TUNE.dirCount));
-
-const wrap360 = (a: number): number => {
-    const r = a % 360;
-    return r < 0 ? r + 360 : r;
-};
-
-const angDiff = (a: number, b: number): number => {
-    const d = Math.abs(wrap360(a) - wrap360(b));
-    return d > 180 ? 360 - d : d;
-};
-
-const bearingDeg = (dx: number, dy: number): number =>
-    wrap360((Math.atan2(dy, dx) * 180) / Math.PI);
-
-interface StepPoint {
+interface Vec {
     x: number;
     y: number;
 }
 
-interface VelocityPoint {
-    vx: number;
-    vy: number;
-}
-
-interface StickyHazard {
-    kind: "sticky";
-    x: number;
-    y: number;
-    r: number;
-    fuse: number;
+interface ThreatMemory {
     gid: string;
-}
-
-interface ZoneHazard {
-    kind: "zone";
     x: number;
     y: number;
-    r: number;
-    fuse: number;
-    approach: number;
-    gid: string;
-}
-
-interface ConeHazard {
-    kind: "cone";
-    key: string;
-    ax: number;
-    ay: number;
-    bis: number;
-    half: number;
-    range: number;
+    dirX: number;
+    dirY: number;
     speed: number;
-    seg: number;
-    gid: string;
+    radius: number;
+    impactRadius: number;
+    range: number;
+    lastSeen: number;
+    ignored: boolean;
 }
 
-interface LinearHazard {
-    kind: "linear";
+interface Threat extends ThreatMemory {
+    svx: number;
+    svy: number;
+    dx: number;
+    dy: number;
+    rNoMove: number;
+    clipDist: number;
+    clipBlocked: boolean;
+}
+
+interface SafePoint {
     x: number;
     y: number;
-    vx: number;
-    vy: number;
-    hitR: number;
-    left: number;
-    gid: string;
-}
-
-type Hazard = StickyHazard | ZoneHazard | ConeHazard | LinearHazard;
-
-type PointHazard = StickyHazard | ZoneHazard | LinearHazard;
-
-interface ZoneSnapshot {
-    x: number;
-    y: number;
-    r: number;
-    sticky: boolean;
-    fuseMs: number;
-}
-
-interface ZoneMemo {
-    x: number;
-    y: number;
-    r: number;
-    until: number;
-    fuseMs: number;
-}
-
-interface Assessment {
-    danger: boolean;
-    prepMs: number;
-    tMin?: number;
-}
-
-interface HeadingCandidate {
-    deg: number;
-    sep: number;
-}
-
-interface HeadingPick {
-    deg: number;
-    score: number;
-}
-
-interface RetreatPoint {
-    hx: number;
-    hy: number;
-}
-
-interface DodgeCommand {
-    headingDeg: number;
-    anchorX: number;
-    anchorY: number;
-    tx: number;
-    ty: number;
-    sentX: number;
-    sentY: number;
-    lastDangerAt: number;
-    lastCheckAt: number;
-    lastSendAt: number;
+    dist: number;
+    clearance: number;
 }
 
 interface DodgeWorld {
@@ -166,7 +79,6 @@ interface DodgeWorld {
     speed: number;
     radius: number;
     projectiles: ProjectileOutput[];
-    walls: WallsApi;
 }
 
 interface DodgeIdleResult {
@@ -175,693 +87,487 @@ interface DodgeIdleResult {
 
 interface DodgeRunResult {
     active: true;
-    started?: boolean;
     targetX: number;
     targetY: number;
-    headingDeg: number;
     send: boolean;
 }
 
 type DodgeResult = DodgeIdleResult | DodgeRunResult;
 
+const ZERO: Vec = { x: 0, y: 0 };
+
+const RING: Vec[] = [];
+for (let i = 0; i < CFG.N_DIRECTIONS; i++) {
+    const a = (Math.PI * 2 * i) / CFG.N_DIRECTIONS;
+    RING.push({ x: Math.cos(a), y: Math.sin(a) });
+}
+
+const normalize2d = (x: number, y: number): Vec => {
+    const n = Math.sqrt(x * x + y * y);
+    return n < 1e-6 ? { x: 1, y: 0 } : { x: x / n, y: y / n };
+};
+
+const distSqPointToSegment = (
+    px: number,
+    py: number,
+    ax: number,
+    ay: number,
+    bx: number,
+    by: number,
+): number => {
+    const abx = bx - ax;
+    const aby = by - ay;
+    const len = abx * abx + aby * aby;
+    if (len < 1e-10) {
+        const dx = px - ax;
+        const dy = py - ay;
+        return dx * dx + dy * dy;
+    }
+    let t = ((px - ax) * abx + (py - ay) * aby) / len;
+    if (t < 0) t = 0;
+    else if (t > 1) t = 1;
+    const cx = ax + t * abx;
+    const cy = ay + t * aby;
+    const dx = px - cx;
+    const dy = py - cy;
+    return dx * dx + dy * dy;
+};
+
 class DodgeCore {
-    #walls: WallsApi | null = null;
-    #world: Pick<DodgeWorld, "projectiles"> = { projectiles: [] };
-    #myR = 60;
-    #myX = 0;
-    #myY = 0;
-    #speed = 0;
-    #now = 0;
-    #cmd: DodgeCommand | null = null;
-    #curDeg = NaN;
-    #lastDeg = NaN;
-    #lastActiveAt = 0;
-    #zoneMem = new Map<string, ZoneMemo>();
-    #lastZones = new Map<string, ZoneSnapshot>();
+    #mem = new Map<string, ThreatMemory>();
+    #threats: Threat[] = [];
+    #maxSpeed = 0;
+    #charSpeed: number = CFG.CHAR_SPEED;
 
-    #dist(ax: number, ay: number, bx: number, by: number): number {
-        return Math.hypot(bx - ax, by - ay);
+    #commit: Vec | null = null;
+    #commitUntil = 0;
+    #safeX = 0;
+    #safeY = 0;
+    #lastDir: Vec | null = null;
+
+    #urgentValue = 0;
+    #urgentAt = 0;
+
+    #impactRadius(radius: number, speed: number): number {
+        if (speed > 0 && speed < 1200 && radius > 0 && radius < 120)
+            return Math.min(220, radius * 2.25);
+        return radius || 8;
     }
 
-    #classify(shot: ProjectileOutput): "sticky" | "zone" | "cone" | "linear" {
-        const travelType = Math.trunc(shot.travelType);
-        const indirect = !!shot.isIndirect || travelType > 0 || Math.trunc(shot.gravity) > 0;
-        const delayed = Math.trunc(shot.triggerMs) > 0 || !!shot.attachArea;
-        if (delayed) return "sticky";
-        if (indirect || !!shot.trail) return "zone";
-        const vb = Math.trunc(shot.volleyBullets);
-        const vs = Math.trunc(shot.volleySpread);
-        const control = Math.trunc(shot.stunMs) > 0 || Math.trunc(shot.silenceMs) > 0;
-        if (vb >= 2 && vs >= 60) return "cone";
-        if (vb >= 3 && vs >= 10 && control) return "cone";
-        return "linear";
+    #ignored(p: ProjectileOutput): boolean {
+        if (Math.trunc(p.travelType) === 6) return true;
+        if (Math.trunc(p.gravity) > 0) return true;
+        return !!p.isIndirect;
     }
 
-    #blastRadius(shot: ProjectileOutput): number {
-        const r = Math.trunc(shot.radius) > 0 ? Math.trunc(shot.radius) : 110;
-        return r >= 110 ? r * 1.02 : 110 * 1.15;
-    }
-
-    #linearVelocity(shot: ProjectileOutput): VelocityPoint | null {
-        let vx = shot.vx;
-        let vy = shot.vy;
-        if (!isFinite(vx) || !isFinite(vy)) {
-            vx = 0;
-            vy = 0;
-        }
-        if (Math.hypot(vx, vy) > 1) return { vx, vy };
-        if (shot.hasTarget) {
-            const dx = shot.targetX - shot.x;
-            const dy = shot.targetY - shot.y;
-            const d = Math.hypot(dx, dy);
-            if (d > 1 && Math.trunc(shot.speed) > 0)
-                return { vx: (dx / d) * shot.speed, vy: (dy / d) * shot.speed };
-        }
-        const dx = shot.x - shot.spawnX;
-        const dy = shot.y - shot.spawnY;
-        const d = Math.hypot(dx, dy);
-        if (d > 8 && Math.trunc(shot.speed) > 0)
-            return { vx: (dx / d) * shot.speed, vy: (dy / d) * shot.speed };
-        return null;
-    }
-
-    #stickyHazard(shot: ProjectileOutput): StickyHazard {
-        const r = this.#blastRadius(shot);
-        const flightS =
-            Math.trunc(shot.seg0) > 0 && Math.trunc(shot.speed) > 0 ? shot.seg0 / shot.speed : 0;
-        const fuseS = Math.max(
-            0.4,
-            Math.trunc(shot.triggerMs) / 1000 -
-                Math.max(0, Math.trunc(shot.ageMs) / 1000 - flightS),
-        );
-        this.#lastZones.set(shot.gid, {
-            x: shot.x,
-            y: shot.y,
-            r,
-            sticky: true,
-            fuseMs: fuseS * 1000,
-        });
-        return { kind: "sticky", x: shot.x, y: shot.y, r, fuse: fuseS, gid: shot.gid };
-    }
-
-    #zoneLanding(shot: ProjectileOutput): StepPoint {
-        const dx = shot.targetX - shot.x;
-        const dy = shot.targetY - shot.y;
-        const dd = Math.hypot(dx, dy);
-        const k = dd > 1 ? Math.min(1, shot.seg / dd) : 1;
-        return { x: shot.x + dx * k, y: shot.y + dy * k };
-    }
-
-    #zoneDrift(shot: ProjectileOutput): StepPoint | null {
-        const velocity = this.#linearVelocity(shot);
-        const spd = velocity ? Math.hypot(velocity.vx, velocity.vy) : 0;
-        if (!(spd > 1)) return null;
-        const k = Math.min(1, shot.seg / spd);
-        return { x: shot.x + velocity!.vx * k, y: shot.y + velocity!.vy * k };
-    }
-
-    #zoneHazard(shot: ProjectileOutput): ZoneHazard {
-        const r = this.#blastRadius(shot);
-        const fuseS = Math.trunc(shot.preMs) / 1000;
-        let lx = shot.x;
-        let ly = shot.y;
-        let approach = 0;
-        if (Math.trunc(shot.seg) > 0 && Math.trunc(shot.speed) > 0) {
-            const landing = shot.hasTarget ? this.#zoneLanding(shot) : this.#zoneDrift(shot);
-            if (landing) {
-                lx = landing.x;
-                ly = landing.y;
+    #track(list: ProjectileOutput[], now: number): void {
+        for (const p of list) {
+            if (!p || !p.gid) continue;
+            let dir: Vec | null = null;
+            const v = Math.hypot(p.vx, p.vy);
+            if (v > 1) {
+                dir = { x: p.vx / v, y: p.vy / v };
+            } else if (p.hasTarget) {
+                const dx = p.targetX - p.x;
+                const dy = p.targetY - p.y;
+                const d = Math.hypot(dx, dy);
+                if (d > 1) dir = { x: dx / d, y: dy / d };
             }
-            approach = shot.seg / shot.speed;
-        }
-        this.#lastZones.set(shot.gid, { x: lx, y: ly, r, sticky: false, fuseMs: 0 });
-        return { kind: "zone", x: lx, y: ly, r, fuse: fuseS, approach, gid: shot.gid };
-    }
-
-    #coneKey(shot: ProjectileOutput): string {
-        return `${shot.ownerIndex}:${Math.trunc(shot.spawnX)}:${Math.trunc(shot.spawnY)}`;
-    }
-
-    #coneReach(shot: ProjectileOutput): number {
-        const flownFromApex = this.#dist(shot.spawnX, shot.spawnY, shot.x, shot.y);
-        if (Math.trunc(shot.seg) > 0) return flownFromApex + shot.seg;
-        if (Math.trunc(shot.seg0) > 0) return shot.seg0 + 60;
-        return Math.min(
-            TUNE.aware,
-            this.#dist(shot.spawnX, shot.spawnY, this.#myX, this.#myY) + 400,
-        );
-    }
-
-    #coneHazard(shot: ProjectileOutput, list: Hazard[]): void {
-        const key = this.#coneKey(shot);
-        for (const existing of list) {
-            if (existing.kind !== "cone" || existing.key !== key) continue;
-            const reach = this.#coneReach(shot);
-            existing.range = Math.max(existing.range, reach);
-            if (Math.trunc(shot.seg) > 0)
-                existing.seg = existing.seg < 0 ? shot.seg : Math.min(existing.seg, shot.seg);
-            return;
-        }
-        const half = Math.trunc(shot.volleySpread) / 2 + 8;
-        const observedSpeed = Math.hypot(shot.vx, shot.vy);
-        list.push({
-            kind: "cone",
-            key,
-            ax: shot.spawnX,
-            ay: shot.spawnY,
-            bis: bearingDeg(this.#myX - shot.spawnX, this.#myY - shot.spawnY),
-            half: half * DEG2RAD,
-            range: this.#coneReach(shot),
-            speed: Math.max(1, observedSpeed > 1 ? observedSpeed : Math.trunc(shot.speed)),
-            seg: Math.trunc(shot.seg) > 0 ? shot.seg : -1,
-            gid: shot.gid,
-        });
-    }
-
-    #pathHazard(shot: ProjectileOutput): ZoneHazard | LinearHazard {
-        const velocity = this.#linearVelocity(shot);
-        const stun = Math.trunc(shot.stunMs) > 0 || Math.trunc(shot.silenceMs) > 0;
-        const hitR = Math.trunc(shot.radius) + this.#myR + (stun ? 70 : 0);
-        if (!velocity) {
-            return {
-                kind: "zone",
-                x: shot.x,
-                y: shot.y,
-                r: Math.max(hitR + TUNE.skin, 110),
-                fuse: 0,
-                approach: 0,
-                gid: shot.gid,
-            };
-        }
-        return {
-            kind: "linear",
-            x: shot.x,
-            y: shot.y,
-            vx: velocity.vx,
-            vy: velocity.vy,
-            hitR,
-            left: Math.trunc(shot.seg) > 0 ? shot.seg : -1,
-            gid: shot.gid,
-        };
-    }
-
-    #collectShots(seen: Set<string>): Hazard[] {
-        const list: Hazard[] = [];
-        const shots = this.#world.projectiles || [];
-        for (const shot of shots) {
-            if (!shot || !shot.gid) continue;
-            if (this.#dist(shot.x, shot.y, this.#myX, this.#myY) > TUNE.aware) continue;
-            seen.add(shot.gid);
-            const kind = this.#classify(shot);
-            if (kind === "sticky") list.push(this.#stickyHazard(shot));
-            else if (kind === "zone") list.push(this.#zoneHazard(shot));
-            else if (kind === "cone" && Math.trunc(shot.volleySpread) > 0)
-                this.#coneHazard(shot, list);
-            else list.push(this.#pathHazard(shot));
-        }
-        return list;
-    }
-
-    #forgetZones(seen: Set<string>): void {
-        for (const [gid, zone] of this.#lastZones) {
-            if (seen.has(gid)) continue;
-            this.#lastZones.delete(gid);
-            let memoX = zone.x;
-            let memoY = zone.y;
-            if (
-                zone.sticky &&
-                this.#dist(zone.x, zone.y, this.#myX, this.#myY) <= zone.r + this.#myR + 150
-            ) {
-                memoX = this.#myX;
-                memoY = this.#myY;
+            if (!dir) {
+                const dx = p.x - p.spawnX;
+                const dy = p.y - p.spawnY;
+                const d = Math.hypot(dx, dy);
+                if (d > 5) dir = { x: dx / d, y: dy / d };
             }
-            this.#zoneMem.set(gid, {
-                x: memoX,
-                y: memoY,
-                r: zone.r,
-                until: this.#now + (zone.sticky ? Math.max(500, zone.fuseMs || 0) : 3500),
-                fuseMs: zone.sticky ? Math.max(0, zone.fuseMs || 0) : 0,
+            const speed = Math.max(100, Math.trunc(p.speed) || 1200);
+            const radius = Math.max(1, Math.trunc(p.radius) || 8);
+            const range = Math.trunc(p.seg) > 0 ? Math.trunc(p.seg) : 9000;
+            const mem = this.#mem.get(p.gid);
+            if (mem) {
+                if (dir) {
+                    mem.dirX = dir.x;
+                    mem.dirY = dir.y;
+                }
+                mem.speed = speed;
+                mem.radius = radius;
+                mem.impactRadius = Math.max(radius, this.#impactRadius(radius, speed));
+                mem.range = range;
+                mem.x = p.x;
+                mem.y = p.y;
+                mem.lastSeen = now;
+                continue;
+            }
+            if (!dir) continue;
+            this.#mem.set(p.gid, {
+                gid: p.gid,
+                x: p.x,
+                y: p.y,
+                dirX: dir.x,
+                dirY: dir.y,
+                speed,
+                radius,
+                impactRadius: Math.max(radius, this.#impactRadius(radius, speed)),
+                range,
+                lastSeen: now,
+                ignored: this.#ignored(p),
+            });
+        }
+        for (const [gid, mem] of this.#mem) {
+            if (now - mem.lastSeen > CFG.STALE_MS) this.#mem.delete(gid);
+        }
+    }
+
+    #choose(x: number, y: number, myR: number): void {
+        this.#threats.length = 0;
+        this.#maxSpeed = 0;
+        const base = myR + CFG.SAFETY_MARGIN;
+        for (const mem of this.#mem.values()) {
+            if (mem.ignored) continue;
+            if (mem.speed > this.#maxSpeed) this.#maxSpeed = mem.speed;
+            this.#threats.push({
+                ...mem,
+                svx: mem.dirX * mem.speed,
+                svy: mem.dirY * mem.speed,
+                dx: mem.x - x,
+                dy: mem.y - y,
+                rNoMove: base + (mem.impactRadius || mem.radius),
+                clipDist: Infinity,
+                clipBlocked: false,
             });
         }
     }
 
-    #memoHazards(): Hazard[] {
-        const list: Hazard[] = [];
-        for (const [gid, zone] of this.#zoneMem) {
-            if (zone.until <= this.#now) {
-                this.#zoneMem.delete(gid);
-                continue;
-            }
-            if (zone.fuseMs > 0) {
-                list.push({
-                    kind: "sticky",
-                    x: zone.x,
-                    y: zone.y,
-                    r: zone.r,
-                    fuse: (zone.until - this.#now) / 1000,
-                    gid,
-                });
-            } else {
-                if (
-                    this.#dist(zone.x, zone.y, this.#myX, this.#myY) >
-                    zone.r + this.#myR + TUNE.skin
-                )
-                    continue;
-                list.push({
-                    kind: "zone",
-                    x: zone.x,
-                    y: zone.y,
-                    r: zone.r,
-                    fuse: 0,
-                    approach: 0,
-                    gid,
-                });
-            }
-        }
-        return list;
-    }
-
-    #collectHazards(): Hazard[] {
-        const seen = new Set<string>();
-        const list = this.#collectShots(seen);
-        this.#forgetZones(seen);
-        for (const h of this.#memoHazards()) list.push(h);
-        return list;
-    }
-
-    #linearTimeToHurt(h: LinearHazard): number {
-        const spd = Math.hypot(h.vx, h.vy);
-        if (!(spd > 1)) return this.#dist(h.x, h.y, this.#myX, this.#myY) <= h.hitR ? 0 : Infinity;
-        const closing = (this.#myX - h.x) * h.vx + (this.#myY - h.y) * h.vy;
-        if (closing <= 0) return Infinity;
-        const gap = this.#dist(h.x, h.y, this.#myX, this.#myY) - h.hitR;
-        const t = gap > 0 ? gap / spd : 0;
-        if (h.left > 0 && t * spd > h.left + 1) return Infinity;
+    #perform(threat: Threat, px: number, py: number, myR: number, dir: Vec, tMax: number): number {
+        if (threat.ignored) return -1;
+        const vx = dir.x * this.#charSpeed;
+        const vy = dir.y * this.#charSpeed;
+        const moving = dir.x !== 0 || dir.y !== 0;
+        const reach =
+            myR +
+            (threat.impactRadius || threat.radius) +
+            CFG.SAFETY_MARGIN +
+            (moving ? CFG.MOVING_EXTRA_MARGIN : 0);
+        const tx = threat.x + threat.svx * CFG.LAG_COMPENSATION_S;
+        const ty = threat.y + threat.svy * CFG.LAG_COMPENSATION_S;
+        const gx = tx - px;
+        const gy = ty - py;
+        if (gx * gx + gy * gy <= reach * reach) return 0;
+        const rx = threat.svx - vx;
+        const ry = threat.svy - vy;
+        const a = rx * rx + ry * ry;
+        if (a < 1e-6) return -1;
+        const b = 2 * (gx * rx + gy * ry);
+        const c = gx * gx + gy * gy - reach * reach;
+        const disc = b * b - 4 * a * c;
+        if (disc < 0) return -1;
+        const root = Math.sqrt(disc);
+        const t0 = (-b - root) / (2 * a);
+        if ((-b + root) / (2 * a) < 0) return -1;
+        const t = t0 >= 0 ? t0 : 0;
+        if (t > tMax) return -1;
+        if (
+            threat.clipBlocked &&
+            isFinite(threat.clipDist) &&
+            threat.speed * (t + CFG.LAG_COMPENSATION_S) >
+                threat.clipDist + (threat.impactRadius || threat.radius)
+        )
+            return -1;
         return t;
     }
 
-    #coneTimeToHurt(h: ConeHazard): number {
-        const d = this.#dist(h.ax, h.ay, this.#myX, this.#myY);
-        if (d > h.range) return Infinity;
-        if (angDiff(bearingDeg(this.#myX - h.ax, this.#myY - h.ay), h.bis) > h.half + 1e-6)
-            return Infinity;
-        if (h.seg > 0) return h.seg / Math.max(1, h.speed);
-        return d / Math.max(1, h.speed);
-    }
-
-    #stickyTimeToHurt(h: StickyHazard): number {
-        const d = this.#dist(h.x, h.y, this.#myX, this.#myY);
-        if (d <= h.r + 20) return 0;
-        return h.fuse;
-    }
-
-    #timeToHurt(h: Hazard): number {
-        if (h.kind === "linear") return this.#linearTimeToHurt(h);
-        if (h.kind === "cone") return this.#coneTimeToHurt(h);
-        if (h.kind === "sticky") return this.#stickyTimeToHurt(h);
-        return Math.max(h.approach, 0) + h.fuse;
-    }
-
-    #clearanceNeed(h: Hazard): number {
-        if (h.kind === "linear") return h.hitR + TUNE.skin;
-        if (h.kind === "cone") {
-            const d = this.#dist(h.ax, h.ay, this.#myX, this.#myY);
-            const lateral = d * Math.sin(h.half);
-            const radial = Math.max(0, h.range - d);
-            return Math.min(lateral, radial) + TUNE.skin;
-        }
-        const d = this.#dist(h.x, h.y, this.#myX, this.#myY);
-        return Math.max(60, h.r + TUNE.skin - d);
-    }
-
-    #assess(hazards: Hazard[]): Assessment {
-        if (!hazards.length) return { danger: false, prepMs: 0 };
-        let tMin = Infinity;
-        let maxNeed = 0;
-        for (const h of hazards) {
-            const t = this.#timeToHurt(h);
-            if (t < tMin) tMin = t;
-            const need = this.#clearanceNeed(h);
-            if (need > maxNeed) maxNeed = need;
-        }
-        const prepMs = Math.round((maxNeed / this.#speed) * 1000 * 1.35) + 90;
-        return { danger: tMin <= prepMs / 1000, prepMs, tMin };
-    }
-
-    #wallRoom(deg: number): number {
-        const rad = deg * DEG2RAD;
-        const ex = this.#myX + Math.cos(rad) * 1000;
-        const ey = this.#myY + Math.sin(rad) * 1000;
-        let hit = this.#walls!.firstWallHit(this.#myX, this.#myY, ex, ey, this.#myR > 200 ? 2 : 1);
-        if (hit < 0) {
-            hit = this.#walls!.rayHitDistance(this.#myX, this.#myY, ex, ey, {
-                radius: this.#myR,
-                bit: this.#walls!.movementBit,
-            });
-        }
-        if (hit < 0) return 1000;
-        if (hit >= 1000) return 1000;
-        return Math.max(0, hit - this.#myR - 40);
-    }
-
-    #anchor(deg: number): StepPoint | null {
-        const room = this.#wallRoom(deg);
-        if (room <= 240) return null;
-        const run = Math.min(room - 40, ANCHOR_RUN);
-        const rad = deg * DEG2RAD;
-        return { x: this.#myX + Math.cos(rad) * run, y: this.#myY + Math.sin(rad) * run };
-    }
-
-    #placeAnchor(cmd: DodgeCommand): void {
-        this.#curDeg = this.#slewDeg(cmd.headingDeg);
-        const room = this.#wallRoom(this.#curDeg);
-        const run = Math.max(180, Math.min(room - 40, ANCHOR_RUN));
-        const rad = this.#curDeg * DEG2RAD;
-        cmd.anchorX = this.#myX + Math.cos(rad) * run;
-        cmd.anchorY = this.#myY + Math.sin(rad) * run;
-        cmd.tx = cmd.anchorX;
-        cmd.ty = cmd.anchorY;
-    }
-
-    #extendAnchor(cmd: DodgeCommand): void {
-        const rad = this.#curDeg * DEG2RAD;
-        cmd.anchorX += Math.cos(rad) * ANCHOR_RUN;
-        cmd.anchorY += Math.sin(rad) * ANCHOR_RUN;
-        cmd.tx = cmd.anchorX;
-        cmd.ty = cmd.anchorY;
-    }
-
-    #shouldSend(cmd: DodgeCommand): boolean {
-        if (this.#now - cmd.lastSendAt < 90) return false;
-        const shift = this.#dist(cmd.tx, cmd.ty, cmd.sentX, cmd.sentY);
-        if (shift < SEND_MIN_SHIFT && this.#now - cmd.lastSendAt < SEND_MIN_MS) return false;
-        cmd.lastSendAt = this.#now;
-        cmd.sentX = cmd.tx;
-        cmd.sentY = cmd.ty;
-        return true;
-    }
-
-    #wedgeSep(h: ConeHazard, px: number, py: number): number {
-        const dx = px - h.ax;
-        const dy = py - h.ay;
-        const d = Math.hypot(dx, dy);
-        if (d < 1) return -h.range * 0.3;
-        const a = angDiff(bearingDeg(dx, dy), h.bis);
-        if (a <= h.half + 1e-6) {
-            if (d > h.range) return d - h.range;
-            return -(h.range - d) * 0.3;
-        }
-        return d * Math.sin((a - h.half) * DEG2RAD);
-    }
-
-    #sepPointMin(hazard: PointHazard, wx: number, wy: number, tMax: number): number {
-        const hr = hazard.kind === "linear" ? hazard.hitR : hazard.r;
-        const rx = this.#myX - hazard.x;
-        const ry = this.#myY - hazard.y;
-        const w2 = wx * wx + wy * wy;
-        let t = 0;
-        if (w2 > 1e-6) {
-            const tStar = -(rx * wx + ry * wy) / w2;
-            t = Math.min(Math.max(tStar, 0), tMax);
-        }
-        return Math.hypot(rx + wx * t, ry + wy * t) - hr;
-    }
-
-    #linearSep(hazard: LinearHazard, vx: number, vy: number): number {
-        const spd = Math.hypot(hazard.vx, hazard.vy);
-        let tMax = TUNE.horizonS;
-        if (hazard.left > 0 && spd > 1) tMax = Math.min(tMax, hazard.left / spd);
-        return this.#sepPointMin(hazard, vx - hazard.vx, vy - hazard.vy, tMax);
-    }
-
-    #coneSep(hazard: ConeHazard, vx: number, vy: number): number {
-        let sep = 420;
-        for (let s = 1; s <= 8; s++) {
-            const t = TUNE.horizonS * (s / 8) * (s / 8);
-            const d = this.#wedgeSep(hazard, this.#myX + vx * t, this.#myY + vy * t);
-            if (d < sep) sep = d;
-            if (sep <= -200) break;
-        }
-        return sep;
-    }
-
-    #separationScore(hazards: Hazard[], deg: number): number {
-        const rad = deg * DEG2RAD;
-        const vx = Math.cos(rad) * this.#speed;
-        const vy = Math.sin(rad) * this.#speed;
-        let total = 0;
-        for (const hazard of hazards) {
-            let sep: number;
-            if (hazard.kind === "linear") sep = this.#linearSep(hazard, vx, vy);
-            else if (hazard.kind === "cone") sep = this.#coneSep(hazard, vx, vy);
-            else sep = this.#sepPointMin(hazard, vx, vy, TUNE.horizonS);
-            if (sep < -200) sep = -200;
-            else if (sep > 420) sep = 420;
-            total += sep;
-            if (total <= -600) return total;
-        }
-        return total;
-    }
-
-    #headingScore(cand: HeadingCandidate, room: number, refDeg: number | null): number {
-        let score = cand.sep - (TUNE.wallPenalty * Math.max(0, 1000 - room)) / 1000;
-        if (refDeg != null) score -= (TUNE.momentum * angDiff(cand.deg, refDeg)) / 180;
-        return score;
-    }
-
-    #bestHeading(hazards: Hazard[], refDeg: number | null): HeadingPick | null {
-        const cands: HeadingCandidate[] = [];
-        for (const deg of RING) {
-            cands.push({ deg, sep: this.#separationScore(hazards, deg) });
-        }
-        cands.sort((a, b) => b.sep - a.sep);
-        let outDeg = -1;
-        let outScore = -Infinity;
-        const top = Math.min(cands.length, 6);
-        for (let i = 0; i < top; i++) {
-            const room = this.#wallRoom(cands[i].deg);
-            if (room <= 240) continue;
-            const score = this.#headingScore(cands[i], room, refDeg);
-            if (score > outScore) {
-                outScore = score;
-                outDeg = cands[i].deg;
-            }
-        }
-        return outDeg < 0 ? null : { deg: outDeg, score: outScore };
-    }
-
-    #retreatHeading(hazards: Hazard[]): number {
-        let near: RetreatPoint | null = null;
-        let nd = Infinity;
-        for (const h of hazards) {
-            const hx = h.kind === "cone" ? h.ax : h.x;
-            const hy = h.kind === "cone" ? h.ay : h.y;
-            const d = this.#dist(hx, hy, this.#myX, this.#myY);
-            if (d < nd) {
-                nd = d;
-                near = { hx, hy };
-            }
-        }
-        if (!near) return 0;
-        return wrap360(bearingDeg(this.#myX - near.hx, this.#myY - near.hy));
-    }
-
-    #scoreOf(hazards: Hazard[], deg: number, refDeg: number | null): number {
-        const room = this.#wallRoom(deg);
-        if (room <= 240) return -Infinity;
-        let score = this.#separationScore(hazards, deg);
-        score -= (TUNE.wallPenalty * Math.max(0, 1000 - room)) / 1000;
-        if (refDeg != null) score -= (TUNE.momentum * angDiff(deg, refDeg)) / 180;
-        return score;
-    }
-
-    #snapHeading(away: number): number {
-        let best = RING[0];
-        for (const deg of RING) {
-            if (angDiff(deg, away) < angDiff(best, away)) best = deg;
+    #expire(px: number, py: number, myR: number, dir: Vec, tMax: number): number {
+        let best = -1;
+        for (const threat of this.#threats) {
+            const t = this.#perform(threat, px, py, myR, dir, tMax);
+            if (t < 0) continue;
+            if (best < 0 || t < best) best = t;
         }
         return best;
     }
 
-    #stepBlocked(step: StepPoint): boolean {
-        return (
-            this.#walls!.rayHitDistance(this.#myX, this.#myY, step.x, step.y, {
-                radius: this.#myR,
-                bit: this.#walls!.movementBit,
-            }) >= 0
-        );
+    #urgent(): number {
+        const now = Date.now();
+        if (now - this.#urgentAt < CFG.URGENT_CACHE_MS) return this.#urgentValue;
+        const n = (Math.max(420, Math.min(900, this.#charSpeed || 720)) - 420) / 480;
+        let t = CFG.T_URGENT_MIN + (1 - n) * (CFG.T_URGENT_MAX - CFG.T_URGENT_MIN);
+        if (this.#maxSpeed > CFG.URGENT_FAST_SPEED)
+            t += Math.min(
+                CFG.URGENT_FAST_BONUS,
+                ((this.#maxSpeed - CFG.URGENT_FAST_SPEED) / 1080) * CFG.URGENT_FAST_BONUS,
+            );
+        this.#urgentValue = t;
+        this.#urgentAt = now;
+        return t;
     }
 
-    #lastResortHeading(hazards: Hazard[]): number {
-        let bestDeg = -1;
-        let bestScore = -Infinity;
-        for (const deg of RING) {
-            const room = this.#wallRoom(deg);
-            if (room <= 240) continue;
-            const score =
-                this.#separationScore(hazards, deg) -
-                (TUNE.wallPenalty * Math.max(0, 1000 - room)) / 1000;
-            if (score > bestScore) {
-                bestScore = score;
-                bestDeg = deg;
+    #pointThreatened(px: number, py: number, myR: number): boolean {
+        for (const threat of this.#threats) {
+            if (threat.ignored) continue;
+            const field = Math.min(
+                CFG.T_FIELD,
+                Math.max(0.25, (threat.range || 9000) / Math.max(1, threat.speed)),
+            );
+            const ex = threat.x + threat.svx * field;
+            const ey = threat.y + threat.svy * field;
+            const reach = myR + (threat.impactRadius || threat.radius) + CFG.SAFETY_MARGIN;
+            if (distSqPointToSegment(px, py, threat.x, threat.y, ex, ey) <= reach * reach)
+                return true;
+        }
+        return false;
+    }
+
+    #clearanceAt(px: number, py: number, myR: number): number {
+        let best = Infinity;
+        for (const threat of this.#threats) {
+            if (threat.ignored) continue;
+            const field = Math.min(
+                CFG.T_FIELD,
+                Math.max(0.25, (threat.range || 9000) / Math.max(1, threat.speed)),
+            );
+            const ex = threat.x + threat.svx * field;
+            const ey = threat.y + threat.svy * field;
+            const reach = myR + (threat.impactRadius || threat.radius) + CFG.SAFETY_MARGIN;
+            const d = Math.sqrt(distSqPointToSegment(px, py, threat.x, threat.y, ex, ey)) - reach;
+            if (d < best) best = d;
+        }
+        return best;
+    }
+
+    #collect(dir: Vec, px: number, py: number, myR: number, intent: Vec): number {
+        let cost = 0;
+        const vx = dir.x * this.#charSpeed;
+        const vy = dir.y * this.#charSpeed;
+        for (const threat of this.#threats) {
+            if (threat.ignored) continue;
+            const t = this.#perform(threat, px, py, myR, dir, CFG.T_FIELD);
+            if (t >= 0) {
+                cost += 4e7 + (CFG.T_FIELD - t) * 4e7;
+                if (t <= 0.15) {
+                    const away = normalize2d(px - threat.x, py - threat.y);
+                    cost += (1 - (dir.x * away.x + dir.y * away.y)) * 5e6;
+                }
+            }
+            const reach = threat.rNoMove;
+            const rx = threat.svx - vx;
+            const ry = threat.svy - vy;
+            const a = rx * rx + ry * ry;
+            const b = 2 * (threat.dx * rx + threat.dy * ry);
+            const c = threat.dx * threat.dx + threat.dy * threat.dy;
+            let near = c;
+            if (a > 1e-6) {
+                const tc = Math.max(0, Math.min(CFG.T_FIELD, -b / (2 * a)));
+                near = c + b * tc + a * tc * tc;
+            }
+            const sq = reach * reach;
+            if (near < sq) {
+                cost += 2e7 + (sq - near) * 2e3;
+            } else {
+                const gap = Math.sqrt(near) - reach;
+                if (gap < CFG.MIN_CLEARANCE) {
+                    const miss = CFG.MIN_CLEARANCE - gap;
+                    cost += (miss * miss * 1e3) / (CFG.MIN_CLEARANCE * CFG.MIN_CLEARANCE);
+                }
             }
         }
-        return bestDeg;
+        if (intent.x !== 0 || intent.y !== 0)
+            cost -= (dir.x * intent.x + dir.y * intent.y) * CFG.INTENT_WEIGHT * 500;
+        return cost;
     }
 
-    #engage(hazards: Hazard[]): DodgeResult {
-        const now = this.#now;
-        if (now - this.#lastActiveAt > 700) this.#curDeg = NaN;
-        const ref = isFinite(this.#lastDeg) ? this.#lastDeg : null;
-        let deg: number | null = null;
-        let anchor: StepPoint | null = null;
-        const picked = this.#bestHeading(hazards, ref);
-        if (picked) anchor = this.#anchor(picked.deg);
-        if (picked && anchor) deg = picked.deg;
-        if (deg === null) {
-            const snapped = this.#snapHeading(this.#retreatHeading(hazards));
-            anchor = this.#anchor(snapped);
-            if (anchor) deg = snapped;
-        }
-        if (deg === null) {
-            deg = this.#lastResortHeading(hazards);
-            if (deg >= 0) anchor = this.#anchor(deg);
-            else deg = null;
-        }
-        if (deg === null || !anchor) return { active: false };
-        if (!isFinite(this.#curDeg)) this.#curDeg = deg;
-        const cmd: DodgeCommand = {
-            headingDeg: deg,
-            anchorX: anchor.x,
-            anchorY: anchor.y,
-            tx: anchor.x,
-            ty: anchor.y,
-            sentX: anchor.x,
-            sentY: anchor.y,
-            lastDangerAt: now,
-            lastCheckAt: now,
-            lastSendAt: now,
-        };
-        this.#placeAnchor(cmd);
-        if (this.#stepBlocked({ x: cmd.anchorX, y: cmd.anchorY })) {
-            cmd.anchorX = anchor.x;
-            cmd.anchorY = anchor.y;
-            cmd.tx = anchor.x;
-            cmd.ty = anchor.y;
-            this.#curDeg = deg;
-        }
-        this.#lastDeg = deg;
-        this.#lastActiveAt = now;
-        this.#cmd = cmd;
-        return {
-            active: true,
-            started: true,
-            targetX: cmd.tx,
-            targetY: cmd.ty,
-            headingDeg: deg,
-            send: true,
-        };
-    }
-
-    #revalidate(cmd: DodgeCommand, hazards: Hazard[]): void {
-        if (this.#now - cmd.lastCheckAt < 300) return;
-        cmd.lastCheckAt = this.#now;
-        const cur = this.#scoreOf(hazards, cmd.headingDeg, cmd.headingDeg);
-        const alt = this.#bestHeading(hazards, cmd.headingDeg);
-        if (!alt || alt.deg === cmd.headingDeg) return;
-        if (angDiff(alt.deg, cmd.headingDeg) < 25) return;
-        if (!(cur < -80) || alt.score <= cur + 520) return;
-        cmd.headingDeg = alt.deg;
-        this.#lastDeg = alt.deg;
-    }
-
-    #releaseCheck(cmd: DodgeCommand, danger: boolean): boolean {
-        if (danger) return false;
-        if (this.#now - cmd.lastDangerAt <= 30) return false;
-        this.#release();
-        return true;
-    }
-
-    #release(): void {
-        this.#cmd = null;
-        this.#lastActiveAt = this.#now;
-    }
-
-    #clear(): DodgeResult {
-        this.#release();
-        return { active: false };
-    }
-
-    #slewDeg(deg: number): number {
-        if (!isFinite(this.#curDeg)) return deg;
-        const diff = wrap360(deg - this.#curDeg);
-        const delta = diff > 180 ? diff - 360 : diff;
-        if (delta > 16) return wrap360(this.#curDeg + 16);
-        if (delta < -16) return wrap360(this.#curDeg - 16);
-        return wrap360(deg);
-    }
-
-    #hold(hazards: Hazard[], danger: boolean): DodgeResult {
-        const cmd = this.#cmd!;
-        if (danger) cmd.lastDangerAt = this.#now;
-        this.#revalidate(cmd, hazards);
-        if (this.#releaseCheck(cmd, danger)) return { active: false };
-        const before = isFinite(this.#curDeg) ? wrap360(this.#curDeg) : NaN;
-        const want = wrap360(this.#slewDeg(cmd.headingDeg));
-        if (want !== before) {
-            this.#curDeg = want;
-            return {
-                active: true,
-                targetX: cmd.tx,
-                targetY: cmd.ty,
-                headingDeg: cmd.headingDeg,
-                send: false,
-            };
-        }
-        const arrived = this.#dist(this.#myX, this.#myY, cmd.anchorX, cmd.anchorY) < ANCHOR_ARRIVE;
-        if (arrived) this.#extendAnchor(cmd);
-        if (this.#stepBlocked({ x: cmd.anchorX, y: cmd.anchorY })) {
-            const repick = this.#engage(hazards);
-            if (!repick.active) {
-                this.#release();
-                return { active: false };
+    #findSafe(px: number, py: number, myR: number, intent: Vec): SafePoint | null {
+        const dirs: Vec[] = [];
+        if (intent.x !== 0 || intent.y !== 0) dirs.push(normalize2d(intent.x, intent.y));
+        for (const d of RING) dirs.push(d);
+        const points: SafePoint[] = [];
+        let nearest = Infinity;
+        for (const dir of dirs) {
+            if (this.#expire(px, py, myR, dir, CFG.T_FIELD) >= 0) continue;
+            for (
+                let step = CFG.STEP_SIZE;
+                step <= CFG.MAX_SEARCH_DIST && !(step > nearest);
+                step += CFG.STEP_SIZE
+            ) {
+                const sx = px + dir.x * step;
+                const sy = py + dir.y * step;
+                if (this.#pointThreatened(sx, sy, myR)) continue;
+                const clearance = this.#clearanceAt(sx, sy, myR);
+                if (clearance < CFG.MIN_CLEARANCE) continue;
+                points.push({ x: sx, y: sy, dist: step, clearance });
+                if (step < nearest) nearest = step;
+                break;
             }
-            return repick;
         }
-        return {
-            active: true,
-            targetX: cmd.tx,
-            targetY: cmd.ty,
-            headingDeg: cmd.headingDeg,
-            send: this.#shouldSend(cmd),
-        };
+        if (points.length === 0) return null;
+        points.sort((a, b) => (a.dist !== b.dist ? a.dist - b.dist : b.clearance - a.clearance));
+        return points[0];
+    }
+
+    #parse(px: number, py: number, myR: number, intent: Vec): Vec | null {
+        const groups = new Map<string, Threat[]>();
+        for (const threat of this.#threats) {
+            if (this.#perform(threat, px, py, myR, ZERO, this.#urgent()) < 0) continue;
+            const key = threat.gid;
+            const bucket = groups.get(key);
+            if (bucket) bucket.push(threat);
+            else groups.set(key, [threat]);
+        }
+        if (groups.size === 0) return null;
+        const dirs: Vec[] = [];
+        for (const group of groups.values()) {
+            let dx = 0;
+            let dy = 0;
+            let gx = 0;
+            let gy = 0;
+            for (const threat of group) {
+                dx += threat.dirX;
+                dy += threat.dirY;
+                gx += threat.x;
+                gy += threat.y;
+            }
+            const n = group.length || 1;
+            dx /= n;
+            dy /= n;
+            gx /= n;
+            gy /= n;
+            const away = normalize2d(px - gx, py - gy);
+            const perpA = normalize2d(-dy, dx);
+            const perpB = normalize2d(dy, -dx);
+            dirs.push(
+                normalize2d(
+                    perpA.x * CFG.PERP_WEIGHT + away.x * CFG.AWAY_WEIGHT,
+                    perpA.y * CFG.PERP_WEIGHT + away.y * CFG.AWAY_WEIGHT,
+                ),
+            );
+            dirs.push(
+                normalize2d(
+                    perpB.x * CFG.PERP_WEIGHT + away.x * CFG.AWAY_WEIGHT,
+                    perpB.y * CFG.PERP_WEIGHT + away.y * CFG.AWAY_WEIGHT,
+                ),
+            );
+        }
+        dirs.push(...RING);
+        let best: Vec | null = null;
+        let bestCost = Infinity;
+        for (const dir of dirs) {
+            const cost = this.#collect(dir, px, py, myR, intent);
+            if (cost < bestCost) {
+                bestCost = cost;
+                best = dir;
+            }
+        }
+        return best;
+    }
+
+    #stillThreatened(dir: Vec, px: number, py: number, myR: number): boolean {
+        for (const threat of this.#threats) {
+            if (this.#perform(threat, px, py, myR, dir, CFG.T_FIELD) >= 0) return true;
+        }
+        return false;
+    }
+
+    #keepCommitted(
+        prev: Vec,
+        next: Vec,
+        px: number,
+        py: number,
+        myR: number,
+        intent: Vec,
+    ): boolean {
+        const tMax = this.#urgent();
+        const a = this.#expire(px, py, myR, prev, tMax);
+        const b = this.#expire(px, py, myR, next, tMax);
+        if (a < 0 && b < 0)
+            return (
+                this.#collect(next, px, py, myR, intent) <=
+                this.#collect(prev, px, py, myR, intent) * 1.25
+            );
+        if (a >= 0 && b >= 0) return a >= b - 0.05;
+        return false;
+    }
+
+    #sameDirection(a: Vec, b: Vec): boolean {
+        return a.x * b.x + a.y * b.y > 0.98;
+    }
+
+    #resetCommit(): void {
+        this.#commit = null;
+        this.#commitUntil = 0;
+        this.#safeX = 0;
+        this.#safeY = 0;
     }
 
     tick(world: DodgeWorld): DodgeResult {
-        this.#walls = world.walls;
-        this.#world = world;
-        this.#now = world.now;
-        this.#myX = world.x;
-        this.#myY = world.y;
-        if (!isFinite(this.#myX) || !isFinite(this.#myY)) return this.#clear();
-        this.#speed = Math.trunc(world.speed);
-        if (!(this.#speed > 0)) return this.#clear();
-        this.#myR = world.radius > 0 ? world.radius : this.#myR;
-        const hazards = this.#collectHazards();
-        const { danger } = this.#assess(hazards);
-        if (this.#cmd) return this.#hold(hazards, danger);
-        if (!danger) return { active: false };
-        return this.#engage(hazards);
+        const now = world.now;
+        const px = world.x;
+        const py = world.y;
+        if (!isFinite(px) || !isFinite(py)) {
+            this.#resetCommit();
+            return { active: false };
+        }
+        this.#charSpeed = world.speed > 0 ? world.speed : CFG.CHAR_SPEED;
+        const myR = world.radius > 0 ? world.radius : 60;
+        const projectiles = world.projectiles || [];
+        this.#track(projectiles, now);
+        this.#choose(px, py, myR);
+        if (projectiles.length === 0 && this.#threats.length === 0 && !this.#commit) {
+            this.#safeX = 0;
+            this.#safeY = 0;
+            return { active: false };
+        }
+        const intent = ZERO;
+        const tMin = this.#expire(px, py, myR, intent, this.#urgent());
+        const threatened = tMin >= 0 || this.#pointThreatened(px, py, myR);
+        if (
+            this.#commit &&
+            now >= this.#commitUntil &&
+            this.#expire(px, py, myR, ZERO, CFG.T_RELEASE + 0.1) < 0
+        ) {
+            this.#resetCommit();
+            return { active: false };
+        }
+        let dir: Vec | null = null;
+        if (this.#commit && !this.#stillThreatened(this.#commit, px, py, myR)) dir = this.#commit;
+        if (!dir && threatened) {
+            const parsed = this.#parse(px, py, myR, intent);
+            const candidate = parsed ?? intent;
+            const safe = this.#findSafe(px, py, myR, candidate);
+            if (safe) {
+                this.#safeX = Math.round(safe.x);
+                this.#safeY = Math.round(safe.y);
+                dir = normalize2d(this.#safeX - px, this.#safeY - py);
+                if (this.#lastDir && this.#keepCommitted(this.#lastDir, dir, px, py, myR, intent))
+                    dir = this.#lastDir;
+            } else if (parsed) {
+                dir = parsed;
+            }
+        }
+        if (!dir) {
+            this.#resetCommit();
+            return { active: false };
+        }
+        this.#lastDir = dir;
+        if (!this.#commit || !this.#sameDirection(this.#commit, dir)) {
+            this.#commit = dir;
+            this.#commitUntil = now + CFG.DODGE_COMMIT_MS;
+        }
+        const targetX = this.#safeX || Math.round(px + dir.x * CFG.DODGE_RANGE);
+        const targetY = this.#safeY || Math.round(py + dir.y * CFG.DODGE_RANGE);
+        if (Math.hypot(targetX - px, targetY - py) <= CFG.ARRIVAL_THRESHOLD && !threatened) {
+            this.#resetCommit();
+            return { active: false };
+        }
+        return { active: true, targetX, targetY, send: true };
     }
 
     reset(): void {
-        this.#cmd = null;
-        this.#curDeg = NaN;
-        this.#lastDeg = NaN;
-        this.#lastActiveAt = 0;
-        this.#zoneMem.clear();
-        this.#lastZones.clear();
-        this.#world = { projectiles: [] };
+        this.#mem.clear();
+        this.#threats.length = 0;
+        this.#maxSpeed = 0;
+        this.#charSpeed = CFG.CHAR_SPEED;
+        this.#lastDir = null;
+        this.#urgentAt = 0;
+        this.#urgentValue = 0;
+        this.#resetCommit();
     }
 }
 
@@ -869,9 +575,6 @@ class AutoDodge {
     #hitbox = 0;
     #radiusMemoData: NativePointer | null = null;
     #radiusMemoValue = 0;
-    #predX = NaN;
-    #predY = NaN;
-    #wallsApi: WallsApi = { firstWallHit, rayHitDistance, movementBit: MOVEMENT_BIT };
 
     #core = new DodgeCore();
 
@@ -917,11 +620,7 @@ class AutoDodge {
         try {
             const logic = scanData.battleModeClient;
             if (!logic || logic.isNull()) return false;
-            if (x !== this.#predX || y !== this.#predY) {
-                getFunctions().LogicBattleModeClient_setClientPredictionMoveTo(logic, x, y, 1);
-                this.#predX = x;
-                this.#predY = y;
-            }
+            getFunctions().LogicBattleModeClient_setClientPredictionMoveTo(logic, x, y, 1);
             return this.#moveCommand(x, y);
         } catch {
             return false;
@@ -930,23 +629,21 @@ class AutoDodge {
 
     update(): void {
         if (scanData.lastUpdate === 0) return;
-        const now = Date.now();
         if (!this.#learnOwnHitbox()) {
-            const fallbackRadius = Math.trunc(scanData.myRadius);
-            if (fallbackRadius > 0) this.#hitbox = fallbackRadius;
+            const fallback = Math.trunc(scanData.myRadius);
+            if (fallback > 0) this.#hitbox = fallback;
         }
-        const result = this.#core.tick({
-            now,
+        const d = this.#core.tick({
+            now: Date.now(),
             x: scanData.myX,
             y: scanData.myY,
             speed: Math.trunc(scanData.mySpeed),
             radius: Math.trunc(this.#hitbox),
             projectiles: scanData.projectiles,
-            walls: this.#wallsApi,
         });
-        if (!result.active) return;
-        if (result.send && isFinite(result.targetX) && isFinite(result.targetY))
-            this.#issueMove(result.targetX, result.targetY);
+        if (!d.active || !d.send) return;
+        if (!isFinite(d.targetX) || !isFinite(d.targetY)) return;
+        this.#issueMove(d.targetX, d.targetY);
     }
 
     #invalidateOwnMetrics(): void {
@@ -958,8 +655,6 @@ class AutoDodge {
     reset(): void {
         this.#core.reset();
         this.#invalidateOwnMetrics();
-        this.#predX = NaN;
-        this.#predY = NaN;
     }
 
     setup(): void {
