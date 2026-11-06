@@ -103,6 +103,8 @@ export interface ScanState {
     myY: number;
     mySpeed: number;
     myRadius: number;
+    inputX: number;
+    inputY: number;
     enemies: EnemyInfo[];
     projectiles: ProjectileOutput[];
     lastUpdate: number;
@@ -132,6 +134,8 @@ class Scanner {
         myY: 0,
         mySpeed: 0,
         myRadius: 0,
+        inputX: 0,
+        inputY: 0,
         enemies: [],
         projectiles: [],
         lastUpdate: 0,
