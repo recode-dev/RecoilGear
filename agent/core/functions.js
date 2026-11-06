@@ -85,9 +85,6 @@ class FunctionTable {
                     "uint8"
                 ]
             ),
-            LogicCharacterData_getSpeed: this.#nf("LogicCharacterData_getSpeed", "int32", [
-                "pointer"
-            ]),
             LogicCharacterData_getCollisionRadius: this.#nf(
                 "LogicCharacterData_getCollisionRadius",
                 "uint32",
@@ -114,29 +111,11 @@ class FunctionTable {
                 ["pointer", "int"]
             ),
             LogicData_getName: this.#nf("LogicData_getName", "pointer", ["pointer"]),
-            LogicCharacterClient_getMoveAngle: this.#nf(
-                "LogicCharacterClient_getMoveAngle",
-                "int32",
-                ["pointer"]
-            ),
-            LogicProjectileData_getPreExplosionTimeMs: this.#nf(
-                "LogicProjectileData_getPreExplosionTimeMs",
-                "int32",
-                ["pointer"]
-            ),
             LogicProjectileClient_getTravelTicks: this.#nf(
                 "LogicProjectileClient_getTravelTicks",
                 "int32",
                 ["pointer", "int32", "int32"]
             ),
-            LogicProjectileData_getUniqueProperty: this.#nf(
-                "LogicProjectileData_getUniqueProperty",
-                "int32",
-                ["pointer"]
-            ),
-            LogicProjectileClient_isBeam: this.#nf("LogicProjectileData_isBeam", "uint32", [
-                "pointer"
-            ]),
             LogicSkillData_getSpread: this.#nf("LogicSkillData_getSpread", "int32", ["pointer"]),
             LogicSkillData_getNumBulletsInOneAttack: this.#nf(
                 "LogicSkillData_getNumBulletsInOneAttack",
@@ -158,58 +137,16 @@ class FunctionTable {
                 "int32",
                 ["pointer"]
             ),
-            LogicProjectileData_piercesEnvironment: this.#nf(
-                "LogicProjectileData_piercesEnvironment",
-                "uint32",
-                ["pointer"]
-            ),
-            LogicProjectileData_isHomingMissile: this.#nf(
-                "LogicProjectileData_isHomingMissile",
-                "uint32",
-                ["pointer"]
-            ),
-            LogicProjectileData_isBouncing: this.#nf("LogicProjectileData_isBouncing", "uint32", [
-                "pointer"
-            ]),
-            LogicProjectileData_getSpeed: this.#nf("LogicProjectileData_getSpeed", "int32", [
-                "pointer"
-            ]),
-            LogicProjectileData_getRadius: this.#nf("LogicProjectileData_getRadius", "int32", [
-                "pointer"
-            ]),
             LogicProjectileData_getTravelType: this.#nf(
                 "LogicProjectileData_getTravelType",
                 "int32",
                 ["pointer"]
-            ),
-            LogicProjectileData_getIntValueFromColumn: this.#nf(
-                "LogicProjectileData_getIntValueFromColumn",
-                "int32",
-                ["pointer", "int"]
-            ),
-            LogicProjectileData_getBoolValueFromColumn: this.#nf(
-                "LogicProjectileData_getBoolValueFromColumn",
-                "uint32",
-                ["pointer", "int"]
-            ),
-            LogicProjectileData_getBoolValueFromColumn2: this.#nf(
-                "LogicProjectileData_getBoolValueFromColumn2",
-                "uint32",
-                ["pointer", "int"]
             ),
             LogicCharacterData_getProjectileStartRadius: this.#nf(
                 "LogicCharacterData_getProjectileStartRadius",
                 "int32",
                 ["pointer"]
             ),
-            LogicData_getBooleanValueAt: this.#nf("LogicData_getBooleanValueAt", "uint32", [
-                "pointer",
-                "int"
-            ]),
-            LogicData_getIntegerValueAt: this.#nf("LogicData_getIntegerValueAt", "int32", [
-                "pointer",
-                "int"
-            ]),
             operator_new: this.#nf("operator_new", "pointer", ["size_t"])
         });
         return this.#table;

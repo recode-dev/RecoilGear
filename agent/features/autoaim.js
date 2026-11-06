@@ -5,11 +5,10 @@ import {
     dataOf,
     enableProjectileTracking,
     onDataReload,
-    rangeScaleCalibrated,
     scanData,
     ticksPerSec,
     travelDistance,
-    travelFor,
+    travelTicksFor,
     weaponRangeUnits
 } from "../core/scan.js";
 import { losCheckWide, projectileBit } from "../utils/walls.js";
@@ -248,13 +247,7 @@ class AutoAim {
         return this.#solveIncremental(pred, speed, range, pocket);
     }
 
-    #readInt(data, off, getter, min, max) {
-        if (getter) {
-            try {
-                const v = Math.trunc(getter(data));
-                if (v >= min && v <= max) return v;
-            } catch {}
-        }
+    #readInt(data, off, min, max) {
         try {
             const v = Math.trunc(data.add(off).readS32());
             if (v >= min && v <= max) return v;
@@ -276,13 +269,7 @@ class AutoAim {
     }
 
     #shotRadius(data, own, fns) {
-        let rad = this.#readInt(
-            data,
-            offsets.LogicProjectileData_radius,
-            fns.LogicProjectileData_getRadius,
-            1,
-            2000
-        );
+        let rad = this.#readInt(data, offsets.LogicProjectileData_radius, 1, 2000);
         if (!(rad > 0) && fns.LogicCharacterData_getProjectileStartRadius) {
             try {
                 const ownData = dataOf(own);
@@ -314,31 +301,17 @@ class AutoAim {
     }
 
     #learnTravelTicks(data, engineSpeed, own) {
-        const learned = travelFor(data);
         const tiles = weaponRangeUnits(own);
-        const speedForTicks = engineSpeed > 0 ? engineSpeed : Math.trunc(scanData.measuredSpeed);
-        const calibrated = rangeScaleCalibrated();
-        this.#ownTicks = learned && learned.ticks > 0 ? learned.ticks : 0;
-        if (!(this.#ownTicks > 0) && calibrated && tiles > 0 && speedForTicks > 0) {
-            this.#ownTicks = Math.max(1, Math.round((tiles * ticksPerSec) / speedForTicks));
-        }
-        if (learned && learned.range > 0) {
-            this.#ownTravel = learned.range;
-        } else {
-            this.#ownTravel = calibrated ? travelDistance(this.#ownTicks, speedForTicks) : 0;
-        }
+        const speedForTicks = engineSpeed > 0 ? engineSpeed : this.#projectileSpeed;
+        this.#ownTicks =
+            speedForTicks > 0 && tiles > 0 ? travelTicksFor(data, tiles, speedForTicks) : 0;
+        this.#ownTravel = this.#ownTicks > 0 ? travelDistance(this.#ownTicks, speedForTicks) : 0;
         if (this.#ownTicks >= beamTicks) this.#ownBeam = true;
     }
 
     #learnWeaponState(data, own) {
         const fns = getFunctions();
-        const engineSpeed = this.#readInt(
-            data,
-            offsets.LogicProjectileData_speed,
-            fns.LogicProjectileData_getSpeed,
-            300,
-            8500
-        );
+        const engineSpeed = this.#readInt(data, offsets.LogicProjectileData_speed, 300, 8500);
         this.#ownBeam = data.add(offsets.LogicProjectileData_isBeamField).readU8() > 0;
         const passes = data.add(offsets.LogicProjectileData_passesEnvironment).readU8() & 1;
         const pierces = data.add(offsets.LogicProjectileData_piercesEnvironmentField).readU8() & 1;
@@ -370,10 +343,7 @@ class AutoAim {
                 if (data) engineSpeed = this.#learnWeaponState(data, own);
             }
         } catch {}
-        const observed = Math.trunc(scanData.measuredSpeed);
-        let speed = 0;
-        if (engineSpeed > 0) speed = engineSpeed;
-        else if (observed >= 300 && observed <= 8500) speed = observed;
+        const speed = engineSpeed;
         if (speed >= 300 && speed <= 8500) {
             this.#projectileSpeed = speed;
             this.#speedAt = now;

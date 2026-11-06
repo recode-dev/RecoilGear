@@ -1,5 +1,3 @@
-import { tileSizeUnits } from "../utils/walls.js";
-
 import { getFunctions, isValidPtr, ptrFromU32 } from "./functions.js";
 import { offsets } from "./offsets.js";
 import { readScString } from "./scstring.js";
@@ -8,13 +6,8 @@ export const tileUnits = 100;
 export const ticksPerSec = 20;
 const tickMs = 1000 / ticksPerSec;
 export const beamTicks = 18000;
-const columnSpan = 48;
 const staleMs = 10000;
 const defaultProjectileRadius = 40;
-const cacheMax = 2048;
-const dataTtlMs = 3000;
-const angleTtlMs = 120;
-const ringCap = 24;
 
 const length = (x, y) => Math.floor(Math.hypot(x, y));
 
@@ -27,23 +20,11 @@ class Scanner {
     #objCount = 0;
     #objMgrPtr = null;
     #projectileHooksInstalled = false;
-    #charRange = new Map();
     #weaponMeta = new Map();
-    #speedByData = new Map();
     #charSpeedByData = new Map();
     #charsByIndex = new Map();
-    #learnedTravel = new Map();
-    #rangeBonus = new Map();
-    #rangeScale = 0;
-    #columnCache = new Map();
-    #colCands = new Map();
     #reloadCallbacks = [];
     #dataHooksInstalled = false;
-    #insideTravelCall = false;
-    #flightRange = new Map();
-    #probeBudget = 0;
-    #dataCache = new Map();
-    #angleCache = new Map();
     #coreHooksInstalled = false;
     #moveAppliedAt = 0;
     #moveAppliedX = 0;
@@ -51,9 +32,6 @@ class Scanner {
     #inputAt = 0;
     #inputX = 0;
     #inputY = 0;
-    #ringKeys = Array.from({ length: ringCap }).fill(0);
-    #ringVals = Array.from({ length: ringCap }).fill(null);
-    #ringHead = 0;
     #metaBudget = 0;
     #outArr = [];
     #moduleBase = null;
@@ -68,9 +46,7 @@ class Scanner {
         myRadius: 0,
         enemies: [],
         projectiles: [],
-        measuredSpeed: 0,
-        lastUpdate: 0,
-        pathRanAt: 0
+        lastUpdate: 0
     };
 
     #ptrKey(value) {
@@ -99,83 +75,13 @@ class Scanner {
     }
 
     dataOf(obj) {
-        if (!isValidPtr(obj)) return ptr(0);
-        const key = this.#ptrKey(obj);
-        const now = Date.now();
-        if (key) {
-            const hit = this.#dataCache.get(key);
-            if (hit && now - hit.ts <= dataTtlMs) return hit.data;
-        }
-        const fns = getFunctions();
-        if (!fns.LogicGameObjectClient_getData) return ptr(0);
-        const data = fns.LogicGameObjectClient_getData(obj);
-        if (key && isValidPtr(data)) this.#cacheData(key, data, now);
-        return data;
-    }
-
-    #cacheData(key, data, now) {
-        if (this.#dataCache.size > cacheMax) this.#dataCache.clear();
-        this.#dataCache.set(key, { data, ts: now });
-    }
-
-    #ringMemo(obj, val) {
-        const raw = obj.toInt32();
-        for (let i = 0; i < ringCap; i++) {
-            if (this.#ringKeys[i] === raw) return;
-        }
-        const key = this.#ptrKey(obj);
-        if (!key) return;
-        const slot = this.#ringHead;
-        this.#ringHead = (this.#ringHead + 1) % ringCap;
-        this.#ringKeys[slot] = raw;
-        this.#ringVals[slot] = key;
-        this.#cacheData(key, val, Date.now());
-    }
-
-    #ringLookup(obj) {
-        const raw = obj.toInt32();
-        for (let i = 0; i < ringCap; i++) {
-            if (this.#ringKeys[i] === raw) return this.#ringVals[i];
-        }
-        return null;
-    }
-
-    #learnMoveAngle(obj) {
-        try {
-            if (!isValidPtr(obj)) return;
-            const key = this.#ringLookup(obj);
-            if (key !== null) return;
-            const deg = Math.trunc(obj.add(offsets.LogicCharacterClient_moveAngle).readS32());
-            if (deg < -720 || deg > 720) return;
-            const slotKey = this.#ptrKey(obj);
-            if (!slotKey) return;
-            const raw = obj.toInt32();
-            const slot = this.#ringHead;
-            this.#ringHead = (this.#ringHead + 1) % ringCap;
-            this.#ringKeys[slot] = raw;
-            this.#ringVals[slot] = slotKey;
-            if (this.#angleCache.size > cacheMax) this.#angleCache.clear();
-            this.#angleCache.set(slotKey, {
-                angle: (deg * Math.PI) / 180,
-                ts: Date.now()
-            });
-        } catch {}
+        return this.dataFieldOf(obj);
     }
 
     #learnInput(ci) {
         this.#inputX = Math.trunc(ci.add(offsets.ClientInput_x).readS32());
         this.#inputY = Math.trunc(ci.add(offsets.ClientInput_y).readS32());
         this.#inputAt = Date.now();
-    }
-
-    #moveAngleOf(obj) {
-        if (!isValidPtr(obj)) return 0;
-        const key = this.#ptrKey(obj);
-        if (key) {
-            const hit = this.#angleCache.get(key);
-            if (hit && Date.now() - hit.ts <= angleTtlMs) return hit.angle;
-        }
-        return this.#readMoveAngle(obj);
     }
 
     moveAppliedSince(x, y, ms) {
@@ -196,34 +102,7 @@ class Scanner {
     #installCoreHooks(base) {
         if (this.#coreHooksInstalled || !base) return;
         this.#coreHooksInstalled = true;
-        const ringMemo = (obj, val) => this.#ringMemo(obj, val);
-        const ringLookup = (obj) => this.#ringLookup(obj);
-        const learnAngle = (obj) => this.#learnMoveAngle(obj);
         const learnInput = (ci) => this.#learnInput(ci);
-        try {
-            Interceptor.attach(base.add(offsets.LogicGameObjectClient_getData), {
-                onEnter(args) {
-                    this.obj = args[0];
-                },
-                onLeave(retval) {
-                    try {
-                        if (retval.isNull()) return;
-                        if (ringLookup(this.obj) !== null) return;
-                        ringMemo(this.obj, retval);
-                    } catch {}
-                }
-            });
-        } catch {}
-        try {
-            Interceptor.attach(base.add(offsets.LogicCharacterClient_getMoveAngle), {
-                onEnter(args) {
-                    this.obj = args[0];
-                },
-                onLeave() {
-                    learnAngle(this.obj);
-                }
-            });
-        } catch {}
         try {
             Interceptor.attach(base.add(offsets.LogicBattleModeClient_setClientPredictionMoveTo), {
                 onEnter: (args) => {
@@ -263,13 +142,6 @@ class Scanner {
     }
 
     #readMoveAngle(obj) {
-        const fns = getFunctions();
-        if (fns.LogicCharacterClient_getMoveAngle) {
-            try {
-                const deg = Math.trunc(fns.LogicCharacterClient_getMoveAngle(obj));
-                if (this.#validAngleDeg(deg)) return (deg * Math.PI) / 180;
-            } catch {}
-        }
         try {
             const deg = Math.trunc(obj.add(offsets.LogicCharacterClient_moveAngle).readS32());
             if (this.#validAngleDeg(deg)) return (deg * Math.PI) / 180;
@@ -378,67 +250,6 @@ class Scanner {
         return Math.round((ticks * speed) / ticksPerSec);
     }
 
-    #learnBeamTravel(key) {
-        if (this.#learnedTravel.has(key)) return;
-        this.#learnedTravel.set(key, { ticks: beamTicks, range: 0, speed: 0, beam: true });
-    }
-
-    #learnPairTravel(key, a1, a2, ticks) {
-        const pairs = a1 <= a2 ? [a1, a2, a2, a1] : [a2, a1, a1, a2];
-        for (let i = 0; i < 4; i += 2) {
-            const range = pairs[i];
-            const speed = pairs[i + 1];
-            if (range < 50 || range > 30000 || speed < 50 || speed > 20000) continue;
-            if (Math.abs(this.travelTicks(range, speed, false) - ticks) > 1) continue;
-            const prev = this.#learnedTravel.get(key);
-            if (prev && prev.range === range && prev.ticks === ticks) return;
-            this.#learnedTravel.set(key, { ticks, range, speed, beam: false });
-            return;
-        }
-    }
-
-    #learnTravel(key, a1, a2, ticks) {
-        if (!key || !(ticks >= 0)) return;
-        if (ticks >= beamTicks) return this.#learnBeamTravel(key);
-        if (ticks <= 0) return;
-        this.#learnPairTravel(key, a1, a2, ticks);
-    }
-
-    #learnedFor(projectile, data) {
-        if (isValidPtr(projectile)) {
-            const hit = this.#learnedTravel.get(projectile.toString());
-            if (hit) return hit;
-        }
-        if (isValidPtr(data)) {
-            const hit = this.#learnedTravel.get(data.toString());
-            if (hit) return hit;
-        }
-        return null;
-    }
-
-    travelFor(data) {
-        if (!isValidPtr(data)) return null;
-        return this.#learnedTravel.get(data.toString()) || null;
-    }
-
-    #callTravelTicks(data, rangeUnits, speed) {
-        if (!isValidPtr(data) || !(rangeUnits > 0) || !(speed > 0)) return 0;
-        const fn = getFunctions().LogicProjectileClient_getTravelTicks;
-        if (!fn) return 0;
-        this.#insideTravelCall = true;
-        try {
-            const ticks = Math.trunc(fn(data, rangeUnits, speed));
-            if (ticks <= 0 || ticks > beamTicks) return 0;
-            if (ticks >= beamTicks) return ticks;
-            if (Math.abs(this.travelTicks(rangeUnits, speed, false) - ticks) > 1) return 0;
-            return ticks;
-        } catch {
-            return 0;
-        } finally {
-            this.#insideTravelCall = false;
-        }
-    }
-
     #weaponSkillFor(character) {
         if (!isValidPtr(character)) return null;
         const fns = getFunctions();
@@ -448,34 +259,6 @@ class Scanner {
             if (isValidPtr(skill)) return skill;
         } catch {}
         return null;
-    }
-
-    #calibrateRangeScale(tiles, rangeUnits) {
-        if (!(tiles >= 1 && tiles <= 64) || !(rangeUnits >= 100 && rangeUnits <= 30000))
-            return false;
-        const per = rangeUnits / tiles;
-        const tile = tileSizeUnits();
-        const candidates = [tile, Math.floor(tile / 3), tileUnits];
-        let best = 0;
-        for (const c of candidates) {
-            if (!(c > 0)) continue;
-            const ratio = per / c;
-            if (ratio < 0.95 || ratio > 2) continue;
-            if (c > best) best = c;
-        }
-        if (!(best > 0) || best === this.#rangeScale) return false;
-        this.#rangeScale = best;
-        this.#charRange.clear();
-        this.#rangeBonus.clear();
-        return true;
-    }
-
-    #rangeScaleUnits() {
-        return this.#rangeScale > 0 ? this.#rangeScale : tileUnits;
-    }
-
-    rangeScaleCalibrated() {
-        return this.#rangeScale > 0;
     }
 
     #castingRangeTiles(character) {
@@ -490,42 +273,10 @@ class Scanner {
         return 0;
     }
 
-    #rangeForOwner(ownerIndex) {
-        if (ownerIndex < 0) return 0;
-        const cached = this.#charRange.get(ownerIndex) || 0;
-        if (cached > 0) return cached;
-        const owner = this.#charsByIndex.get(ownerIndex);
-        if (!isValidPtr(owner)) return 0;
-        const tiles = this.#castingRangeTiles(owner);
-        if (tiles <= 0) return 0;
-        if (!this.rangeScaleCalibrated()) return 0;
-        const units = tiles * this.#rangeScaleUnits() + (this.#rangeBonus.get(ownerIndex) || 0);
-        this.#charRange.set(ownerIndex, units);
-        return units;
-    }
-
     weaponRangeUnits(character) {
         if (!isValidPtr(character)) return 0;
         const tiles = this.#castingRangeTiles(character);
-        if (tiles <= 0 || !this.rangeScaleCalibrated()) return 0;
-        const index = this.#readOwnerIndex(character);
-        return (
-            tiles * this.#rangeScaleUnits() + (index >= 0 ? this.#rangeBonus.get(index) || 0 : 0)
-        );
-    }
-
-    #learnRangeBonus(ownerIndex, rangeUnits) {
-        if (ownerIndex < 0 || !(rangeUnits > 0)) return;
-        const owner = this.#charsByIndex.get(ownerIndex);
-        if (!isValidPtr(owner)) return;
-        const tiles = this.#castingRangeTiles(owner);
-        if (tiles <= 0) return;
-        this.#calibrateRangeScale(tiles, rangeUnits);
-        const bonus = rangeUnits - tiles * this.#rangeScaleUnits();
-        if (bonus < 0 || bonus > 4 * this.#rangeScaleUnits()) return;
-        if ((this.#rangeBonus.get(ownerIndex) || 0) === bonus) return;
-        this.#rangeBonus.set(ownerIndex, bonus);
-        this.#charRange.delete(ownerIndex);
+        return tiles > 0 ? tiles * tileUnits : 0;
     }
 
     #readProjectileField(data, off, min, max) {
@@ -538,163 +289,12 @@ class Scanner {
         }
     }
 
-    #dataRow(data) {
-        try {
-            const row = data.add(offsets.LogicProjectileData_reader).readPointer();
-            return isValidPtr(row) ? row : null;
-        } catch {
-            return null;
-        }
-    }
-
-    #columnInt(data, col) {
-        const fns = getFunctions();
-        if (fns.LogicProjectileData_getIntValueFromColumn) {
-            try {
-                return Math.trunc(fns.LogicProjectileData_getIntValueFromColumn(data, col));
-            } catch {}
-        }
-        const row = this.#dataRow(data);
-        if (!row) return 0;
-        if (fns.LogicData_getIntegerValueAt) {
-            try {
-                return Math.trunc(fns.LogicData_getIntegerValueAt(row, col));
-            } catch {}
-        }
-        return 0;
-    }
-
-    #boolViaFn(fn, data, col) {
-        if (!fn) return null;
-        try {
-            return fn(data, col) ? 1 : 0;
-        } catch {
-            return null;
-        }
-    }
-
-    #columnBool(data, col) {
-        const fns = getFunctions();
-        let v = this.#boolViaFn(fns.LogicProjectileData_getBoolValueFromColumn, data, col);
-        if (v === null)
-            v = this.#boolViaFn(fns.LogicProjectileData_getBoolValueFromColumn2, data, col);
-        if (v === null) {
-            const row = this.#dataRow(data);
-            if (row) v = this.#boolViaFn(fns.LogicData_getBooleanValueAt, row, col);
-        }
-        return v === null ? 0 : v;
-    }
-
-    #probeStep(read, data, st, value) {
-        let budget = 2;
-        while (budget > 0 && this.#probeBudget > 0 && st.next < columnSpan) {
-            this.#probeBudget--;
-            budget--;
-            if (read.call(this, data, st.next) === value) {
-                if (!st.cols) st.cols = new Set();
-                st.cols.add(st.next);
-            }
-            st.next++;
-        }
-    }
-
-    #probeColumn(kind, read, data, value) {
-        if (this.#probeBudget <= 0) return;
-        const st = this.#colCands.get(kind);
-        if (!st) return this.#probeStart(kind, read, data, value);
-        if (!st.cols || st.next >= columnSpan) return;
-        this.#probeStep(read, data, st, value);
-        if (st.next >= columnSpan) {
-            if (st.cols.size === 1) this.#columnCache.set(kind, st.cols.values().next().value);
-            else if (st.cols.size === 0) this.#columnCache.set(kind, -1);
-            else if (st.rounds < 10) {
-                st.rounds++;
-                st.next = 0;
-            } else this.#columnCache.set(kind, -1);
-        }
-    }
-
-    #probeStart(kind, read, data, value) {
-        const st = { cols: null, next: 0, rounds: 1 };
-        this.#probeStep(read, data, st, value);
-        if (st.next >= columnSpan && !st.cols) {
-            this.#columnCache.set(kind, -1);
-            this.#colCands.set(kind, { cols: null, next: columnSpan, rounds: 99 });
-            return;
-        }
-        this.#colCands.set(kind, st);
-        if (st.cols && st.cols.size === 1 && st.next >= columnSpan)
-            this.#columnCache.set(kind, st.cols.values().next().value);
-    }
-
-    #scanColumnsFor(data, spec) {
-        for (let col = 0; col < columnSpan; col++) {
-            const v = Math.trunc(this.#columnInt(data, col));
-            if (v >= spec.min && v <= spec.max) {
-                this.#columnCache.set(spec.kind, col);
-                return v;
-            }
-        }
-        this.#columnCache.set(spec.kind, -1);
-        return 0;
-    }
-
-    #readProjectileInt(data, spec) {
-        let value = 0;
-        if (spec.getter) {
-            try {
-                const v = Math.trunc(spec.getter(data));
-                if (v >= spec.min && v <= spec.max) value = v;
-            } catch {}
-        }
-        if (!(value > 0)) value = this.#readProjectileField(data, spec.off, spec.min, spec.max);
-        if (value > 0) {
-            if (this.#columnCache.get(spec.kind) === undefined)
-                this.#probeColumn(spec.kind, this.#columnInt, data, value);
-            return value;
-        }
-        const known = this.#columnCache.get(spec.kind);
-        if (known > 0) {
-            const v = Math.trunc(this.#columnInt(data, known));
-            return v >= spec.min && v <= spec.max ? v : 0;
-        }
-        if (known === undefined) return this.#scanColumnsFor(data, spec);
-        return 0;
-    }
-
-    #readProjectileBool(data, off, kind) {
-        let field = -1;
-        try {
-            field = data.add(off).readU8() & 1;
-        } catch {}
-        if (field >= 0) {
-            if (this.#columnCache.get(kind) === undefined)
-                this.#probeColumn(kind, this.#columnBool, data, field);
-            return field;
-        }
-        const known = this.#columnCache.get(kind);
-        if (known > 0) return this.#columnBool(data, known);
-        return 0;
-    }
-
     #readProjectileRadius(data) {
-        return this.#readProjectileInt(data, {
-            kind: "radius",
-            off: offsets.LogicProjectileData_radius,
-            min: 1,
-            max: 2000,
-            getter: getFunctions().LogicProjectileData_getRadius
-        });
+        return this.#readProjectileField(data, offsets.LogicProjectileData_radius, 1, 2000);
     }
 
     #readProjectileSpeed(data) {
-        return this.#readProjectileInt(data, {
-            kind: "speed",
-            off: offsets.LogicProjectileData_speed,
-            min: 1,
-            max: 20000,
-            getter: getFunctions().LogicProjectileData_getSpeed
-        });
+        return this.#readProjectileField(data, offsets.LogicProjectileData_speed, 1, 20000);
     }
 
     #characterSpeed(data) {
@@ -704,16 +304,7 @@ class Scanner {
             const hit = this.#charSpeedByData.get(key);
             if (hit !== undefined && hit > 0) return hit;
         }
-        let speed = 0;
-        const fns = getFunctions();
-        try {
-            if (fns.LogicCharacterData_getSpeed) {
-                const v = Math.trunc(fns.LogicCharacterData_getSpeed(data));
-                if (v > 0) speed = v;
-            }
-        } catch {}
-        if (!(speed > 0))
-            speed = this.#readProjectileField(data, offsets.LogicCharacterData_speed, 1, 6000);
+        const speed = this.#readProjectileField(data, offsets.LogicCharacterData_speed, 1, 6000);
         if (key && speed > 0) this.#charSpeedByData.set(key, speed);
         return speed;
     }
@@ -749,45 +340,6 @@ class Scanner {
         return { passes, pierces, piercesChars };
     }
 
-    #readProjectileU8(data, off, kind, min, max) {
-        try {
-            const v = data.add(off).readU8();
-            if (v >= min && v <= max) {
-                if (this.#columnCache.get(kind) === undefined)
-                    this.#probeColumn(kind, this.#columnInt, data, v);
-                return v;
-            }
-        } catch {}
-        const known = this.#columnCache.get(kind);
-        if (known > 0) {
-            const v = Math.trunc(this.#columnInt(data, known));
-            if (v >= min && v <= max) return v;
-        }
-        return 0;
-    }
-
-    #readBounceKeep(data) {
-        const percent = this.#readProjectileU8(
-            data,
-            offsets.LogicProjectileData_bouncePercent,
-            "bouncePercent",
-            1,
-            100
-        );
-        return percent > 0 ? percent / 100 : 0;
-    }
-
-    #flagFrom(fn, data, projectile) {
-        if (!fn) return 0;
-        try {
-            if (fn(data)) return 1;
-        } catch {}
-        try {
-            if (fn(projectile)) return 1;
-        } catch {}
-        return 0;
-    }
-
     #readClientU32(obj, off, max) {
         try {
             const v = obj.add(off).readU32();
@@ -806,58 +358,56 @@ class Scanner {
 
     #steerSpecs(data) {
         return {
-            ignore: this.#readProjectileInt(data, {
-                kind: "steerIgnore",
-                off: offsets.LogicProjectileData_steerIgnoreTicks,
-                min: 1,
-                max: 400,
-                getter: null
-            }),
-            life: this.#readProjectileInt(data, {
-                kind: "steerLife",
-                off: offsets.LogicProjectileData_steerLifeTime,
-                min: 1,
-                max: 20000,
-                getter: null
-            })
-        };
-    }
-
-    #bounceSpecs(data) {
-        return {
-            add: this.#readProjectileInt(data, {
-                kind: "bounceAdd",
-                off: offsets.LogicProjectileData_distanceAddFromBounce,
-                min: 1,
-                max: 3000,
-                getter: null
-            }),
-            max: this.#readProjectileInt(data, {
-                kind: "bounceMax",
-                off: offsets.LogicProjectileData_maxDistanceAddBounces,
-                min: 1,
-                max: 20000,
-                getter: null
-            }),
-            keep: this.#readBounceKeep(data),
-            rehit: this.#readProjectileBool(
+            ignore: this.#readProjectileField(
                 data,
-                offsets.LogicProjectileData_canHitAgainAfterBounce,
-                "rehit"
+                offsets.LogicProjectileData_steerIgnoreTicks,
+                1,
+                400
+            ),
+            life: this.#readProjectileField(
+                data,
+                offsets.LogicProjectileData_steerLifeTime,
+                1,
+                20000
             )
         };
     }
 
+    #bounceSpecs(data) {
+        const percent = this.#metaFlag(data, offsets.LogicProjectileData_bouncePercent, 100);
+        return {
+            add: this.#readProjectileField(
+                data,
+                offsets.LogicProjectileData_distanceAddFromBounce,
+                1,
+                3000
+            ),
+            max: this.#readProjectileField(
+                data,
+                offsets.LogicProjectileData_maxDistanceAddBounces,
+                1,
+                20000
+            ),
+            keep: percent > 0 ? percent / 100 : 0,
+            rehit: this.#metaFlag(data, offsets.LogicProjectileData_canHitAgainAfterBounce, 1)
+        };
+    }
+
+    travelTicksFor(data, rangeUnits, speed) {
+        const fn = getFunctions().LogicProjectileClient_getTravelTicks;
+        if (fn && isValidPtr(data) && rangeUnits > 0 && speed > 0) {
+            try {
+                const ticks = Math.trunc(fn(data, rangeUnits, speed));
+                if (ticks > 0 && ticks <= beamTicks) return ticks;
+            } catch {}
+        }
+        if (!(rangeUnits > 0) || !(speed > 0)) return 0;
+        return Math.max(1, Math.round((rangeUnits * ticksPerSec) / speed));
+    }
+
     #resolveTicks(projectile, data, rangeUnits, speed, beam) {
         let isBeam = !!beam;
-        const learned = this.#learnedFor(projectile, data);
-        let ticks = 0;
-        if (learned && learned.ticks > 0) {
-            ticks = learned.ticks;
-            if (learned.beam) isBeam = true;
-        }
-        if (!(ticks > 0)) ticks = this.#callTravelTicks(data, rangeUnits, speed);
-        if (!(ticks > 0)) ticks = this.travelTicks(rangeUnits, speed, isBeam);
+        const ticks = this.travelTicksFor(data, rangeUnits, speed);
         if (ticks >= beamTicks) isBeam = true;
         return { ticks, isBeam };
     }
@@ -870,29 +420,7 @@ class Scanner {
     }
 
     #typeIdOf(data) {
-        const fns = getFunctions();
-        if (fns.LogicProjectileData_getUniqueProperty) {
-            try {
-                const t = Math.trunc(fns.LogicProjectileData_getUniqueProperty(data));
-                if (t >= 0 && t <= 20) return t;
-            } catch {}
-        }
         return this.#readClientU32(data, offsets.LogicProjectileData_uniqueProperty, 20);
-    }
-
-    #preExplosionMs(data, preMs) {
-        const fn = getFunctions().LogicProjectileData_getPreExplosionTimeMs;
-        if (!fn || preMs > 0) return preMs;
-        try {
-            const v = Math.trunc(fn(data));
-            if (v > 0 && v <= 60000) return v;
-        } catch {}
-        return preMs;
-    }
-
-    #flagFallback(fn, data, projectile, field) {
-        if (field) return field;
-        return this.#flagFrom(fn, data, projectile);
     }
 
     #steerStrengthOf(data) {
@@ -911,37 +439,24 @@ class Scanner {
         }
     }
 
+    #metaFlag(data, off, max) {
+        try {
+            const v = data.add(off).readU8();
+            return v <= max ? v : 0;
+        } catch {
+            return 0;
+        }
+    }
+
     #readProjectileMeta(projectile, data, speed, rangeUnits, beam) {
-        const fns = getFunctions();
-        let preMs = this.#readProjectileField(
+        const preMs = this.#readProjectileField(
             data,
             offsets.LogicProjectileData_preExplosionTimeMs,
             1,
             60000
         );
-        let homing = this.#readProjectileBool(
-            data,
-            offsets.LogicProjectileData_isHomingMissileField,
-            "homing"
-        );
-        let bouncing = this.#readProjectileBool(
-            data,
-            offsets.LogicProjectileData_isBouncingField,
-            "bouncing"
-        );
-        preMs = this.#preExplosionMs(data, preMs);
-        homing = this.#flagFallback(
-            fns.LogicProjectileData_isHomingMissile,
-            data,
-            projectile,
-            homing
-        );
-        bouncing = this.#flagFallback(
-            fns.LogicProjectileData_isBouncing,
-            data,
-            projectile,
-            bouncing
-        );
+        const homing = this.#metaFlag(data, offsets.LogicProjectileData_isHomingMissileField, 1);
+        const bouncing = this.#metaFlag(data, offsets.LogicProjectileData_isBouncingField, 1);
         const steerSpecs = this.#steerSpecs(data);
         const bounceSpecs = this.#bounceSpecs(data);
         const resolved = this.#resolveTicks(projectile, data, rangeUnits, speed, beam);
@@ -1222,40 +737,7 @@ class Scanner {
         if (!key) return;
         const entry = this.#liveProjectiles.get(key);
         if (!entry || !entry.ptr.equals(projectile)) return;
-        const flown = this.#traveled(entry, entry.lastX, entry.lastY);
-        if (flown > 0) {
-            this.#learnFlightRange(entry.data, flown);
-            this.#learnRangeBonus(entry.ownerIndex, flown + entry.radius);
-        }
         this.#liveProjectiles.delete(key);
-    }
-
-    #installTravelTicksHook(base) {
-        try {
-            const insideCall = () => this.#insideTravelCall;
-            const learn = (key, a1, a2, ticks) => this.#learnTravel(key, a1, a2, ticks);
-            Interceptor.attach(base.add(offsets.LogicProjectileClient_getTravelTicks), {
-                onEnter(args) {
-                    this.key = args[0].toString();
-                    this.a1 = args[1].toUInt32();
-                    this.a2 = args[2].toUInt32();
-                },
-                onLeave(retval) {
-                    if (insideCall()) return;
-                    learn(this.key, this.a1, this.a2, retval.toInt32());
-                }
-            });
-        } catch {}
-    }
-
-    #installProjectilePathHook(base) {
-        try {
-            Interceptor.attach(base.add(offsets.CalculateProjectilePath), {
-                onEnter: () => {
-                    this.state.pathRanAt = Date.now();
-                }
-            });
-        } catch {}
     }
 
     onDataReload(callback) {
@@ -1263,13 +745,7 @@ class Scanner {
     }
 
     #notifyDataReload() {
-        this.#charRange.clear();
         this.#weaponMeta.clear();
-        this.#learnedTravel.clear();
-        this.#flightRange.clear();
-        this.#rangeBonus.clear();
-        this.#columnCache.clear();
-        this.#colCands.clear();
         this.#charSpeedByData.clear();
         for (const [, projectile] of this.#liveProjectiles) {
             projectile.castRange = 0;
@@ -1290,8 +766,6 @@ class Scanner {
         const remember = (character) => {
             const index = this.#readOwnerIndex(character);
             if (index < 0) return;
-            this.#charRange.delete(index);
-            this.#rangeBonus.delete(index);
             this.#rememberCharacter(index, character);
         };
         const names = [
@@ -1354,35 +828,16 @@ class Scanner {
                 }
             });
         } catch {}
-        this.#installTravelTicksHook(base);
-        this.#installProjectilePathHook(base);
         this.#installDataReloadHooks(base);
     }
 
-    learnedFlightRange(data) {
-        if (!isValidPtr(data)) return 0;
-        const v = this.#flightRange.get(data.toString()) || 0;
-        return Math.max(v, 0);
-    }
-
-    #learnFlightRange(data, flown) {
-        if (!isValidPtr(data) || !(flown > 0)) return;
-        const key = data.toString();
-        const prev = this.#flightRange.get(key) || 0;
-        if (flown > prev) this.#flightRange.set(key, flown);
-    }
-
-    #flightSeg(entry, flown) {
-        const learned = this.learnedFlightRange(entry.data);
-        let cap = learned > 0 ? learned + entry.radius : 0;
-        if (entry.lifeTicks > 0 && entry.speed > 0) {
-            const lifeCap = (entry.lifeTicks * entry.speed) / ticksPerSec;
-            if (lifeCap > cap) cap = lifeCap;
-        }
-        if (!(cap > 0) && entry.seg0 > 0) cap = entry.seg0;
+    #segmentLeft(entry, flown) {
+        let cap = 0;
+        if (entry.lifeTicks > 0 && entry.speed > 0)
+            cap = (entry.lifeTicks * entry.speed) / ticksPerSec;
+        if (!(cap > 0)) cap = entry.seg0;
         if (!(cap > 0)) return 0;
-        const remain = cap - flown;
-        return Math.max(remain, 0);
+        return Math.max(cap - flown, 0);
     }
 
     #applyMeta(entry, meta) {
@@ -1415,20 +870,7 @@ class Scanner {
         entry.vx = entry.vx * (1 - alpha) + observedVx * alpha;
         entry.vy = entry.vy * (1 - alpha) + observedVy * alpha;
         entry.hasVelocitySample = true;
-        const measured = length(entry.vx, entry.vy);
-        if (measured >= 300 && measured <= 8500) this.#learnOwnSpeed(entry, measured);
-    }
 
-    #learnOwnSpeed(entry, measured) {
-        if (entry.ownerIndex !== this.state.myPlayerIndex) return;
-        const dataPtr = entry.data;
-        if (!isValidPtr(dataPtr)) return;
-        const key = dataPtr.toString();
-        const acc = this.#speedByData.get(key) || { sum: 0, count: 0 };
-        acc.sum += measured;
-        acc.count++;
-        this.#speedByData.set(key, acc);
-        this.state.measuredSpeed = Math.round(acc.sum / acc.count);
     }
 
     #sampleEntryMotion(entry, x, y, now) {
@@ -1449,13 +891,6 @@ class Scanner {
         entry.hasTarget = true;
         if (!(entry.seg0 > 0) && !entry.spawnPending)
             entry.seg0 = length(target.x - entry.spawnX, target.y - entry.spawnY);
-    }
-
-    #learnCapOvershoot(entry, flown, now) {
-        if (!(entry.hasVelocitySample && now - entry.lastMoveTs < 200)) return;
-        const capLearned = this.learnedFlightRange(entry.data);
-        if (capLearned > 0 && flown > capLearned + entry.radius + 50)
-            this.#learnFlightRange(entry.data, flown + entry.speed * 0.7);
     }
 
     #badOwner(resolved, entry) {
@@ -1612,8 +1047,7 @@ class Scanner {
         }
         const flown = this.#traveled(entry, x, y);
         entry.flown = flown;
-        this.#learnCapOvershoot(entry, flown, now);
-        entry.seg = this.#flightSeg(entry, flown);
+        entry.seg = this.#segmentLeft(entry, flown);
         entry.segUncertain = !!(
             entry.hasVelocitySample &&
             now - entry.lastMoveTs < 200 &&
@@ -1629,7 +1063,7 @@ class Scanner {
     #updateLiveProjectiles(now) {
         const output = this.#outArr;
         output.length = 0;
-        this.#metaBudget = this.#probeBudget > 0 ? 4 : 0;
+        this.#metaBudget = 4;
         this.#liveProjectiles.forEach((entry, gid) => {
             try {
                 if (now - (entry.spawnTs || now) > staleMs) {
@@ -1736,7 +1170,7 @@ class Scanner {
             body: obj,
             teamId: this.#teamOf(obj, bm),
             moveSpeed: this.#characterSpeed(data),
-            moveAngle: this.#moveAngleOf(obj),
+            moveAngle: this.#readMoveAngle(obj),
             radius,
             kind: brawlerName ? "player" : "spawnable"
         };
@@ -1762,7 +1196,6 @@ class Scanner {
     }
 
     #scanEnemies(own, bm, now) {
-        this.#probeBudget = 8;
         const objMgr = bm.add(offsets.BattleMode_objectManager).readPointer();
         if (!isValidPtr(objMgr)) return [];
         const objects = objMgr.add(offsets.LogicGameObjectManagerClient_objects).readPointer();
@@ -1801,10 +1234,7 @@ class Scanner {
     }
 
     resetCache() {
-        this.#dataCache.clear();
-        this.#angleCache.clear();
         this.#brawlerNameCache.clear();
-        this.#charRange.clear();
         this.#weaponMeta.clear();
         this.#liveProjectiles.clear();
         this.#friendlyIdx.clear();
@@ -1812,21 +1242,9 @@ class Scanner {
         this.#objCount = 0;
         this.#objMgrPtr = null;
         this.#charsByIndex.clear();
-        this.#speedByData.clear();
         this.#charSpeedByData.clear();
-        this.#learnedTravel.clear();
-        this.#flightRange.clear();
-        this.#rangeBonus.clear();
-        this.#columnCache.clear();
-        this.#colCands.clear();
-        this.#rangeScale = 0;
         this.#outArr.length = 0;
-        this.#ringKeys.fill(0);
-        this.#ringVals.fill(null);
-        this.#ringHead = 0;
-        this.state.pathRanAt = 0;
         this.state.projectiles = [];
-        this.state.measuredSpeed = 0;
         this.state.myRadius = 0;
     }
 
@@ -1852,11 +1270,10 @@ export const isEnemyObject = (obj) => scanner.isEnemyObject(obj);
 export const travelTicks = (rangeUnits, speed, beam) =>
     scanner.travelTicks(rangeUnits, speed, beam);
 export const travelDistance = (ticks, speed) => scanner.travelDistance(ticks, speed);
-export const travelFor = (data) => scanner.travelFor(data);
-export const rangeScaleCalibrated = () => scanner.rangeScaleCalibrated();
+export const travelTicksFor = (data, rangeUnits, speed) =>
+    scanner.travelTicksFor(data, rangeUnits, speed);
 export const weaponRangeUnits = (character) => scanner.weaponRangeUnits(character);
 export const collisionRadius = (data) => scanner.collisionRadius(data);
-export const learnedFlightRange = (data) => scanner.learnedFlightRange(data);
 export const onDataReload = (callback) => scanner.onDataReload(callback);
 export const updateScanner = (bm, now) => scanner.update(bm, now);
 export const resetScannerCache = () => scanner.resetCache();
