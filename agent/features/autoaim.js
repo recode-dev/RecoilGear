@@ -193,7 +193,8 @@ class AutoAim {
 
     #snapTicks(t) {
         if (!(this.#ownTicks > 0) || !isFinite(t) || t <= 0) return t;
-        const maxT = this.#ownTicks >= beamTicks ? maxFlightS : this.#ownTicks * tickS;
+        const maxT =
+            this.#ownTicks >= beamTicks ? maxFlightS : this.#ownTicks / (ticksPerSec * 1000);
         const snapped = Math.round(t / tickS) * tickS;
         return Math.min(snapped > 0 ? snapped : tickS, maxT);
     }
@@ -290,7 +291,7 @@ class AutoAim {
         this.#ownTicks =
             speedForTicks > 0 && tiles > 0 ? travelTicksFor(data, tiles, speedForTicks) : 0;
         this.#ownTravel = this.#ownTicks > 0 ? travelDistance(this.#ownTicks, speedForTicks) : 0;
-        if (this.#ownTicks >= beamTicks) this.#ownBeam = true;
+        if (this.#ownTicks === beamTicks) this.#ownBeam = true;
     }
 
     #learnWeaponState(data, own) {

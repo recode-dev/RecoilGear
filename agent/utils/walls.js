@@ -18,7 +18,7 @@ class WallGrid {
     #width = 0;
     #height = 0;
     #needsRebuild = true;
-    #lastFailedTs = 0;
+    #lastFailedTs = -retryMs;
     #tileWatchInstalled = false;
     #pfHookInstalled = false;
     #pfMemo = new Map();
@@ -112,7 +112,7 @@ class WallGrid {
         this.#width = 0;
         this.#height = 0;
         this.#needsRebuild = true;
-        this.#lastFailedTs = 0;
+        this.#lastFailedTs = -retryMs;
         this.maybeRefreshWallCache(battleMode, Date.now());
     }
 
@@ -187,56 +187,33 @@ class WallGrid {
         });
     }
 
-    #blockedCell(cx, cy, checkBit) {
-        const width = this.#width;
-        const height = this.#height;
-        if (cx < 0 || cx >= width || cy < 0 || cy >= height) return false;
-        return !!(this.#walls[cy * width + cx] & checkBit);
+    #circleTouchesTile(wx, wy, r, tx, ty) {
+        const size = this.tileSize;
+        const cx = Math.max(tx * size, Math.min(wx, (tx + 1) * size));
+        const cy = Math.max(ty * size, Math.min(wy, (ty + 1) * size));
+        const dx = wx - cx;
+        const dy = wy - cy;
+        return dx * dx + dy * dy <= r * r;
     }
 
-    losCheck(wx0, wy0, wx1, wy1, checkBit) {
-        if (!this.#walls) return true;
-        let cx = Math.trunc(wx0 / this.tileSize);
-        let cy = Math.trunc(wy0 / this.tileSize);
-        const tx = Math.trunc(wx1 / this.tileSize);
-        const ty = Math.trunc(wy1 / this.tileSize);
-        if (cx === tx && cy === ty) return true;
-        const dx = Math.abs(tx - cx);
-        const dy = -Math.abs(ty - cy);
-        const sx = cx < tx ? 1 : -1;
-        const sy = cy < ty ? 1 : -1;
-        let err = dx + dy;
-        const maxSteps = dx - dy + 2;
-        for (let n = 0; n < maxSteps; n++) {
-            const e2 = 2 * err;
-            if (e2 >= dy) {
-                err += dy;
-                cx += sx;
-            }
-            if (e2 <= dx) {
-                err += dx;
-                cy += sy;
-            }
-            if (cx === tx && cy === ty) return !this.#blockedCell(tx, ty, checkBit);
-            if (this.#blockedCell(cx, cy, checkBit)) return false;
-        }
-        return true;
-    }
-
-    losCheckWide(wx0, wy0, wx1, wy1, opts) {
+    segBlocked(wx0, wy0, wx1, wy1, opts) {
+        if (!this.#walls) return false;
+        const radius = Math.max(opts.radius, 0);
         const checkBit = opts.bit;
-        if (this.losCheck(wx0, wy0, wx1, wy1, checkBit) === false) return false;
-        const r = Math.max(opts.radius, 0);
-        if (r <= 0) return true;
         const dx = wx1 - wx0;
         const dy = wy1 - wy0;
         const len = Math.hypot(dx, dy);
-        if (!(len > 1)) return this.isBlockedAt(wx1, wy1, checkBit) === false;
-        const px = (-dy / len) * r;
-        const py = (dx / len) * r;
-        if (this.losCheck(wx0 + px, wy0 + py, wx1 + px, wy1 + py, checkBit) === false) return false;
-        if (this.losCheck(wx0 - px, wy0 - py, wx1 - px, wy1 - py, checkBit) === false) return false;
-        return true;
+        if (!(len > 1)) return this.isBlockedCircle(wx1, wy1, radius, checkBit);
+        const n = Math.min(160, Math.max(1, Math.ceil(len / 25)));
+        for (let i = 0; i <= n; i++) {
+            const t = i / n;
+            if (this.isBlockedCircle(wx0 + dx * t, wy0 + dy * t, radius, checkBit)) return true;
+        }
+        return false;
+    }
+
+    losCheckWide(wx0, wy0, wx1, wy1, opts) {
+        return !this.segBlocked(wx0, wy0, wx1, wy1, opts);
     }
 
     isBlockedAt(wx, wy, checkBit) {
@@ -290,16 +267,54 @@ class WallGrid {
         }
     }
 
-    isBlockedWide(wx, wy, radius, checkBit) {
-        if (this.isBlockedAt(wx, wy, checkBit)) return true;
+    isBlockedCircle(wx, wy, radius, checkBit) {
+        const gridData = this.#walls;
+        if (!gridData) return false;
+        const width = this.#width;
+        const height = this.#height;
+        if (width <= 0 || height <= 0) return false;
         const r = Math.max(radius, 0);
-        if (r <= 0) return false;
-        return (
-            this.isBlockedAt(wx + r, wy, checkBit) ||
-            this.isBlockedAt(wx - r, wy, checkBit) ||
-            this.isBlockedAt(wx, wy + r, checkBit) ||
-            this.isBlockedAt(wx, wy - r, checkBit)
-        );
+        if (!(r > 0)) return this.isBlockedAt(wx, wy, checkBit);
+        const size = this.tileSize;
+        const tx0 = Math.max(0, Math.trunc((wx - r) / size));
+        const tx1 = Math.min(width - 1, Math.trunc((wx + r) / size));
+        const ty0 = Math.max(0, Math.trunc((wy - r) / size));
+        const ty1 = Math.min(height - 1, Math.trunc((wy + r) / size));
+        for (let ty = ty0; ty <= ty1; ty++) {
+            for (let tx = tx0; tx <= tx1; tx++) {
+                if (!(gridData[ty * width + tx] & checkBit)) continue;
+                if (this.#circleTouchesTile(wx, wy, r, tx, ty)) return true;
+            }
+        }
+        return false;
+    }
+
+    rayHitDistance(wx0, wy0, wx1, wy1, opts) {
+        if (!this.#walls) return -1;
+        const radius = Math.max(opts.radius, 0);
+        const checkBit = opts.bit;
+        const dx = wx1 - wx0;
+        const dy = wy1 - wy0;
+        const len = Math.hypot(dx, dy);
+        if (!(len > 1)) return this.isBlockedCircle(wx1, wy1, radius, checkBit) ? 0 : -1;
+        const samples = Math.min(96, Math.max(2, Math.ceil(len / (this.tileSize / 4))));
+        let prevT = 0;
+        for (let i = 1; i <= samples; i++) {
+            const t = i / samples;
+            if (this.isBlockedCircle(wx0 + dx * t, wy0 + dy * t, radius, checkBit)) {
+                let lo = prevT;
+                let hi = t;
+                for (let k = 0; k < 5; k++) {
+                    const mid = (lo + hi) / 2;
+                    if (this.isBlockedCircle(wx0 + dx * mid, wy0 + dy * mid, radius, checkBit))
+                        hi = mid;
+                    else lo = mid;
+                }
+                return hi * len;
+            }
+            prevT = t;
+        }
+        return -1;
     }
 }
 
@@ -313,5 +328,5 @@ export const losCheckWide = (wx0, wy0, wx1, wy1, opts) =>
     wallGrid.losCheckWide(wx0, wy0, wx1, wy1, opts);
 export const firstWallHit = (wx0, wy0, wx1, wy1, size) =>
     wallGrid.firstWallHit(wx0, wy0, wx1, wy1, size);
-export const isBlockedWide = (wx, wy, radius, checkBit) =>
-    wallGrid.isBlockedWide(wx, wy, radius, checkBit);
+export const rayHitDistance = (wx0, wy0, wx1, wy1, opts) =>
+    wallGrid.rayHitDistance(wx0, wy0, wx1, wy1, opts);

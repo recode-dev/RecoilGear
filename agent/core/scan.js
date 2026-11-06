@@ -5,6 +5,7 @@ import { readScString } from "./scstring.js";
 const tileUnits = 100;
 export const ticksPerSec = 20;
 export const beamTicks = 18000;
+const projectileSpeedPerTick = 0.1;
 const staleMs = 10000;
 const defaultProjectileRadius = 40;
 
@@ -129,7 +130,7 @@ class Scanner {
 
     travelDistance(ticks, speed) {
         if (!(ticks > 0) || ticks >= beamTicks || !(speed > 0)) return 0;
-        return Math.round((ticks * speed) / ticksPerSec);
+        return Math.round((ticks * speed) / (ticksPerSec * 1000));
     }
 
     #weaponSkillFor(character) {
@@ -421,7 +422,7 @@ class Scanner {
     #segmentLeft(entry, flown) {
         let cap = 0;
         if (entry.lifeTicks > 0 && entry.speed > 0)
-            cap = (entry.lifeTicks * entry.speed) / ticksPerSec;
+            cap = entry.lifeTicks * entry.speed * projectileSpeedPerTick;
         if (!(cap > 0)) cap = entry.seg0;
         if (!(cap > 0)) return 0;
         return Math.max(cap - flown, 0);

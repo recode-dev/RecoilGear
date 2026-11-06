@@ -2,7 +2,7 @@ import { sendCommand } from "../core/commands.js";
 import { getFunctions } from "../core/functions.js";
 import { offsets } from "../core/offsets.js";
 import { collisionRadius, enableProjectileTracking, onDataReload, scanData } from "../core/scan.js";
-import { firstWallHit, isBlockedWide, movementBit } from "../utils/walls.js";
+import { firstWallHit, movementBit, rayHitDistance } from "../utils/walls.js";
 
 const moveInputType = 2;
 const deg2rad = Math.PI / 180;
@@ -163,6 +163,7 @@ class DodgeCore {
             return;
         }
         const half = Math.trunc(p.volleySpread) / 2 + 8;
+        const observedSpeed = Math.hypot(p.vx, p.vy);
         list.push({
             kind: "cone",
             key,
@@ -171,10 +172,7 @@ class DodgeCore {
             bis: bearingDeg(this.#myX - p.spawnX, this.#myY - p.spawnY),
             half: half * deg2rad,
             range: this.#coneReach(p),
-            speed: Math.max(
-                1,
-                Math.trunc(p.speed) > 0 ? Math.trunc(p.speed) : Math.hypot(p.vx, p.vy)
-            ),
+            speed: Math.max(1, observedSpeed > 1 ? observedSpeed : Math.trunc(p.speed)),
             seg: Math.trunc(p.seg) > 0 ? p.seg : -1,
             gid: p.gid
         });
@@ -337,25 +335,16 @@ class DodgeCore {
         const rad = deg * deg2rad;
         const ex = this.#myX + Math.cos(rad) * 1000;
         const ey = this.#myY + Math.sin(rad) * 1000;
-        const hit = this.#walls.firstWallHit(this.#myX, this.#myY, ex, ey, this.#myR > 200 ? 2 : 1);
-        if (hit >= 0) return hit >= 1000 ? 1000 : Math.max(0, hit - this.#myR - 40);
-        if (!this.#walls.isBlockedWide(ex, ey, this.#myR, this.#walls.movementBit)) return 1000;
-        let lo = 0;
-        let hi = 1000;
-        for (let i = 0; i < 6; i++) {
-            const mid = (lo + hi) / 2;
-            if (
-                this.#walls.isBlockedWide(
-                    this.#myX + Math.cos(rad) * mid,
-                    this.#myY + Math.sin(rad) * mid,
-                    this.#myR,
-                    this.#walls.movementBit
-                )
-            )
-                hi = mid;
-            else lo = mid;
+        let hit = this.#walls.firstWallHit(this.#myX, this.#myY, ex, ey, this.#myR > 200 ? 2 : 1);
+        if (hit < 0) {
+            hit = this.#walls.rayHitDistance(this.#myX, this.#myY, ex, ey, {
+                radius: this.#myR,
+                bit: this.#walls.movementBit
+            });
         }
-        return Math.max(0, lo - this.#myR - 40);
+        if (hit < 0) return 1000;
+        if (hit >= 1000) return 1000;
+        return Math.max(0, hit - this.#myR - 40);
     }
 
     #anchor(deg) {
@@ -379,15 +368,35 @@ class DodgeCore {
         return d * Math.sin((a - h.half) * deg2rad);
     }
 
-    #sepAt(h, px, py, t) {
-        if (h.kind === "linear") {
-            const spd = Math.hypot(h.vx, h.vy);
-            if (!(spd > 1)) return this.#dist(h.x, h.y, px, py) - h.hitR;
-            if (h.left > 0 && t > h.left / spd) return 420;
-            return Math.hypot(px - (h.x + h.vx * t), py - (h.y + h.vy * t)) - h.hitR;
+    #sepPointMin(hazard, wx, wy, tMax) {
+        const hr = hazard.kind === "linear" ? hazard.hitR : hazard.r;
+        const rx = this.#myX - hazard.x;
+        const ry = this.#myY - hazard.y;
+        const w2 = wx * wx + wy * wy;
+        let t = 0;
+        if (w2 > 1e-6) {
+            const tStar = -(rx * wx + ry * wy) / w2;
+            t = Math.min(Math.max(tStar, 0), tMax);
         }
-        if (h.kind === "cone") return this.#wedgeSep(h, px, py);
-        return this.#dist(h.x, h.y, px, py) - h.r;
+        return Math.hypot(rx + wx * t, ry + wy * t) - hr;
+    }
+
+    #linearSep(hazard, vx, vy) {
+        const spd = Math.hypot(hazard.vx, hazard.vy);
+        let tMax = tune.horizonS;
+        if (hazard.left > 0 && spd > 1) tMax = Math.min(tMax, hazard.left / spd);
+        return this.#sepPointMin(hazard, vx - hazard.vx, vy - hazard.vy, tMax);
+    }
+
+    #coneSep(hazard, vx, vy) {
+        let sep = 420;
+        for (let s = 1; s <= 8; s++) {
+            const t = tune.horizonS * (s / 8) * (s / 8);
+            const d = this.#wedgeSep(hazard, this.#myX + vx * t, this.#myY + vy * t);
+            if (d < sep) sep = d;
+            if (sep <= -200) break;
+        }
+        return sep;
     }
 
     #separationScore(hazards, deg) {
@@ -396,13 +405,10 @@ class DodgeCore {
         const vy = Math.sin(rad) * this.#speed;
         let total = 0;
         for (const hazard of hazards) {
-            let sep = 420;
-            for (let s = 1; s <= 8; s++) {
-                const t = tune.horizonS * (s / 8) * (s / 8);
-                const d = this.#sepAt(hazard, this.#myX + vx * t, this.#myY + vy * t, t);
-                if (d < sep) sep = d;
-                if (sep <= -200) break;
-            }
+            let sep;
+            if (hazard.kind === "linear") sep = this.#linearSep(hazard, vx, vy);
+            else if (hazard.kind === "cone") sep = this.#coneSep(hazard, vx, vy);
+            else sep = this.#sepPointMin(hazard, vx, vy, tune.horizonS);
             if (sep < -200) sep = -200;
             else if (sep > 420) sep = 420;
             total += sep;
@@ -471,8 +477,35 @@ class DodgeCore {
         return best;
     }
 
+    #stepBlocked(step) {
+        return (
+            this.#walls.rayHitDistance(this.#myX, this.#myY, step.x, step.y, {
+                radius: this.#myR,
+                bit: this.#walls.movementBit
+            }) >= 0
+        );
+    }
+
+    #lastResortHeading(hazards) {
+        let bestDeg = -1;
+        let bestScore = -Infinity;
+        for (const element of ring) {
+            const room = this.#wallRoom(element);
+            if (room <= 240) continue;
+            const score =
+                this.#separationScore(hazards, element) -
+                (tune.wallPenalty * Math.max(0, 1000 - room)) / 1000;
+            if (score > bestScore) {
+                bestScore = score;
+                bestDeg = element;
+            }
+        }
+        return bestDeg;
+    }
+
     #engage(hazards) {
         const now = this.#now;
+        this.#curDeg = NaN;
         let deg = null;
         let anchor = null;
         const picked = this.#bestHeading(hazards, null);
@@ -484,13 +517,9 @@ class DodgeCore {
             if (anchor) deg = snapped;
         }
         if (deg === null) {
-            for (const element of ring) {
-                anchor = this.#anchor(element);
-                if (anchor) {
-                    deg = element;
-                    break;
-                }
-            }
+            deg = this.#lastResortHeading(hazards);
+            if (deg >= 0) anchor = this.#anchor(deg);
+            else deg = null;
         }
         if (deg === null || !anchor) return { active: false };
         this.#curDeg = deg;
@@ -543,11 +572,12 @@ class DodgeCore {
 
     #slewDeg(deg) {
         if (!isFinite(this.#curDeg)) return deg;
-        const diff = angDiff(deg, this.#curDeg);
+        const diff = wrap360(deg - this.#curDeg);
+        const delta = diff > 180 ? diff - 360 : diff;
         const maxStep = 16;
-        if (diff > maxStep) return this.#curDeg + maxStep;
-        if (diff < -maxStep) return this.#curDeg - maxStep;
-        return deg;
+        if (delta > maxStep) return wrap360(this.#curDeg + maxStep);
+        if (delta < -maxStep) return wrap360(this.#curDeg - maxStep);
+        return wrap360(deg);
     }
 
     #hold(hazards, danger) {
@@ -556,6 +586,11 @@ class DodgeCore {
         this.#revalidate(cmd, hazards);
         if (this.#releaseCheck(cmd, danger)) return { active: false, stopped: true };
         const step = this.#stepTarget(cmd.headingDeg);
+        if (this.#stepBlocked(step)) {
+            const repick = this.#engage(hazards);
+            if (!repick.active) return { active: false, stopped: true };
+            return repick;
+        }
         cmd.tx = step.x;
         cmd.ty = step.y;
         return {
@@ -600,7 +635,8 @@ class AutoDodge {
     #radiusMemoData = null;
     #radiusMemoValue = 0;
     #stopSent = false;
-    #wallsApi = { firstWallHit, isBlockedWide, movementBit };
+    #wallsApi = { firstWallHit, rayHitDistance, movementBit };
+
     #core = new DodgeCore();
 
     #characterCollisionRadius(data) {
