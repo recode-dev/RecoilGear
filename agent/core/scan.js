@@ -38,7 +38,6 @@ class Scanner {
     state = {
         ownCharacter: ptr(0),
         battleModeClient: ptr(0),
-        myTeamId: 0,
         myPlayerIndex: -1,
         myX: 0,
         myY: 0,
@@ -335,14 +334,6 @@ class Scanner {
             if (v <= max) return v;
         } catch {}
         return -1;
-    }
-
-    #volleyMs(weapon) {
-        if (!weapon) return 0;
-        if (weapon.bullets < 2 || weapon.msBetween <= 0) return 0;
-        const total = weapon.bullets * weapon.msBetween;
-        if (total > 0 && total <= 4000) return total;
-        return 0;
     }
 
     #steerSpecs(data) {
@@ -668,7 +659,6 @@ class Scanner {
             spawnTs: now,
             lastX: x,
             lastY: y,
-            lastTs: now,
             lastMoveTs: now,
             vx: 0,
             vy: 0,
@@ -737,7 +727,6 @@ class Scanner {
         this.#weaponMeta.clear();
         this.#charSpeedByData.clear();
         for (const [, projectile] of this.#liveProjectiles) {
-            projectile.castRange = 0;
             projectile.travelDistance = 0;
             projectile.ticks = 0;
         }
@@ -968,13 +957,12 @@ class Scanner {
         this.#staticOutputFields(entry, o);
         this.#effectOutputFields(entry, o);
         const w = this.#weaponForOwner(entry.ownerIndex);
-        o.volleyMs = this.#volleyMs(w);
         o.volleyBullets = (w && w.bullets) || 0;
         o.volleySpread = (w && w.spread) || 0;
         return o;
     }
 
-    #refreshOutput(entry, o, x, y, flown) {
+    #refreshOutput(entry, o, x, y) {
         o.x = x;
         o.y = y;
         o.spawnX = entry.spawnX;
@@ -985,7 +973,6 @@ class Scanner {
         o.speed = entry.speed;
         o.seg = entry.seg;
         o.segUncertain = !!entry.segUncertain;
-        o.flown = flown;
         o.hasTarget = !!entry.hasTarget;
         o.targetX = entry.targetX;
         o.targetY = entry.targetY;
@@ -1015,7 +1002,6 @@ class Scanner {
         this.#sampleEntryMotion(entry, x, y, now);
         entry.lastX = x;
         entry.lastY = y;
-        entry.lastTs = now;
         entry.x = x;
         entry.y = y;
         entry.ownerIndex = this.#readOwnerIndex(entry.ptr);
@@ -1034,7 +1020,6 @@ class Scanner {
             );
         }
         const flown = this.#traveled(entry, x, y);
-        entry.flown = flown;
         entry.seg = this.#segmentLeft(entry, flown);
         entry.segUncertain = !!(
             entry.hasVelocitySample &&
@@ -1044,7 +1029,7 @@ class Scanner {
         );
         if (!this.#entryVisible(entry, this.#resolveOwner(entry))) return;
         const o = entry.out || this.#newOutput(entry, gid);
-        this.#refreshOutput(entry, o, x, y, flown);
+        this.#refreshOutput(entry, o, x, y);
         output.push(o);
     }
 
@@ -1071,15 +1056,10 @@ class Scanner {
     }
 
     #scanOwn(own, bm) {
-        let myTeamFromMgr = -1;
         try {
             const mgrForTeam = bm.add(offsets.BattleMode_objectManager).readPointer();
-            if (isValidPtr(mgrForTeam)) {
-                this.#objMgrPtr = mgrForTeam;
-                myTeamFromMgr = this.#ownTeamOf(mgrForTeam);
-            }
+            if (isValidPtr(mgrForTeam)) this.#objMgrPtr = mgrForTeam;
         } catch {}
-        this.state.myTeamId = myTeamFromMgr >= 0 ? myTeamFromMgr : this.#teamOf(own, bm);
         this.state.myPlayerIndex = this.#readOwnerIndex(own);
         this.#friendlyIdx.clear();
         this.#friendlyIdx.add(this.state.myPlayerIndex);
