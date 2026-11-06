@@ -27,8 +27,6 @@ const LEAD_PASSES = 3;
 const MAX_FLIGHT_S = 3;
 const STICKY_MARGIN = 1.12;
 const TICK_S = 1 / TICKS_PER_SEC;
-const STEER_LEAD_FACTOR = 0.75;
-const LINEUP_BONUS = 220;
 const WALKBACK_FRACS = [0.55, 0.25, 0];
 
 const length = (x: number, y: number): number => Math.floor(Math.hypot(x, y));
@@ -128,12 +126,9 @@ class AutoAim {
     #speedAt = 0;
     #speedFailAt = 0;
     #ownBeam = false;
-    #ownPierces = false;
-    #ownPiercesChars = false;
     #ownShotR = 0;
     #ownTicks = 0;
     #ownTravel = 0;
-    #ownSteerLife = 0;
     #rangeCache = 0;
     #rangeAt = 0;
     #hooks = false;
@@ -284,11 +279,11 @@ class AutoAim {
         return Math.min(snapped > 0 ? snapped : TICK_S, maxT);
     }
 
-    #applyLead(pred: Prediction, lead: number): void {
-        pred.leadVx = pred.vx * lead;
-        pred.leadVy = pred.vy * lead;
-        pred.leadAx = pred.ax * lead;
-        pred.leadAy = pred.ay * lead;
+    #applyLead(pred: Prediction): void {
+        pred.leadVx = pred.vx;
+        pred.leadVy = pred.vy;
+        pred.leadAx = pred.ax;
+        pred.leadAy = pred.ay;
     }
 
     #solveFlying(
@@ -339,7 +334,7 @@ class AutoAim {
             if (d0 > range) return null;
         }
         if (!(speed > 0)) return { x: Math.round(pred.x), y: Math.round(pred.y), t: 0 };
-        this.#applyLead(pred, this.#ownSteerLife > 0 ? STEER_LEAD_FACTOR : 1);
+        this.#applyLead(pred);
         const t = this.#flightTime(
             pred.x - scanData.myX,
             pred.y - scanData.myY,
@@ -371,39 +366,18 @@ class AutoAim {
         return radius;
     }
 
-    #learnSteer(data: NativePointer): void {
-        try {
-            const steer = data.add(OFFSETS.LogicProjectileData_steerStrength).readFloat();
-            const life = readClampedS32(data, OFFSETS.LogicProjectileData_steerLifeTime, 1, 20000);
-            this.#ownSteerLife = steer > 0 && life > 0 ? life : 0;
-        } catch {
-            this.#ownSteerLife = 0;
-        }
-    }
-
     #learnTravelTicks(data: NativePointer, engineSpeed: number, own: NativePointer): void {
         const tiles = weaponRangeUnits(own);
         const speedForTicks = engineSpeed > 0 ? engineSpeed : this.#projectileSpeed;
         this.#ownTicks =
             speedForTicks > 0 && tiles > 0 ? travelTicksFor(data, tiles, speedForTicks) : 0;
         this.#ownTravel = this.#ownTicks > 0 ? travelDistance(this.#ownTicks, speedForTicks) : 0;
-        if (this.#ownTicks === BEAM_TICKS) this.#ownBeam = true;
+        this.#ownBeam = this.#ownTicks === BEAM_TICKS;
     }
 
     #learnWeaponState(data: NativePointer, own: NativePointer): number {
         const engineSpeed = readClampedS32(data, OFFSETS.LogicProjectileData_speed, 300, 8500);
-        this.#ownBeam = data.add(OFFSETS.LogicProjectileData_isBeamField).readU8() > 0;
-        const passes = data.add(OFFSETS.LogicProjectileData_passesEnvironment).readU8() & 1;
-        const pierces = data.add(OFFSETS.LogicProjectileData_piercesEnvironmentField).readU8() & 1;
-        this.#ownPierces = (passes | pierces) === 1;
-        try {
-            this.#ownPiercesChars =
-                (data.add(OFFSETS.LogicProjectileData_piercesCharacters).readU8() & 1) === 1;
-        } catch {
-            this.#ownPiercesChars = false;
-        }
         this.#ownShotR = this.#shotRadius(data);
-        this.#learnSteer(data);
         this.#learnTravelTicks(data, engineSpeed, own);
         return engineSpeed;
     }
@@ -522,40 +496,11 @@ class AutoAim {
         pred.radius = Math.trunc(enemy.radius);
         const aim = this.#solve(pred, speed, this.#ownRange());
         if (!aim) return null;
-        if (this.#ownPierces) return this.#finishAim(aim, mx, my);
         const pocketR = this.#ownShotR > 0 ? this.#ownShotR : 40;
         if (!isFinite(aim.x) || !isFinite(aim.y)) return null;
         if (losCheckWide(mx, my, aim.x, aim.y, { bit: PROJECTILE_BIT, radius: pocketR }))
             return this.#finishAim(aim, mx, my);
         return this.#blockedWalkback(pred, aim, mx, my, pocketR);
-    }
-
-    #lineupHits(
-        list: EnemyInfo[],
-        mx: number,
-        my: number,
-        target: EnemyInfo,
-        pocket: number,
-    ): number {
-        const ax = target.x - mx;
-        const ay = target.y - my;
-        const len = length(ax, ay);
-        if (len < 1) return 0;
-        const ux = ax / len;
-        const uy = ay / len;
-        let hits = 0;
-        for (const other of list) {
-            if (!other || other === target) continue;
-            if (other.kind !== "player") continue;
-            if (this.#isSkipped(other.brawlerName)) continue;
-            const rx = other.x - mx;
-            const ry = other.y - my;
-            const along = rx * ux + ry * uy;
-            if (along <= 0 || along > len * 1.6) continue;
-            const off = Math.abs(rx * -uy + ry * ux);
-            if (off <= pocket + (other.radius > 0 ? other.radius : 60)) hits++;
-        }
-        return hits;
     }
 
     #enemyByPtr(candidate: NativePointer | null): EnemyInfo | null {
@@ -592,7 +537,6 @@ class AutoAim {
         if (!enemy || !enemy.ptr || enemy.ptr.isNull()) return false;
         if (enemy.kind !== "player") return false;
         if (this.#isSkipped(enemy.brawlerName)) return false;
-        if (this.#ownPierces) return true;
         const pocketR = this.#ownShotR > 0 ? this.#ownShotR : 40;
         return losCheckWide(mx, my, enemy.x, enemy.y, { bit: PROJECTILE_BIT, radius: pocketR });
     }
@@ -644,10 +588,7 @@ class AutoAim {
             const dist = distance(enemy.x, enemy.y, mx, my);
             const pocket = Math.max(this.#ownShotR, 0) + pred.radius;
             if (range > 0 && dist - pocket > range) continue;
-            const score = this.#ownPiercesChars
-                ? dist - this.#lineupHits(list, mx, my, enemy, pocket) * LINEUP_BONUS
-                : dist;
-            this.#consider(state, enemy, pred, score);
+            this.#consider(state, enemy, pred, dist);
         }
         const { pick, pred } = this.#selectPick(state, now);
         if (!pick || !pred) return null;
@@ -665,10 +606,7 @@ class AutoAim {
         this.#ownShotR = 0;
         this.#ownTicks = 0;
         this.#ownTravel = 0;
-        this.#ownSteerLife = 0;
         this.#ownBeam = false;
-        this.#ownPierces = false;
-        this.#ownPiercesChars = false;
     }
 
     setup(): void {

@@ -25,22 +25,8 @@ export interface OffsetTable {
     LogicProjectileClient_stunMs: number;
     LogicProjectileClient_effectMs: number;
 
-    LogicProjectileData_indirect: number;
-    LogicProjectileData_gravity: number;
     LogicProjectileData_speed: number;
-    LogicProjectileData_preExplosionTimeMs: number;
     LogicProjectileData_radius: number;
-    LogicProjectileData_triggerWithDelayMs: number;
-    LogicProjectileData_spawnAreaEffectTrail: number;
-    LogicProjectileData_isBeamField: number;
-    LogicProjectileData_piercesCharacters: number;
-    LogicProjectileData_piercesEnvironmentField: number;
-    LogicProjectileData_passesEnvironment: number;
-    LogicProjectileData_travelType: number;
-    LogicProjectileData_steerStrength: number;
-    LogicProjectileData_steerLifeTime: number;
-    LogicProjectileData_allowDynamicRange: number;
-    LogicProjectileData_attachAreaEffectToTarget: number;
 
     LogicCharacterData_speed: number;
 
@@ -132,22 +118,8 @@ export const OFFSETS: Readonly<OffsetTable> = Object.freeze({
     LogicProjectileClient_stunMs: 0x220,
     LogicProjectileClient_effectMs: 0x228,
 
-    LogicProjectileData_indirect: 0x108,
-    LogicProjectileData_gravity: 0x118,
     LogicProjectileData_speed: 0x124,
-    LogicProjectileData_preExplosionTimeMs: 0x128,
     LogicProjectileData_radius: 0x130,
-    LogicProjectileData_triggerWithDelayMs: 0x138,
-    LogicProjectileData_spawnAreaEffectTrail: 0x1a8,
-    LogicProjectileData_isBeamField: 0x1d9,
-    LogicProjectileData_piercesCharacters: 0x1e4,
-    LogicProjectileData_piercesEnvironmentField: 0x1e5,
-    LogicProjectileData_passesEnvironment: 0x23c,
-    LogicProjectileData_travelType: 0x260,
-    LogicProjectileData_steerStrength: 0x278,
-    LogicProjectileData_steerLifeTime: 0x284,
-    LogicProjectileData_allowDynamicRange: 0x2dd,
-    LogicProjectileData_attachAreaEffectToTarget: 0x2e1,
 
     LogicCharacterData_speed: 0x26c,
 

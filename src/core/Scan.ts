@@ -44,10 +44,6 @@ export interface ProjectileOutput {
     travelType: number;
     stunMs: number;
     silenceMs: number;
-    triggerMs: number;
-    gravity: number;
-    attachArea: number;
-    trail: number;
     volleyBullets: number;
     volleySpread: number;
     x: number;
@@ -63,7 +59,6 @@ export interface ProjectileOutput {
     targetX: number;
     targetY: number;
     ageMs: number;
-    preMs: number;
     ownerIndex: number;
 }
 
@@ -93,13 +88,8 @@ interface ProjectileEntry {
     vy: number;
     hasVelocitySample: boolean;
     travelType: number;
-    preMs: number;
     stunMs: number;
     silenceMs: number;
-    triggerMs: number;
-    gravity: number;
-    attachArea: number;
-    trail: number;
     lifeTicks: number;
     seg: number;
     out: ProjectileOutput | null;
@@ -355,17 +345,7 @@ class Scanner {
         }
     }
 
-    #dataU8(data: NativePointer, off: number): number {
-        try {
-            return data.add(off).readU8() & 1;
-        } catch {
-            return 0;
-        }
-    }
-
-    #travelTypeOf(data: NativePointer, projectile: NativePointer): number {
-        const travelType = readClampedS32(data, OFFSETS.LogicProjectileData_travelType, 0, 20);
-        if (travelType) return travelType;
+    #travelTypeOf(projectile: NativePointer): number {
         try {
             const raw = projectile.add(OFFSETS.LogicProjectileClient_travelType).readU32();
             return raw <= 20 ? raw : 0;
@@ -402,10 +382,8 @@ class Scanner {
         const y = this.#posY(projectile);
         const spawnReady = x !== 0 || y !== 0;
         const target = this.#readProjectileTarget(projectile, x, y);
-        let isIndirect = this.#dataU8(data, OFFSETS.LogicProjectileData_indirect);
-        const travelType = this.#travelTypeOf(data, projectile);
-        const dynamicRange = this.#dataU8(data, OFFSETS.LogicProjectileData_allowDynamicRange);
-        if (travelType === 6 || dynamicRange) isIndirect = 1;
+        const travelType = this.#travelTypeOf(projectile);
+        const isIndirect = travelType === 6 ? 1 : 0;
         const targetObj = this.#readPtrField(
             projectile,
             OFFSETS.LogicProjectileClient_targetObject,
@@ -436,18 +414,8 @@ class Scanner {
             vy: 0,
             hasVelocitySample: false,
             travelType,
-            preMs: readClampedS32(data, OFFSETS.LogicProjectileData_preExplosionTimeMs, 1, 60000),
             stunMs: readClampedS32(projectile, OFFSETS.LogicProjectileClient_stunMs, 1, 60000),
             silenceMs: readClampedS32(projectile, OFFSETS.LogicProjectileClient_effectMs, 1, 60000),
-            triggerMs: readClampedS32(
-                data,
-                OFFSETS.LogicProjectileData_triggerWithDelayMs,
-                1,
-                60000,
-            ),
-            gravity: readClampedS32(data, OFFSETS.LogicProjectileData_gravity, 1, 20000),
-            attachArea: this.#dataU8(data, OFFSETS.LogicProjectileData_attachAreaEffectToTarget),
-            trail: this.#dataU8(data, OFFSETS.LogicProjectileData_spawnAreaEffectTrail),
             lifeTicks: readClampedS32(
                 projectile,
                 OFFSETS.LogicProjectileClient_lifeTicks,
@@ -626,10 +594,6 @@ class Scanner {
         output.travelType = entry.travelType || 0;
         output.stunMs = entry.stunMs || 0;
         output.silenceMs = entry.silenceMs || 0;
-        output.triggerMs = entry.triggerMs || 0;
-        output.gravity = entry.gravity || 0;
-        output.attachArea = entry.attachArea || 0;
-        output.trail = entry.trail || 0;
         const weapon = this.#weaponForOwner(entry.ownerIndex);
         output.volleyBullets = (weapon && weapon.bullets) || 0;
         output.volleySpread = (weapon && weapon.spread) || 0;
@@ -650,7 +614,6 @@ class Scanner {
         o.targetX = entry.targetX;
         o.targetY = entry.targetY;
         o.ageMs = entry.ageMs;
-        o.preMs = entry.preMs || 0;
         o.ownerIndex = entry.ownerIndex;
     }
 

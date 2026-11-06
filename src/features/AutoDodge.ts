@@ -157,8 +157,6 @@ class DodgeCore {
     }
 
     #ignored(p: ProjectileOutput): boolean {
-        if (Math.trunc(p.travelType) === 6) return true;
-        if (Math.trunc(p.gravity) > 0) return true;
         return !!p.isIndirect;
     }
 
