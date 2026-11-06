@@ -634,15 +634,19 @@ class AutoDodge {
         }
     }
 
+    #moveCommand(x, y) {
+        return sendCommand(moveInputType, (ci) => {
+            ci.add(offsets.ClientInput_x).writeS32(x);
+            ci.add(offsets.ClientInput_y).writeS32(y);
+        });
+    }
+
     #issueMove(x, y) {
         try {
             const logic = scanData.battleModeClient;
             if (!logic || logic.isNull()) return false;
             getFunctions().LogicBattleModeClient_setClientPredictionMoveTo(logic, x, y, 1);
-            return sendCommand(moveInputType, (ci) => {
-                ci.add(offsets.ClientInput_x).writeS32(x);
-                ci.add(offsets.ClientInput_y).writeS32(y);
-            });
+            return this.#moveCommand(x, y);
         } catch {
             return false;
         }
@@ -652,10 +656,7 @@ class AutoDodge {
         try {
             const logic = scanData.battleModeClient;
             if (!logic || logic.isNull()) return false;
-            return sendCommand(moveInputType, (ci) => {
-                ci.add(offsets.ClientInput_x).writeS32(scanData.myX);
-                ci.add(offsets.ClientInput_y).writeS32(scanData.myY);
-            });
+            return this.#moveCommand(scanData.myX, scanData.myY);
         } catch {
             return false;
         }

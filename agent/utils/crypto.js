@@ -72,10 +72,7 @@ export const inputToken = (secrets, typeConst, snapshot) => {
     inner.set(mixed, 0);
     inner.fill(0x36, 16, 64);
     inner.set(data, 64);
-    inner[80] = typeConst[0];
-    inner[81] = typeConst[1];
-    inner[82] = typeConst[2];
-    inner[83] = typeConst[3];
+    inner.set(typeConst, 80);
     inner[84] = 0x80;
     inner[126] = 0x02;
     inner[127] = 0xa0;

@@ -1,4 +1,4 @@
-import { initFunctions } from "./core/functions.js";
+import { attachOffset, initFunctions } from "./core/functions.js";
 import { offsets } from "./core/offsets.js";
 import { initScanner, resetScannerCache, updateScanner } from "./core/scan.js";
 import { resetAutoAim, setupAutoAim, updateAutoAim } from "./features/autoaim.js";
@@ -70,13 +70,11 @@ class RecoilGearAgent {
         watchTileChanges(mod.base);
         setupAutoDodge();
         setupAutoAim();
-        try {
-            Interceptor.attach(mod.base.add(offsets.LogicBattleModeClient_update), {
-                onEnter: (args) => {
-                    this.#tick(args[0]);
-                }
-            });
-        } catch {}
+        attachOffset(mod.base, offsets.LogicBattleModeClient_update, {
+            onEnter: (args) => {
+                this.#tick(args[0]);
+            }
+        });
         this.#installed = true;
         return true;
     }

@@ -1,4 +1,4 @@
-import { getFunctions, isValidPtr, ptrFromU32 } from "../core/functions.js";
+import { attachOffset, getFunctions, isValidPtr, ptrFromU32 } from "../core/functions.js";
 import { offsets } from "../core/offsets.js";
 
 const maxMapTiles = 120;
@@ -147,15 +147,13 @@ class WallGrid {
 
     watchTileChanges(base) {
         if (!this.#tileWatchInstalled) {
-            try {
-                Interceptor.attach(base.add(offsets.LogicTile_setData), {
-                    onEnter: () => {
-                        this.#needsRebuild = true;
-                        this.#pfMemo.clear();
-                    }
-                });
-                this.#tileWatchInstalled = true;
-            } catch {}
+            const listener = attachOffset(base, offsets.LogicTile_setData, {
+                onEnter: () => {
+                    this.#needsRebuild = true;
+                    this.#pfMemo.clear();
+                }
+            });
+            this.#tileWatchInstalled = listener !== null;
         }
         this.#installPathHook(base);
     }
@@ -163,32 +161,30 @@ class WallGrid {
     #installPathHook(base) {
         if (this.#pfHookInstalled) return;
         this.#pfHookInstalled = true;
-        try {
-            const remember = (q, dist) => this.#pfRemember(q, dist);
-            Interceptor.attach(base.add(offsets.LogicGamePlayUtil_getClosestPathfinderCollision), {
-                onEnter(args) {
-                    this.size = args[0].toInt32();
-                    this.x1 = args[1].toInt32();
-                    this.y1 = args[2].toInt32();
-                    this.x2 = args[3].toInt32();
-                    this.y2 = args[4].toInt32();
-                    this.out = args[6];
-                    this.f1 = args[7].toInt32();
-                    this.f2 = args[8].toInt32();
-                },
-                onLeave(retval) {
-                    try {
-                        let dist = Math.round(Math.hypot(this.x2 - this.x1, this.y2 - this.y1));
-                        if (retval.toInt32() & 1) {
-                            const hx = Math.trunc(this.out.readS32());
-                            const hy = Math.trunc(this.out.add(4).readS32());
-                            dist = Math.max(0, Math.round(Math.hypot(hx - this.x1, hy - this.y1)));
-                        }
-                        remember(this, dist);
-                    } catch {}
-                }
-            });
-        } catch {}
+        const remember = (q, dist) => this.#pfRemember(q, dist);
+        attachOffset(base, offsets.LogicGamePlayUtil_getClosestPathfinderCollision, {
+            onEnter(args) {
+                this.size = args[0].toInt32();
+                this.x1 = args[1].toInt32();
+                this.y1 = args[2].toInt32();
+                this.x2 = args[3].toInt32();
+                this.y2 = args[4].toInt32();
+                this.out = args[6];
+                this.f1 = args[7].toInt32();
+                this.f2 = args[8].toInt32();
+            },
+            onLeave(retval) {
+                try {
+                    let dist = Math.round(Math.hypot(this.x2 - this.x1, this.y2 - this.y1));
+                    if (retval.toInt32() & 1) {
+                        const hx = Math.trunc(this.out.readS32());
+                        const hy = Math.trunc(this.out.add(4).readS32());
+                        dist = Math.max(0, Math.round(Math.hypot(hx - this.x1, hy - this.y1)));
+                    }
+                    remember(this, dist);
+                } catch {}
+            }
+        });
     }
 
     #blockedCell(cx, cy, checkBit) {

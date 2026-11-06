@@ -1,4 +1,4 @@
-import { getFunctions, isValidPtr, ptrFromU32 } from "./functions.js";
+import { attachOffset, getFunctions, isValidPtr, ptrFromU32, readClampedS32 } from "./functions.js";
 import { offsets } from "./offsets.js";
 import { readScString } from "./scstring.js";
 
@@ -157,24 +157,6 @@ class Scanner {
         return tiles > 0 ? tiles * tileUnits : 0;
     }
 
-    #readProjectileField(data, off, min, max) {
-        try {
-            const v = Math.trunc(data.add(off).readS32());
-            if (v < min || v > max) return 0;
-            return v;
-        } catch {
-            return 0;
-        }
-    }
-
-    #readProjectileRadius(data) {
-        return this.#readProjectileField(data, offsets.LogicProjectileData_radius, 1, 2000);
-    }
-
-    #readProjectileSpeed(data) {
-        return this.#readProjectileField(data, offsets.LogicProjectileData_speed, 1, 20000);
-    }
-
     #characterSpeed(data) {
         if (!isValidPtr(data)) return 0;
         const key = this.#ptrKey(data);
@@ -182,7 +164,7 @@ class Scanner {
             const hit = this.#charSpeedByData.get(key);
             if (hit !== undefined && hit > 0) return hit;
         }
-        const speed = this.#readProjectileField(data, offsets.LogicCharacterData_speed, 1, 6000);
+        const speed = readClampedS32(data, offsets.LogicCharacterData_speed, 1, 6000);
         if (key && speed > 0) this.#charSpeedByData.set(key, speed);
         return speed;
     }
@@ -195,14 +177,6 @@ class Scanner {
         return 0;
     }
 
-    #readClientU32(obj, off, max) {
-        try {
-            const v = obj.add(off).readU32();
-            if (v <= max) return v;
-        } catch {}
-        return -1;
-    }
-
     travelTicksFor(data, rangeUnits, speed) {
         if (!isValidPtr(data) || !(rangeUnits > 0) || !(speed > 0)) return 0;
         try {
@@ -213,9 +187,10 @@ class Scanner {
         return 0;
     }
 
-    #skillStats(owner, fns) {
+    #skillStats(owner) {
         const out = { spread: 0, bullets: 0, msBetween: 0 };
         try {
+            const fns = getFunctions();
             const skill = fns.LogicCharacterClient_getWeaponSkill(owner);
             if (!isValidPtr(skill)) return out;
             out.bullets = Math.trunc(fns.LogicSkillData_getNumBulletsInOneAttack(skill));
@@ -231,7 +206,7 @@ class Scanner {
         const owner = this.#charsByIndex.get(ownerIndex);
         if (!isValidPtr(owner)) return null;
         const out = { spread: 0, bullets: 0, msBetween: 0 };
-        const stats = this.#skillStats(owner, getFunctions());
+        const stats = this.#skillStats(owner);
         if (stats.bullets >= 1 && stats.bullets <= 40) out.bullets = stats.bullets;
         if (stats.msBetween >= 0 && stats.msBetween <= 3000) out.msBetween = stats.msBetween;
         if (stats.spread > 0 && stats.spread <= 120) out.spread = stats.spread;
@@ -276,35 +251,14 @@ class Scanner {
         }
     }
 
-    #dataS32(data, off, min, max) {
-        try {
-            const v = Math.trunc(data.add(off).readS32());
-            return v >= min && v <= max ? v : 0;
-        } catch {
-            return 0;
-        }
-    }
-
-    #clientS32(obj, off, min, max) {
-        try {
-            const v = Math.trunc(obj.add(off).readS32());
-            return v >= min && v <= max ? v : 0;
-        } catch {
-            return 0;
-        }
-    }
-
     #travelTypeOf(data, projectile) {
-        let travelType = this.#dataS32(data, offsets.LogicProjectileData_travelType, 0, 20);
-        if (!travelType) {
-            const raw = this.#readClientU32(
-                projectile,
-                offsets.LogicProjectileClient_travelType,
-                20
-            );
-            travelType = Math.max(raw, 0);
-        }
-        return travelType;
+        const travelType = readClampedS32(data, offsets.LogicProjectileData_travelType, 0, 20);
+        if (travelType) return travelType;
+        try {
+            const raw = projectile.add(offsets.LogicProjectileClient_travelType).readU32();
+            return raw <= 20 ? raw : 0;
+        } catch {}
+        return 0;
     }
 
     #captureProjectile(projectile, data, now) {
@@ -326,7 +280,7 @@ class Scanner {
     }
 
     #newProjectileEntry(projectile, data, now) {
-        let radius = this.#readProjectileRadius(data);
+        let radius = readClampedS32(data, offsets.LogicProjectileData_radius, 1, 2000);
         if (!(radius > 0)) radius = defaultProjectileRadius;
         const x = this.#posX(projectile);
         const y = this.#posY(projectile);
@@ -346,7 +300,7 @@ class Scanner {
             data,
             ownerIndex: this.#readOwnerIndex(projectile),
             radius,
-            speed: this.#readProjectileSpeed(data),
+            speed: readClampedS32(data, offsets.LogicProjectileData_speed, 1, 20000),
             x,
             y,
             spawnX: spawnReady ? x : 0,
@@ -366,24 +320,19 @@ class Scanner {
             vy: 0,
             hasVelocitySample: false,
             travelType,
-            preMs: this.#dataS32(data, offsets.LogicProjectileData_preExplosionTimeMs, 1, 60000),
-            stunMs: this.#clientS32(projectile, offsets.LogicProjectileClient_stunMs, 1, 60000),
-            silenceMs: this.#clientS32(
-                projectile,
-                offsets.LogicProjectileClient_effectMs,
-                1,
-                60000
-            ),
-            triggerMs: this.#dataS32(
+            preMs: readClampedS32(data, offsets.LogicProjectileData_preExplosionTimeMs, 1, 60000),
+            stunMs: readClampedS32(projectile, offsets.LogicProjectileClient_stunMs, 1, 60000),
+            silenceMs: readClampedS32(projectile, offsets.LogicProjectileClient_effectMs, 1, 60000),
+            triggerMs: readClampedS32(
                 data,
                 offsets.LogicProjectileData_triggerWithDelayMs,
                 1,
                 60000
             ),
-            gravity: this.#dataS32(data, offsets.LogicProjectileData_gravity, 1, 20000),
+            gravity: readClampedS32(data, offsets.LogicProjectileData_gravity, 1, 20000),
             attachArea: this.#dataU8(data, offsets.LogicProjectileData_attachAreaEffectToTarget),
             trail: this.#dataU8(data, offsets.LogicProjectileData_spawnAreaEffectTrail),
-            lifeTicks: this.#clientS32(
+            lifeTicks: readClampedS32(
                 projectile,
                 offsets.LogicProjectileClient_lifeTicks,
                 1,
@@ -421,33 +370,23 @@ class Scanner {
         const notify = () => this.#notifyDataReload();
         const remember = (character) => {
             const index = this.#readOwnerIndex(character);
-            if (index < 0) return;
-            this.#rememberCharacter(index, character);
+            if (index >= 0) this.#rememberCharacter(index, character);
         };
-        const names = [
+        for (const key of [
             "LogicProjectileData_createReferences",
             "LogicSkillData_createReferences",
             "LogicCharacterData_createReferences"
-        ];
-        for (const name of names) {
-            const off = offsets[name];
-            if (typeof off !== "number" || off <= 0) continue;
-            try {
-                Interceptor.attach(base.add(off), {
-                    onLeave: () => notify()
-                });
-            } catch {}
+        ]) {
+            attachOffset(base, offsets[key], { onLeave: notify });
         }
-        try {
-            Interceptor.attach(base.add(offsets.LogicCharacterClient_decode), {
-                onEnter(args) {
-                    this.character = args[0];
-                },
-                onLeave() {
-                    remember(this.character);
-                }
-            });
-        } catch {}
+        attachOffset(base, offsets.LogicCharacterClient_decode, {
+            onEnter(args) {
+                this.character = args[0];
+            },
+            onLeave() {
+                remember(this.character);
+            }
+        });
     }
 
     #installProjectileHooks(base) {
@@ -455,35 +394,27 @@ class Scanner {
         this.#projectileHooksInstalled = true;
         const capture = (projectile) => this.#captureProjectile(projectile, null, Date.now());
         const remove = (projectile) => this.#removeProjectile(projectile);
-        try {
-            Interceptor.attach(base.add(offsets.LogicProjectileClient_ctor), {
-                onEnter(args) {
-                    this.projectile = args[0];
-                },
-                onLeave() {
-                    try {
-                        capture(this.projectile);
-                    } catch {}
-                }
-            });
-        } catch {}
-        try {
-            Interceptor.attach(base.add(offsets.LogicProjectileClient_destruct), {
-                onEnter: (args) => {
-                    remove(args[0]);
-                }
-            });
-        } catch {}
-        try {
-            Interceptor.attach(base.add(offsets.LogicProjectileClient_decode), {
-                onEnter(args) {
-                    this.projectile = args[0];
-                },
-                onLeave() {
-                    capture(this.projectile);
-                }
-            });
-        } catch {}
+        attachOffset(base, offsets.LogicProjectileClient_ctor, {
+            onEnter(args) {
+                this.projectile = args[0];
+            },
+            onLeave() {
+                capture(this.projectile);
+            }
+        });
+        attachOffset(base, offsets.LogicProjectileClient_destruct, {
+            onEnter: (args) => {
+                remove(args[0]);
+            }
+        });
+        attachOffset(base, offsets.LogicProjectileClient_decode, {
+            onEnter(args) {
+                this.projectile = args[0];
+            },
+            onLeave() {
+                capture(this.projectile);
+            }
+        });
         this.#installDataReloadHooks(base);
     }
 
@@ -569,27 +500,19 @@ class Scanner {
         return entry.seg > 0 || entry.hasTarget || entry.hasVelocitySample;
     }
 
-    #staticOutputFields(entry, o) {
-        o.travelType = entry.travelType || 0;
-        o.stunMs = entry.stunMs || 0;
-        o.silenceMs = entry.silenceMs || 0;
-        o.triggerMs = entry.triggerMs || 0;
-    }
-
-    #effectOutputFields(entry, o) {
-        o.gravity = entry.gravity || 0;
-        o.attachArea = entry.attachArea || 0;
-        o.trail = entry.trail || 0;
-    }
-
     #newOutput(entry, gid) {
         const o = {};
         entry.out = o;
         o.gid = gid;
         o.radius = entry.radius;
         o.isIndirect = !!entry.isIndirect;
-        this.#staticOutputFields(entry, o);
-        this.#effectOutputFields(entry, o);
+        o.travelType = entry.travelType || 0;
+        o.stunMs = entry.stunMs || 0;
+        o.silenceMs = entry.silenceMs || 0;
+        o.triggerMs = entry.triggerMs || 0;
+        o.gravity = entry.gravity || 0;
+        o.attachArea = entry.attachArea || 0;
+        o.trail = entry.trail || 0;
         const w = this.#weaponForOwner(entry.ownerIndex);
         o.volleyBullets = (w && w.bullets) || 0;
         o.volleySpread = (w && w.spread) || 0;

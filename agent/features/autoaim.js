@@ -1,4 +1,10 @@
-import { getBase, getFunctions, isValidPtr } from "../core/functions.js";
+import {
+    attachOffset,
+    getBase,
+    getFunctions,
+    isValidPtr,
+    readClampedS32
+} from "../core/functions.js";
 import { offsets } from "../core/offsets.js";
 import {
     beamTicks,
@@ -248,14 +254,6 @@ class AutoAim {
         return this.#solveIncremental(pred, speed, range, pocket);
     }
 
-    #readInt(data, off, min, max) {
-        try {
-            const v = Math.trunc(data.add(off).readS32());
-            if (v >= min && v <= max) return v;
-        } catch {}
-        return 0;
-    }
-
     #ownProjectileData(own) {
         const fns = getFunctions();
         const skill = fns.LogicCharacterClient_getWeaponSkill(own);
@@ -263,11 +261,13 @@ class AutoAim {
         return data && !data.isNull() ? data : null;
     }
 
-    #shotRadius(data, fns) {
-        let rad = this.#readInt(data, offsets.LogicProjectileData_radius, 1, 2000);
+    #shotRadius(data) {
+        let rad = readClampedS32(data, offsets.LogicProjectileData_radius, 1, 2000);
         if (!(rad > 0)) {
             try {
-                const start = Math.trunc(fns.LogicCharacterData_getProjectileStartRadius());
+                const start = Math.trunc(
+                    getFunctions().LogicCharacterData_getProjectileStartRadius()
+                );
                 if (start >= 1 && start <= 2000) rad = start;
             } catch {}
         }
@@ -277,7 +277,7 @@ class AutoAim {
     #learnSteer(data) {
         try {
             const steer = data.add(offsets.LogicProjectileData_steerStrength).readFloat();
-            const life = this.#readInt(data, offsets.LogicProjectileData_steerLifeTime, 1, 20000);
+            const life = readClampedS32(data, offsets.LogicProjectileData_steerLifeTime, 1, 20000);
             this.#ownSteerLife = steer > 0 && life > 0 ? life : 0;
         } catch {
             this.#ownSteerLife = 0;
@@ -294,8 +294,7 @@ class AutoAim {
     }
 
     #learnWeaponState(data, own) {
-        const fns = getFunctions();
-        const engineSpeed = this.#readInt(data, offsets.LogicProjectileData_speed, 300, 8500);
+        const engineSpeed = readClampedS32(data, offsets.LogicProjectileData_speed, 300, 8500);
         this.#ownBeam = data.add(offsets.LogicProjectileData_isBeamField).readU8() > 0;
         const passes = data.add(offsets.LogicProjectileData_passesEnvironment).readU8() & 1;
         const pierces = data.add(offsets.LogicProjectileData_piercesEnvironmentField).readU8() & 1;
@@ -306,7 +305,7 @@ class AutoAim {
         } catch {
             this.#ownPiercesChars = false;
         }
-        this.#ownShotR = this.#shotRadius(data, fns);
+        this.#ownShotR = this.#shotRadius(data);
         this.#learnSteer(data);
         this.#learnTravelTicks(data, engineSpeed, own);
         return engineSpeed;
@@ -456,15 +455,6 @@ class AutoAim {
         return hits;
     }
 
-    #ptrAlive(candidate) {
-        if (!candidate || candidate.isNull()) return null;
-        const list = scanData.enemies || [];
-        for (const e of list) {
-            if (e && e.ptr && !e.ptr.isNull() && e.ptr.equals(candidate)) return e.ptr;
-        }
-        return null;
-    }
-
     #enemyByPtr(candidate) {
         if (!candidate || candidate.isNull()) return null;
         const list = scanData.enemies || [];
@@ -484,7 +474,7 @@ class AutoAim {
 
     #aimPointNow() {
         const now = Date.now();
-        const live = this.#target ? this.#ptrAlive(this.#target.ptr) : null;
+        const live = this.#target ? this.#enemyByPtr(this.#target.ptr) : null;
         let enemy = live ? this.#target : this.#pickTarget(now);
         if (!enemy) {
             const viaGame = this.#enemyByPtr(this.#gameTarget);
@@ -589,35 +579,31 @@ class AutoAim {
             enableProjectileTracking();
             onDataReload(() => this.#resetWeaponCache());
         } catch {}
-        try {
-            Interceptor.attach(base.add(offsets.BattleScreen_getClosestTargetForAutoshoot), {
-                onLeave: (retval) => {
-                    try {
-                        if (retval.isNull()) return;
-                        this.#gameTarget = retval;
-                    } catch {}
-                }
-            });
-        } catch {}
-        try {
-            Interceptor.attach(base.add(offsets.BattleScreen_activateSkill), {
-                onEnter: (args) => {
-                    const aim = this.#aimPoint();
-                    if (!aim) return;
-                    try {
-                        const ax = Math.trunc(aim.x);
-                        const ay = Math.trunc(aim.y);
-                        const mx = Math.trunc(scanData.myX);
-                        const my = Math.trunc(scanData.myY);
-                        if (!isFinite(ax) || !isFinite(ay)) return;
-                        if (ax === 0 && ay === 0) return;
-                        if (ax === mx && ay === my) return;
-                        args[1] = ptr(ax);
-                        args[2] = ptr(ay);
-                    } catch {}
-                }
-            });
-        } catch {}
+        attachOffset(base, offsets.BattleScreen_getClosestTargetForAutoshoot, {
+            onLeave: (retval) => {
+                try {
+                    if (retval.isNull()) return;
+                    this.#gameTarget = retval;
+                } catch {}
+            }
+        });
+        attachOffset(base, offsets.BattleScreen_activateSkill, {
+            onEnter: (args) => {
+                const aim = this.#aimPoint();
+                if (!aim) return;
+                try {
+                    const ax = Math.trunc(aim.x);
+                    const ay = Math.trunc(aim.y);
+                    const mx = Math.trunc(scanData.myX);
+                    const my = Math.trunc(scanData.myY);
+                    if (!isFinite(ax) || !isFinite(ay)) return;
+                    if (ax === 0 && ay === 0) return;
+                    if (ax === mx && ay === my) return;
+                    args[1] = ptr(ax);
+                    args[2] = ptr(ay);
+                } catch {}
+            }
+        });
     }
 
     update() {
