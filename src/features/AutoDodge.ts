@@ -21,10 +21,10 @@ const CFG = {
     T_RELEASE: 0.2,
     MIN_CLEARANCE: 70,
     DODGE_COMMIT_MS: 110,
-    DODGE_DWELL_MS: 200,
+    DODGE_DWELL_MS: 240,
     SWITCH_MARGIN: 1.25,
     URGENT_MARGIN: 0.6,
-    BREAK_WINDOW_S: 0.15,
+    BREAK_WINDOW_S: 0.1,
     N_DIRECTIONS: 8,
     STEP_SIZE: 150,
     MAX_SEARCH_DIST: 1500,
@@ -42,6 +42,7 @@ const CFG = {
     HOLD_AFTER_CLEAR_MS: 150,
     VOLLEY_WINDOW_MS: 200,
     SPAWN_BUCKET: 128,
+    COMBAT_RANGE: 1700,
     SEND_MIN_SHIFT: 80,
     WALK_OUT: 750,
     MIN_REACH: 300,
@@ -94,6 +95,7 @@ interface DodgeWorld {
     speed: number;
     radius: number;
     projectiles: ProjectileOutput[];
+    enemies: { x: number; y: number }[];
 }
 
 interface DodgeIdleResult {
@@ -523,6 +525,48 @@ class DodgeCore {
         return best;
     }
 
+    #perpEscape(px: number, py: number): Vec | null {
+        let best: Threat | null = null;
+        let bestT = Infinity;
+        for (const t of this.#threats) {
+            const d = Math.hypot(t.x - px, t.y - py) - t.rNoMove;
+            const tt = Math.max(0, d) / Math.max(1, t.speed);
+            if (tt < bestT) {
+                bestT = tt;
+                best = t;
+            }
+        }
+        if (!best || bestT > CFG.T_FIELD) return null;
+        const nl = Math.hypot(best.svx, best.svy) || 1;
+        let nx = -best.svy / nl;
+        let ny = best.svx / nl;
+        if (this.#commit && nx * this.#commit.x + ny * this.#commit.y < 0) {
+            nx = -nx;
+            ny = -ny;
+        }
+        return snapDir({ x: nx, y: ny });
+    }
+
+    #strafeDir(px: number, py: number, enemies: { x: number; y: number }[]): Vec | null {
+        let best: { x: number; y: number } | null = null;
+        let bestD = Infinity;
+        for (const e of enemies) {
+            const d = (e.x - px) * (e.x - px) + (e.y - py) * (e.y - py);
+            if (d < bestD) {
+                bestD = d;
+                best = e;
+            }
+        }
+        if (!best || bestD > CFG.COMBAT_RANGE * CFG.COMBAT_RANGE) return null;
+        const nx = best.x - px;
+        const ny = best.y - py;
+        const n = Math.hypot(nx, ny) || 1;
+        const ax = -ny / n;
+        const ay = nx / n;
+        const side = this.#commit && ax * this.#commit.x + ay * this.#commit.y < 0 ? -1 : 1;
+        return snapDir({ x: side * ax - 0.6 * (nx / n), y: side * ay - 0.6 * (ny / n) });
+    }
+
     #urgentThreat(dir: Vec, px: number, py: number, myR: number): boolean {
         return this.#expire(px, py, myR, dir, CFG.BREAK_WINDOW_S) >= 0;
     }
@@ -562,6 +606,8 @@ class DodgeCore {
         threatened: boolean,
         intent: Vec,
         now: number,
+        enemies: { x: number; y: number }[],
+        enemyNear: boolean,
     ): Vec | null {
         if (this.#commit && !this.#urgentThreat(this.#commit, px, py, myR)) {
             const reach = this.#wallReach(px, py, myR, this.#commit);
@@ -573,7 +619,9 @@ class DodgeCore {
             return this.#commit;
         }
         let dir: Vec | null = null;
-        if (threatened) {
+        if (threatened) dir = this.#perpEscape(px, py);
+        if (enemyNear) dir = dir ?? this.#strafeDir(px, py, enemies);
+        if (threatened && !dir) {
             const parsedRaw = this.#parse(px, py, myR, intent);
             const parsed = parsedRaw ? snapDir(parsedRaw) : null;
             const safe = this.#findSafe(px, py, myR, parsed ?? intent);
@@ -622,9 +670,15 @@ class DodgeCore {
         this.#charSpeed = world.speed > 0 ? world.speed : CFG.CHAR_SPEED;
         const myR = world.radius > 0 ? world.radius : 60;
         const projectiles = world.projectiles;
+        const enemies = world.enemies;
+        const enemyNear = enemies.some(
+            (e) =>
+                (e.x - px) * (e.x - px) + (e.y - py) * (e.y - py) <
+                CFG.COMBAT_RANGE * CFG.COMBAT_RANGE,
+        );
         this.#track(projectiles, now);
         this.#choose(px, py, myR);
-        if (projectiles.length === 0 && this.#threats.length === 0 && !this.#commit) {
+        if (projectiles.length === 0 && this.#threats.length === 0 && !this.#commit && !enemyNear) {
             this.#safeX = 0;
             this.#safeY = 0;
             return { active: false };
@@ -633,7 +687,7 @@ class DodgeCore {
         const tMin = this.#expire(px, py, myR, intent, this.#urgent());
         const threatened = tMin >= 0 || this.#pointThreatened(px, py, myR);
         if (this.#commit) {
-            const clear = this.#expire(px, py, myR, ZERO, CFG.T_RELEASE + 0.1) < 0;
+            const clear = this.#expire(px, py, myR, ZERO, CFG.T_RELEASE + 0.1) < 0 && !enemyNear;
             if (threatened || !clear) this.#clearSince = 0;
             else if (this.#clearSince === 0) this.#clearSince = now;
             if (
@@ -645,7 +699,8 @@ class DodgeCore {
                 return { active: false };
             }
         }
-        const dir = this.#decide(px, py, myR, threatened, intent, now);
+        let dir = this.#decide(px, py, myR, threatened, intent, now, enemies, enemyNear);
+        if (!dir && this.#commit) dir = this.#commit;
         if (!dir) {
             this.#resetCommit();
             return { active: false };
@@ -662,8 +717,13 @@ class DodgeCore {
         );
         const targetX = this.#safeX || Math.round(px + dir.x * run);
         const targetY = this.#safeY || Math.round(py + dir.y * run);
-        if (Math.hypot(targetX - px, targetY - py) <= CFG.ARRIVAL_THRESHOLD && !threatened) {
-            this.#resetCommit();
+        if (
+            Math.hypot(targetX - px, targetY - py) <= CFG.ARRIVAL_THRESHOLD &&
+            !threatened &&
+            !enemyNear
+        ) {
+            this.#safeX = 0;
+            this.#safeY = 0;
             return { active: false };
         }
         return { active: true, targetX, targetY, send: true };
@@ -753,6 +813,7 @@ class AutoDodge {
             speed: Math.trunc(scanData.mySpeed),
             radius: Math.trunc(this.#hitbox),
             projectiles: scanData.projectiles,
+            enemies: scanData.enemies,
         });
         if (!d.active || !d.send) return;
         if (!isFinite(d.targetX) || !isFinite(d.targetY)) return;
