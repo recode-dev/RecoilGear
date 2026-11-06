@@ -14,7 +14,7 @@ const moveInputType = 2;
 const deg2rad = Math.PI / 180;
 
 const tune = {
-    dirCount: 36,
+    dirCount: 64,
     horizonS: 1.2,
     aware: 3600,
     skin: 60,
