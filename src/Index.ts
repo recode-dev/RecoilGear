@@ -8,6 +8,9 @@ import { maybeRefreshWallCache, notifyBattleModeChanged, watchTileChanges } from
 
 const RETRY_INTERVAL_MS = 500;
 const RETRY_MAX_ATTEMPTS = 40;
+const TICK_MIN_INTERVAL_MS = 6;
+const AIM_INTERVAL_MS = 18;
+const DODGE_INTERVAL_MS = 45;
 
 class RecoilGearAgent {
     #lastBattle: NativePointer | null = null;
@@ -22,11 +25,10 @@ class RecoilGearAgent {
         try {
             return Process.getModuleByName("Nulls Brawl");
         } catch {}
-        const mods = Process.enumerateModules();
-        for (const mod of mods) {
-            if (mod.name.toLowerCase().includes("nulls")) return mod;
-        }
-        return null;
+        return (
+            Process.enumerateModules().find((mod) => mod.name.toLowerCase().includes("nulls")) ??
+            null
+        );
     }
 
     #tick(bm: NativePointer): void {
@@ -39,7 +41,7 @@ class RecoilGearAgent {
             notifyBattleModeChanged(bm);
         }
         const now = Date.now();
-        if (now - this.#lastTickAt < 6) return;
+        if (now - this.#lastTickAt < TICK_MIN_INTERVAL_MS) return;
         this.#lastTickAt = now;
         try {
             updateScanner(bm, now);
@@ -47,13 +49,13 @@ class RecoilGearAgent {
         try {
             maybeRefreshWallCache(bm, now);
         } catch {}
-        if (now - this.#lastAimAt >= 18) {
+        if (now - this.#lastAimAt >= AIM_INTERVAL_MS) {
             this.#lastAimAt = now;
             try {
                 updateAutoAim();
             } catch {}
         }
-        if (now - this.#lastDodgeAt >= 45) {
+        if (now - this.#lastDodgeAt >= DODGE_INTERVAL_MS) {
             this.#lastDodgeAt = now;
             try {
                 updateAutoDodge();

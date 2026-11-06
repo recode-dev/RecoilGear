@@ -77,7 +77,7 @@ interface Prediction {
     vy: number;
     ax: number;
     ay: number;
-    rad: number;
+    radius: number;
     leadVx: number;
     leadVy: number;
     leadAx: number;
@@ -96,15 +96,15 @@ interface TargetPos {
 }
 
 interface PickCandidate {
-    e: EnemyInfo | null;
+    enemy: EnemyInfo | null;
     pred: Prediction | null;
-    d: number;
+    dist: number;
 }
 
 interface HeldCandidate {
-    e: EnemyInfo;
+    enemy: EnemyInfo;
     pred: Prediction | null;
-    d: number;
+    dist: number;
 }
 
 interface PickState {
@@ -121,7 +121,7 @@ interface PickResult {
 class AutoAim {
     #target: EnemyInfo | null = null;
     #gameTarget: NativePointer | null = null;
-    #aimPt: AimPoint | null = null;
+    #cachedAim: AimPoint | null = null;
     #aimStamp = 0;
     #track = new Map<string | null, TargetTrack>();
     #projectileSpeed = 0;
@@ -140,10 +140,7 @@ class AutoAim {
 
     #isSkipped(name: string | null): boolean {
         if (!name) return true;
-        for (const skipNamePart of SKIP_NAME_PARTS) {
-            if (name.includes(skipNamePart)) return true;
-        }
-        return false;
+        return SKIP_NAME_PARTS.some((part) => name.includes(part));
     }
 
     #newTrack(now: number): TargetTrack {
@@ -183,7 +180,7 @@ class AutoAim {
         let vxWindow = (x - oldest.x) / span;
         let vyWindow = (y - oldest.y) / span;
         const magnitude = length(vxWindow, vyWindow);
-        if (magnitude <= 150 && typeof moveAngle === "number") {
+        if (magnitude <= 150) {
             const delta = ((moveAngle - Math.atan2(vyWindow, vxWindow)) * 180) / Math.PI;
             const drift = Math.abs(((((delta + 180) % 360) + 360) % 360) - 180);
             if (drift < 45) {
@@ -245,8 +242,8 @@ class AutoAim {
         return { ax, ay };
     }
 
-    #sample(e: EnemyInfo, x: number, y: number, now: number): Prediction | null {
-        const track = this.#trackFor(e.gid, now);
+    #sample(enemy: EnemyInfo, x: number, y: number, now: number): Prediction | null {
+        const track = this.#trackFor(enemy.gid, now);
         track.lastSeen = now;
         const slot = track.hist[track.histHead];
         slot.x = x;
@@ -254,10 +251,10 @@ class AutoAim {
         slot.t = now;
         track.histHead = (track.histHead + 1) % HIST_CAP;
         track.histLen = track.histLen < HIST_CAP ? track.histLen + 1 : HIST_CAP;
-        const window = this.#windowVelocity(track, x, y, e.moveAngle, now);
+        const window = this.#windowVelocity(track, x, y, enemy.moveAngle, now);
         if (!window) return null;
         if (window.magnitude < 30) return { x, y, vx: 0, vy: 0, ax: 0, ay: 0 } as Prediction;
-        const dir = this.#directionSpeed(track, x, y, e.moveSpeed, window);
+        const dir = this.#directionSpeed(track, x, y, enemy.moveSpeed, window);
         if (!dir) return null;
         const accel = this.#accelAt(track, dir.vx, dir.vy, now);
         return { x, y, vx: dir.vx, vy: dir.vy, ax: accel.ax, ay: accel.ay } as Prediction;
@@ -335,7 +332,7 @@ class AutoAim {
     }
 
     #solve(pred: Prediction, speed: number, range: number): AimPoint | null {
-        const pocket = Math.max(this.#ownShotR, 0) + Math.max(pred.rad, 0);
+        const pocket = Math.max(this.#ownShotR, 0) + Math.max(pred.radius, 0);
         if (this.#ownBeam) return { x: Math.round(pred.x), y: Math.round(pred.y), t: 0 };
         if (range > 0) {
             const d0 = distance(pred.x, pred.y, scanData.myX, scanData.myY) - pocket;
@@ -362,16 +359,16 @@ class AutoAim {
     }
 
     #shotRadius(data: NativePointer): number {
-        let rad = readClampedS32(data, OFFSETS.LogicProjectileData_radius, 1, 2000);
-        if (!(rad > 0)) {
+        let radius = readClampedS32(data, OFFSETS.LogicProjectileData_radius, 1, 2000);
+        if (!(radius > 0)) {
             try {
                 const start = Math.trunc(
                     getFunctions().LogicCharacterData_getProjectileStartRadius(),
                 );
-                if (start >= 1 && start <= 2000) rad = start;
+                if (start >= 1 && start <= 2000) radius = start;
             } catch {}
         }
-        return rad;
+        return radius;
     }
 
     #learnSteer(data: NativePointer): void {
@@ -420,9 +417,8 @@ class AutoAim {
                 if (data) engineSpeed = this.#learnWeaponState(data, own);
             }
         } catch {}
-        const speed = engineSpeed;
-        if (speed >= 300 && speed <= 8500) {
-            this.#projectileSpeed = speed;
+        if (engineSpeed >= 300 && engineSpeed <= 8500) {
+            this.#projectileSpeed = engineSpeed;
             this.#speedAt = now;
         } else {
             this.#speedFailAt = now;
@@ -523,7 +519,7 @@ class AutoAim {
         const pred =
             this.#sample(enemy, pos.x, pos.y, now) ||
             ({ x: pos.x, y: pos.y, vx: 0, vy: 0, ax: 0, ay: 0 } as Prediction);
-        pred.rad = Math.trunc(enemy.radius);
+        pred.radius = Math.trunc(enemy.radius);
         const aim = this.#solve(pred, speed, this.#ownRange());
         if (!aim) return null;
         if (this.#ownPierces) return this.#finishAim(aim, mx, my);
@@ -565,18 +561,19 @@ class AutoAim {
     #enemyByPtr(candidate: NativePointer | null): EnemyInfo | null {
         if (!candidate || candidate.isNull()) return null;
         const list = scanData.enemies || [];
-        for (const e of list) {
-            if (e && e.ptr && !e.ptr.isNull() && e.ptr.equals(candidate)) return e;
+        for (const enemy of list) {
+            if (enemy && enemy.ptr && !enemy.ptr.isNull() && enemy.ptr.equals(candidate))
+                return enemy;
         }
         return null;
     }
 
     #aimPoint(): AimPoint | null {
         const now = Date.now();
-        if (now - this.#aimStamp < 25) return this.#aimPt;
+        if (now - this.#aimStamp < 25) return this.#cachedAim;
         this.#aimStamp = now;
-        this.#aimPt = this.#aimPointNow();
-        return this.#aimPt;
+        this.#cachedAim = this.#aimPointNow();
+        return this.#cachedAim;
     }
 
     #aimPointNow(): AimPoint | null {
@@ -591,19 +588,20 @@ class AutoAim {
         return this.#aimAt(enemy, now);
     }
 
-    #enemyEligible(e: EnemyInfo, mx: number, my: number): boolean {
-        if (!e || !e.ptr || e.ptr.isNull()) return false;
-        if (e.kind !== "player") return false;
-        if (this.#isSkipped(e.brawlerName)) return false;
+    #enemyEligible(enemy: EnemyInfo, mx: number, my: number): boolean {
+        if (!enemy || !enemy.ptr || enemy.ptr.isNull()) return false;
+        if (enemy.kind !== "player") return false;
+        if (this.#isSkipped(enemy.brawlerName)) return false;
         if (this.#ownPierces) return true;
         const pocketR = this.#ownShotR > 0 ? this.#ownShotR : 40;
-        return losCheckWide(mx, my, e.x, e.y, { bit: PROJECTILE_BIT, radius: pocketR }) !== false;
+        return losCheckWide(mx, my, enemy.x, enemy.y, { bit: PROJECTILE_BIT, radius: pocketR });
     }
 
-    #consider(state: PickState, e: EnemyInfo, pred: Prediction, score: number): void {
-        if (score < state.calm.d) state.calm = { e, pred, d: score };
-        if (score < state.best.d) state.best = { e, pred, d: score };
-        if (this.#target && e.gid === this.#target.gid) state.cur = { e, pred, d: score };
+    #consider(state: PickState, enemy: EnemyInfo, pred: Prediction, score: number): void {
+        if (score < state.calm.dist) state.calm = { enemy, pred, dist: score };
+        if (score < state.best.dist) state.best = { enemy, pred, dist: score };
+        if (this.#target && enemy.gid === this.#target.gid)
+            state.cur = { enemy, pred, dist: score };
     }
 
     #pruneTracks(now: number): void {
@@ -615,15 +613,15 @@ class AutoAim {
 
     #selectPick(state: PickState, now: number): PickResult {
         let best = state.best;
-        if (state.calm.e && state.calm.d <= state.best.d * 1.4) best = state.calm;
-        if (!state.cur || !best.e || state.cur.d > best.d * STICKY_MARGIN)
-            return { pick: best.e, pred: best.pred };
+        if (state.calm.enemy && state.calm.dist <= state.best.dist * 1.4) best = state.calm;
+        if (!state.cur || !best.enemy || state.cur.dist > best.dist * STICKY_MARGIN)
+            return { pick: best.enemy, pred: best.pred };
         const pred =
-            state.cur.e.gid === best.e.gid
+            state.cur.enemy.gid === best.enemy.gid
                 ? best.pred
-                : this.#sample(state.cur.e, state.cur.e.x, state.cur.e.y, now);
-        if (pred) pred.rad = Math.trunc(state.cur.e.radius);
-        return { pick: state.cur.e, pred };
+                : this.#sample(state.cur.enemy, state.cur.enemy.x, state.cur.enemy.y, now);
+        if (pred) pred.radius = Math.trunc(state.cur.enemy.radius);
+        return { pick: state.cur.enemy, pred };
     }
 
     #pickTarget(now: number): EnemyInfo | null {
@@ -633,23 +631,23 @@ class AutoAim {
         const speed = this.#ownProjectileSpeed();
         const range = this.#ownRange();
         const state: PickState = {
-            best: { e: null, pred: null, d: Infinity },
-            calm: { e: null, pred: null, d: Infinity },
+            best: { enemy: null, pred: null, dist: Infinity },
+            calm: { enemy: null, pred: null, dist: Infinity },
             cur: null,
         };
-        for (const e of list) {
-            if (!this.#enemyEligible(e, mx, my)) continue;
+        for (const enemy of list) {
+            if (!this.#enemyEligible(enemy, mx, my)) continue;
             const pred =
-                this.#sample(e, e.x, e.y, now) ||
-                ({ x: e.x, y: e.y, vx: 0, vy: 0, ax: 0, ay: 0 } as Prediction);
-            pred.rad = Math.trunc(e.radius);
-            const d = distance(e.x, e.y, mx, my);
-            const pocket = Math.max(this.#ownShotR, 0) + pred.rad;
-            if (range > 0 && d - pocket > range) continue;
+                this.#sample(enemy, enemy.x, enemy.y, now) ||
+                ({ x: enemy.x, y: enemy.y, vx: 0, vy: 0, ax: 0, ay: 0 } as Prediction);
+            pred.radius = Math.trunc(enemy.radius);
+            const dist = distance(enemy.x, enemy.y, mx, my);
+            const pocket = Math.max(this.#ownShotR, 0) + pred.radius;
+            if (range > 0 && dist - pocket > range) continue;
             const score = this.#ownPiercesChars
-                ? d - this.#lineupHits(list, mx, my, e, pocket) * LINEUP_BONUS
-                : d;
-            this.#consider(state, e, pred, score);
+                ? dist - this.#lineupHits(list, mx, my, enemy, pocket) * LINEUP_BONUS
+                : dist;
+            this.#consider(state, enemy, pred, score);
         }
         const { pick, pred } = this.#selectPick(state, now);
         if (!pick || !pred) return null;
@@ -719,7 +717,7 @@ class AutoAim {
 
     reset(): void {
         this.#target = null;
-        this.#aimPt = null;
+        this.#cachedAim = null;
         this.#aimStamp = 0;
         this.#track.clear();
         this.#resetWeaponCache();

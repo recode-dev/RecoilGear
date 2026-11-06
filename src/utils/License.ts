@@ -7,15 +7,15 @@ const LICENSE_PATH = "/res/license.bin";
 
 class LicenseProvider {
     #listener: InvocationListener | null = null;
-    #body: string = JSON.stringify({ features: [], connection: "Keep-Alive" });
+    #body = JSON.stringify({ features: [], connection: "Keep-Alive" });
     #bodyBytes: ArrayBuffer | null = null;
     #total = 0;
 
     setup(): void {
         if (this.#listener) return;
         try {
-            const off = OFFSETS.LogicHttpRequest_encode;
-            if (typeof off !== "number" || off <= 0) return;
+            const offset = OFFSETS.LogicHttpRequest_encode;
+            if (typeof offset !== "number" || offset <= 0) return;
             const image = getImage();
             if (!image) return;
             const dir = image.path.slice(0, image.path.lastIndexOf("/"));
@@ -26,7 +26,7 @@ class LicenseProvider {
             const malloc = new NativeFunction(mallocAddr, "pointer", ["size_t"]);
             this.#bodyBytes = license;
             this.#total = license.byteLength + this.#body.length + 1;
-            this.#listener = Interceptor.attach(getBase().add(off), {
+            this.#listener = Interceptor.attach(getBase().add(offset), {
                 onEnter: (args) => {
                     try {
                         if (!args[0] || args[0].isNull()) return;

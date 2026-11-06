@@ -8,6 +8,7 @@ export const BEAM_TICKS = 18000;
 const PROJECTILE_SPEED_PER_TICK = 0.1;
 const STALE_MS = 10000;
 const DEFAULT_PROJECTILE_RADIUS = 40;
+const MAX_OBJECTS = 1200;
 
 const length = (x: number, y: number): number => Math.floor(Math.hypot(x, y));
 
@@ -184,7 +185,7 @@ class Scanner {
         try {
             const name = readScString(getFunctions().LogicData_getName(data), 128);
             if (!name) return null;
-            return (name.indexOf("hero_icon_") === 0 ? name.slice(10) : name).toUpperCase();
+            return (name.startsWith("hero_icon_") ? name.slice(10) : name).toUpperCase();
         } catch {}
         return null;
     }
@@ -617,22 +618,22 @@ class Scanner {
     }
 
     #newOutput(entry: ProjectileEntry, gid: string): ProjectileOutput {
-        const o = {} as ProjectileOutput;
-        entry.out = o;
-        o.gid = gid;
-        o.radius = entry.radius;
-        o.isIndirect = !!entry.isIndirect;
-        o.travelType = entry.travelType || 0;
-        o.stunMs = entry.stunMs || 0;
-        o.silenceMs = entry.silenceMs || 0;
-        o.triggerMs = entry.triggerMs || 0;
-        o.gravity = entry.gravity || 0;
-        o.attachArea = entry.attachArea || 0;
-        o.trail = entry.trail || 0;
-        const w = this.#weaponForOwner(entry.ownerIndex);
-        o.volleyBullets = (w && w.bullets) || 0;
-        o.volleySpread = (w && w.spread) || 0;
-        return o;
+        const output = {} as ProjectileOutput;
+        entry.out = output;
+        output.gid = gid;
+        output.radius = entry.radius;
+        output.isIndirect = !!entry.isIndirect;
+        output.travelType = entry.travelType || 0;
+        output.stunMs = entry.stunMs || 0;
+        output.silenceMs = entry.silenceMs || 0;
+        output.triggerMs = entry.triggerMs || 0;
+        output.gravity = entry.gravity || 0;
+        output.attachArea = entry.attachArea || 0;
+        output.trail = entry.trail || 0;
+        const weapon = this.#weaponForOwner(entry.ownerIndex);
+        output.volleyBullets = (weapon && weapon.bullets) || 0;
+        output.volleySpread = (weapon && weapon.spread) || 0;
+        return output;
     }
 
     #refreshOutput(entry: ProjectileEntry, o: ProjectileOutput, x: number, y: number): void {
@@ -743,11 +744,11 @@ class Scanner {
         const vtableProj = this.#vtableProj;
         const vtableProjClient = this.#vtableProjClient;
         if (!vtableProj || !vtableProjClient) return false;
-        let objVt: NativePointer | null = null;
+        let objVtable: NativePointer | null = null;
         try {
-            objVt = obj.readPointer();
+            objVtable = obj.readPointer();
         } catch {}
-        if (objVt && objVt.equals(vtableProjClient)) return true;
+        if (objVtable && objVtable.equals(vtableProjClient)) return true;
         try {
             return data.readPointer().equals(vtableProj);
         } catch {
@@ -837,14 +838,12 @@ class Scanner {
         if (!isValidPtr(objMgr)) return [];
         const objects = objMgr.add(OFFSETS.LogicGameObjectManagerClient_objects).readPointer();
         const count = objMgr.add(OFFSETS.LogicGameObjectManagerClient_count).readU32();
-        const ok = isValidPtr(objects) && count > 0 && count <= 1200;
-        if (!ok) return [];
+        if (!isValidPtr(objects) || count <= 0 || count > MAX_OBJECTS) return [];
         return this.#scanObjectBatch(objects, count, own, bm, now);
     }
 
-    update(bm: NativePointer, now?: number): void {
+    update(bm: NativePointer, now: number = Date.now()): void {
         if (!this.#moduleBase) return;
-        if (now === undefined) now = Date.now();
         try {
             const own = getFunctions().LogicBattleModeClient_getOwnCharacter(bm);
             if (!isValidPtr(own)) {

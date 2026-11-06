@@ -203,219 +203,239 @@ class DodgeCore {
         return Math.hypot(bx - ax, by - ay);
     }
 
-    #classify(p: ProjectileOutput): "sticky" | "zone" | "cone" | "linear" {
-        const travelType = Math.trunc(p.travelType);
-        const indirect = !!p.isIndirect || travelType > 0 || Math.trunc(p.gravity) > 0;
-        const delayed = Math.trunc(p.triggerMs) > 0 || !!p.attachArea;
+    #classify(shot: ProjectileOutput): "sticky" | "zone" | "cone" | "linear" {
+        const travelType = Math.trunc(shot.travelType);
+        const indirect = !!shot.isIndirect || travelType > 0 || Math.trunc(shot.gravity) > 0;
+        const delayed = Math.trunc(shot.triggerMs) > 0 || !!shot.attachArea;
         if (delayed) return "sticky";
-        if (indirect || !!p.trail) return "zone";
-        const vb = Math.trunc(p.volleyBullets);
-        const vs = Math.trunc(p.volleySpread);
-        const control = Math.trunc(p.stunMs) > 0 || Math.trunc(p.silenceMs) > 0;
+        if (indirect || !!shot.trail) return "zone";
+        const vb = Math.trunc(shot.volleyBullets);
+        const vs = Math.trunc(shot.volleySpread);
+        const control = Math.trunc(shot.stunMs) > 0 || Math.trunc(shot.silenceMs) > 0;
         if (vb >= 2 && vs >= 60) return "cone";
         if (vb >= 3 && vs >= 10 && control) return "cone";
         return "linear";
     }
 
-    #blastRadius(p: ProjectileOutput): number {
-        const r = Math.trunc(p.radius) > 0 ? Math.trunc(p.radius) : 110;
+    #blastRadius(shot: ProjectileOutput): number {
+        const r = Math.trunc(shot.radius) > 0 ? Math.trunc(shot.radius) : 110;
         return r >= 110 ? r * 1.02 : 110 * 1.15;
     }
 
-    #linearVelocity(p: ProjectileOutput): VelocityPoint | null {
-        let vx = p.vx;
-        let vy = p.vy;
+    #linearVelocity(shot: ProjectileOutput): VelocityPoint | null {
+        let vx = shot.vx;
+        let vy = shot.vy;
         if (!isFinite(vx) || !isFinite(vy)) {
             vx = 0;
             vy = 0;
         }
         if (Math.hypot(vx, vy) > 1) return { vx, vy };
-        if (p.hasTarget) {
-            const dx = p.targetX - p.x;
-            const dy = p.targetY - p.y;
+        if (shot.hasTarget) {
+            const dx = shot.targetX - shot.x;
+            const dy = shot.targetY - shot.y;
             const d = Math.hypot(dx, dy);
-            if (d > 1 && Math.trunc(p.speed) > 0)
-                return { vx: (dx / d) * p.speed, vy: (dy / d) * p.speed };
+            if (d > 1 && Math.trunc(shot.speed) > 0)
+                return { vx: (dx / d) * shot.speed, vy: (dy / d) * shot.speed };
         }
-        const dx = p.x - p.spawnX;
-        const dy = p.y - p.spawnY;
+        const dx = shot.x - shot.spawnX;
+        const dy = shot.y - shot.spawnY;
         const d = Math.hypot(dx, dy);
-        if (d > 8 && Math.trunc(p.speed) > 0)
-            return { vx: (dx / d) * p.speed, vy: (dy / d) * p.speed };
+        if (d > 8 && Math.trunc(shot.speed) > 0)
+            return { vx: (dx / d) * shot.speed, vy: (dy / d) * shot.speed };
         return null;
     }
 
-    #stickyHazard(p: ProjectileOutput): StickyHazard {
-        const r = this.#blastRadius(p);
-        const flightS = Math.trunc(p.seg0) > 0 && Math.trunc(p.speed) > 0 ? p.seg0 / p.speed : 0;
+    #stickyHazard(shot: ProjectileOutput): StickyHazard {
+        const r = this.#blastRadius(shot);
+        const flightS =
+            Math.trunc(shot.seg0) > 0 && Math.trunc(shot.speed) > 0 ? shot.seg0 / shot.speed : 0;
         const fuseS = Math.max(
             0.4,
-            Math.trunc(p.triggerMs) / 1000 - Math.max(0, Math.trunc(p.ageMs) / 1000 - flightS),
+            Math.trunc(shot.triggerMs) / 1000 -
+                Math.max(0, Math.trunc(shot.ageMs) / 1000 - flightS),
         );
-        this.#lastZones.set(p.gid, {
-            x: p.x,
-            y: p.y,
+        this.#lastZones.set(shot.gid, {
+            x: shot.x,
+            y: shot.y,
             r,
             sticky: true,
             fuseMs: fuseS * 1000,
         });
-        return { kind: "sticky", x: p.x, y: p.y, r, fuse: fuseS, gid: p.gid };
+        return { kind: "sticky", x: shot.x, y: shot.y, r, fuse: fuseS, gid: shot.gid };
     }
 
-    #zoneLanding(p: ProjectileOutput): StepPoint {
-        const dx = p.targetX - p.x;
-        const dy = p.targetY - p.y;
+    #zoneLanding(shot: ProjectileOutput): StepPoint {
+        const dx = shot.targetX - shot.x;
+        const dy = shot.targetY - shot.y;
         const dd = Math.hypot(dx, dy);
-        const k = dd > 1 ? Math.min(1, p.seg / dd) : 1;
-        return { x: p.x + dx * k, y: p.y + dy * k };
+        const k = dd > 1 ? Math.min(1, shot.seg / dd) : 1;
+        return { x: shot.x + dx * k, y: shot.y + dy * k };
     }
 
-    #zoneDrift(p: ProjectileOutput): StepPoint | null {
-        const v = this.#linearVelocity(p);
-        const spd = v ? Math.hypot(v.vx, v.vy) : 0;
+    #zoneDrift(shot: ProjectileOutput): StepPoint | null {
+        const velocity = this.#linearVelocity(shot);
+        const spd = velocity ? Math.hypot(velocity.vx, velocity.vy) : 0;
         if (!(spd > 1)) return null;
-        const k = Math.min(1, p.seg / spd);
-        return { x: p.x + v!.vx * k, y: p.y + v!.vy * k };
+        const k = Math.min(1, shot.seg / spd);
+        return { x: shot.x + velocity!.vx * k, y: shot.y + velocity!.vy * k };
     }
 
-    #zoneHazard(p: ProjectileOutput): ZoneHazard {
-        const r = this.#blastRadius(p);
-        const fuseS = Math.trunc(p.preMs) / 1000;
-        let lx = p.x;
-        let ly = p.y;
+    #zoneHazard(shot: ProjectileOutput): ZoneHazard {
+        const r = this.#blastRadius(shot);
+        const fuseS = Math.trunc(shot.preMs) / 1000;
+        let lx = shot.x;
+        let ly = shot.y;
         let approach = 0;
-        if (Math.trunc(p.seg) > 0 && Math.trunc(p.speed) > 0) {
-            const landing = p.hasTarget ? this.#zoneLanding(p) : this.#zoneDrift(p);
+        if (Math.trunc(shot.seg) > 0 && Math.trunc(shot.speed) > 0) {
+            const landing = shot.hasTarget ? this.#zoneLanding(shot) : this.#zoneDrift(shot);
             if (landing) {
                 lx = landing.x;
                 ly = landing.y;
             }
-            approach = p.seg / p.speed;
+            approach = shot.seg / shot.speed;
         }
-        this.#lastZones.set(p.gid, { x: lx, y: ly, r, sticky: false, fuseMs: 0 });
-        return { kind: "zone", x: lx, y: ly, r, fuse: fuseS, approach, gid: p.gid };
+        this.#lastZones.set(shot.gid, { x: lx, y: ly, r, sticky: false, fuseMs: 0 });
+        return { kind: "zone", x: lx, y: ly, r, fuse: fuseS, approach, gid: shot.gid };
     }
 
-    #coneKey(p: ProjectileOutput): string {
-        return `${p.ownerIndex}:${Math.trunc(p.spawnX)}:${Math.trunc(p.spawnY)}`;
+    #coneKey(shot: ProjectileOutput): string {
+        return `${shot.ownerIndex}:${Math.trunc(shot.spawnX)}:${Math.trunc(shot.spawnY)}`;
     }
 
-    #coneReach(p: ProjectileOutput): number {
-        const flownFromApex = this.#dist(p.spawnX, p.spawnY, p.x, p.y);
-        if (Math.trunc(p.seg) > 0) return flownFromApex + p.seg;
-        if (Math.trunc(p.seg0) > 0) return p.seg0 + 60;
-        return Math.min(TUNE.aware, this.#dist(p.spawnX, p.spawnY, this.#myX, this.#myY) + 400);
+    #coneReach(shot: ProjectileOutput): number {
+        const flownFromApex = this.#dist(shot.spawnX, shot.spawnY, shot.x, shot.y);
+        if (Math.trunc(shot.seg) > 0) return flownFromApex + shot.seg;
+        if (Math.trunc(shot.seg0) > 0) return shot.seg0 + 60;
+        return Math.min(
+            TUNE.aware,
+            this.#dist(shot.spawnX, shot.spawnY, this.#myX, this.#myY) + 400,
+        );
     }
 
-    #coneHazard(p: ProjectileOutput, list: Hazard[]): void {
-        const key = this.#coneKey(p);
-        for (const element of list) {
-            if (element.kind !== "cone" || element.key !== key) continue;
-            const reach = this.#coneReach(p);
-            element.range = Math.max(element.range, reach);
-            if (Math.trunc(p.seg) > 0)
-                element.seg = element.seg < 0 ? p.seg : Math.min(element.seg, p.seg);
+    #coneHazard(shot: ProjectileOutput, list: Hazard[]): void {
+        const key = this.#coneKey(shot);
+        for (const existing of list) {
+            if (existing.kind !== "cone" || existing.key !== key) continue;
+            const reach = this.#coneReach(shot);
+            existing.range = Math.max(existing.range, reach);
+            if (Math.trunc(shot.seg) > 0)
+                existing.seg = existing.seg < 0 ? shot.seg : Math.min(existing.seg, shot.seg);
             return;
         }
-        const half = Math.trunc(p.volleySpread) / 2 + 8;
-        const observedSpeed = Math.hypot(p.vx, p.vy);
+        const half = Math.trunc(shot.volleySpread) / 2 + 8;
+        const observedSpeed = Math.hypot(shot.vx, shot.vy);
         list.push({
             kind: "cone",
             key,
-            ax: p.spawnX,
-            ay: p.spawnY,
-            bis: bearingDeg(this.#myX - p.spawnX, this.#myY - p.spawnY),
+            ax: shot.spawnX,
+            ay: shot.spawnY,
+            bis: bearingDeg(this.#myX - shot.spawnX, this.#myY - shot.spawnY),
             half: half * DEG2RAD,
-            range: this.#coneReach(p),
-            speed: Math.max(1, observedSpeed > 1 ? observedSpeed : Math.trunc(p.speed)),
-            seg: Math.trunc(p.seg) > 0 ? p.seg : -1,
-            gid: p.gid,
+            range: this.#coneReach(shot),
+            speed: Math.max(1, observedSpeed > 1 ? observedSpeed : Math.trunc(shot.speed)),
+            seg: Math.trunc(shot.seg) > 0 ? shot.seg : -1,
+            gid: shot.gid,
         });
     }
 
-    #pathHazard(p: ProjectileOutput): ZoneHazard | LinearHazard {
-        const v = this.#linearVelocity(p);
-        const stun = Math.trunc(p.stunMs) > 0 || Math.trunc(p.silenceMs) > 0;
-        const hitR = Math.trunc(p.radius) + this.#myR + (stun ? 70 : 0);
-        if (!v) {
+    #pathHazard(shot: ProjectileOutput): ZoneHazard | LinearHazard {
+        const velocity = this.#linearVelocity(shot);
+        const stun = Math.trunc(shot.stunMs) > 0 || Math.trunc(shot.silenceMs) > 0;
+        const hitR = Math.trunc(shot.radius) + this.#myR + (stun ? 70 : 0);
+        if (!velocity) {
             return {
                 kind: "zone",
-                x: p.x,
-                y: p.y,
+                x: shot.x,
+                y: shot.y,
                 r: Math.max(hitR + TUNE.skin, 110),
                 fuse: 0,
                 approach: 0,
-                gid: p.gid,
+                gid: shot.gid,
             };
         }
         return {
             kind: "linear",
-            x: p.x,
-            y: p.y,
-            vx: v.vx,
-            vy: v.vy,
+            x: shot.x,
+            y: shot.y,
+            vx: velocity.vx,
+            vy: velocity.vy,
             hitR,
-            left: Math.trunc(p.seg) > 0 ? p.seg : -1,
-            gid: p.gid,
+            left: Math.trunc(shot.seg) > 0 ? shot.seg : -1,
+            gid: shot.gid,
         };
     }
 
     #collectShots(seen: Set<string>): Hazard[] {
         const list: Hazard[] = [];
         const shots = this.#world.projectiles || [];
-        for (const p of shots) {
-            if (!p || !p.gid) continue;
-            if (this.#dist(p.x, p.y, this.#myX, this.#myY) > TUNE.aware) continue;
-            seen.add(p.gid);
-            const kind = this.#classify(p);
-            if (kind === "sticky") list.push(this.#stickyHazard(p));
-            else if (kind === "zone") list.push(this.#zoneHazard(p));
-            else if (kind === "cone" && Math.trunc(p.volleySpread) > 0) this.#coneHazard(p, list);
-            else list.push(this.#pathHazard(p));
+        for (const shot of shots) {
+            if (!shot || !shot.gid) continue;
+            if (this.#dist(shot.x, shot.y, this.#myX, this.#myY) > TUNE.aware) continue;
+            seen.add(shot.gid);
+            const kind = this.#classify(shot);
+            if (kind === "sticky") list.push(this.#stickyHazard(shot));
+            else if (kind === "zone") list.push(this.#zoneHazard(shot));
+            else if (kind === "cone" && Math.trunc(shot.volleySpread) > 0)
+                this.#coneHazard(shot, list);
+            else list.push(this.#pathHazard(shot));
         }
         return list;
     }
 
     #forgetZones(seen: Set<string>): void {
-        for (const [gid, z] of this.#lastZones) {
+        for (const [gid, zone] of this.#lastZones) {
             if (seen.has(gid)) continue;
             this.#lastZones.delete(gid);
-            let mx = z.x;
-            let my = z.y;
-            if (z.sticky && this.#dist(z.x, z.y, this.#myX, this.#myY) <= z.r + this.#myR + 150) {
-                mx = this.#myX;
-                my = this.#myY;
+            let memoX = zone.x;
+            let memoY = zone.y;
+            if (
+                zone.sticky &&
+                this.#dist(zone.x, zone.y, this.#myX, this.#myY) <= zone.r + this.#myR + 150
+            ) {
+                memoX = this.#myX;
+                memoY = this.#myY;
             }
             this.#zoneMem.set(gid, {
-                x: mx,
-                y: my,
-                r: z.r,
-                until: this.#now + (z.sticky ? Math.max(500, z.fuseMs || 0) : 3500),
-                fuseMs: z.sticky ? Math.max(0, z.fuseMs || 0) : 0,
+                x: memoX,
+                y: memoY,
+                r: zone.r,
+                until: this.#now + (zone.sticky ? Math.max(500, zone.fuseMs || 0) : 3500),
+                fuseMs: zone.sticky ? Math.max(0, zone.fuseMs || 0) : 0,
             });
         }
     }
 
     #memoHazards(): Hazard[] {
         const list: Hazard[] = [];
-        for (const [gid, z] of this.#zoneMem) {
-            if (z.until <= this.#now) {
+        for (const [gid, zone] of this.#zoneMem) {
+            if (zone.until <= this.#now) {
                 this.#zoneMem.delete(gid);
                 continue;
             }
-            if (z.fuseMs > 0) {
+            if (zone.fuseMs > 0) {
                 list.push({
                     kind: "sticky",
-                    x: z.x,
-                    y: z.y,
-                    r: z.r,
-                    fuse: (z.until - this.#now) / 1000,
+                    x: zone.x,
+                    y: zone.y,
+                    r: zone.r,
+                    fuse: (zone.until - this.#now) / 1000,
                     gid,
                 });
             } else {
-                if (this.#dist(z.x, z.y, this.#myX, this.#myY) > z.r + this.#myR + TUNE.skin)
+                if (
+                    this.#dist(zone.x, zone.y, this.#myX, this.#myY) >
+                    zone.r + this.#myR + TUNE.skin
+                )
                     continue;
-                list.push({ kind: "zone", x: z.x, y: z.y, r: z.r, fuse: 0, approach: 0, gid });
+                list.push({
+                    kind: "zone",
+                    x: zone.x,
+                    y: zone.y,
+                    r: zone.r,
+                    fuse: 0,
+                    approach: 0,
+                    gid,
+                });
             }
         }
         return list;
@@ -477,14 +497,14 @@ class DodgeCore {
     #assess(hazards: Hazard[]): Assessment {
         if (!hazards.length) return { danger: false, prepMs: 0 };
         let tMin = Infinity;
-        let need = 0;
+        let maxNeed = 0;
         for (const h of hazards) {
             const t = this.#timeToHurt(h);
             if (t < tMin) tMin = t;
-            const n = this.#clearanceNeed(h);
-            if (n > need) need = n;
+            const need = this.#clearanceNeed(h);
+            if (need > maxNeed) maxNeed = need;
         }
-        const prepMs = Math.round((need / this.#speed) * 1000 * 1.35) + 90;
+        const prepMs = Math.round((maxNeed / this.#speed) * 1000 * 1.35) + 90;
         return { danger: tMin <= prepMs / 1000, prepMs, tMin };
     }
 
@@ -675,15 +695,15 @@ class DodgeCore {
     #lastResortHeading(hazards: Hazard[]): number {
         let bestDeg = -1;
         let bestScore = -Infinity;
-        for (const element of RING) {
-            const room = this.#wallRoom(element);
+        for (const deg of RING) {
+            const room = this.#wallRoom(deg);
             if (room <= 240) continue;
             const score =
-                this.#separationScore(hazards, element) -
+                this.#separationScore(hazards, deg) -
                 (TUNE.wallPenalty * Math.max(0, 1000 - room)) / 1000;
             if (score > bestScore) {
                 bestScore = score;
-                bestDeg = element;
+                bestDeg = deg;
             }
         }
         return bestDeg;
@@ -912,10 +932,10 @@ class AutoDodge {
         if (scanData.lastUpdate === 0) return;
         const now = Date.now();
         if (!this.#learnOwnHitbox()) {
-            const fb = Math.trunc(scanData.myRadius);
-            if (fb > 0) this.#hitbox = fb;
+            const fallbackRadius = Math.trunc(scanData.myRadius);
+            if (fallbackRadius > 0) this.#hitbox = fallbackRadius;
         }
-        const d = this.#core.tick({
+        const result = this.#core.tick({
             now,
             x: scanData.myX,
             y: scanData.myY,
@@ -924,9 +944,9 @@ class AutoDodge {
             projectiles: scanData.projectiles,
             walls: this.#wallsApi,
         });
-        if (!d.active) return;
-        if (d.send && isFinite(d.targetX) && isFinite(d.targetY))
-            this.#issueMove(d.targetX, d.targetY);
+        if (!result.active) return;
+        if (result.send && isFinite(result.targetX) && isFinite(result.targetY))
+            this.#issueMove(result.targetX, result.targetY);
     }
 
     #invalidateOwnMetrics(): void {

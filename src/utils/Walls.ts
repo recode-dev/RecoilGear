@@ -153,22 +153,22 @@ class WallGrid {
         this.#lastFailedTs = now;
     }
 
-    #pfKey(q: PfQuery): string {
-        return `${q.size}|${q.x1}|${q.y1}|${q.x2}|${q.y2}|${q.f1}|${q.f2}`;
+    #pfKey(query: PfQuery): string {
+        return `${query.size}|${query.x1}|${query.y1}|${query.x2}|${query.y2}|${query.f1}|${query.f2}`;
     }
 
-    #pfRemember(q: PfQuery, dist: number): void {
+    #pfRemember(query: PfQuery, dist: number): void {
         const now = Date.now();
         if (now - this.#pfMemoTs > PF_BUCKET_MS || this.#pfMemo.size > PF_MEMO_MAX) {
             this.#pfMemo.clear();
             this.#pfMemoTs = now;
         }
-        this.#pfMemo.set(this.#pfKey(q), dist);
+        this.#pfMemo.set(this.#pfKey(query), dist);
     }
 
-    #pfLookup(q: PfQuery): number {
+    #pfLookup(query: PfQuery): number {
         if (Date.now() - this.#pfMemoTs > PF_BUCKET_MS) return -1;
-        const hit = this.#pfMemo.get(this.#pfKey(q));
+        const hit = this.#pfMemo.get(this.#pfKey(query));
         return hit === undefined ? -1 : hit;
     }
 
@@ -188,7 +188,7 @@ class WallGrid {
     #installPathHook(base: NativePointer): void {
         if (this.#pfHookInstalled) return;
         this.#pfHookInstalled = true;
-        const remember = (q: PfQuery, dist: number): void => this.#pfRemember(q, dist);
+        const remember = (query: PfQuery, dist: number): void => this.#pfRemember(query, dist);
         attachOffset(base, OFFSETS.LogicGamePlayUtil_getClosestPathfinderCollision, {
             onEnter(args) {
                 this.size = args[0].toInt32();
@@ -277,15 +277,25 @@ class WallGrid {
         const fn = getFunctions().LogicGamePlayUtil_getClosestPathfinderCollision;
         if (!isValidPtr(this.#pathFinder)) return -1;
         const bodySize = typeof size === "number" ? Math.trunc(size) : 0;
-        const q = this.#queryFor(bodySize, wx0, wy0, wx1, wy1);
-        const memo = this.#pfLookup(q);
+        const query = this.#queryFor(bodySize, wx0, wy0, wx1, wy1);
+        const memo = this.#pfLookup(query);
         if (memo >= 0) return memo;
         try {
             if (!this.#probeOut) this.#probeOut = Memory.alloc(8);
             this.#probeOut.writeS32(0);
             this.#probeOut.add(4).writeS32(0);
             const hit = Math.trunc(
-                fn(bodySize, q.x1, q.y1, q.x2, q.y2, this.#pathFinder, this.#probeOut, 0, 0),
+                fn(
+                    bodySize,
+                    query.x1,
+                    query.y1,
+                    query.x2,
+                    query.y2,
+                    this.#pathFinder,
+                    this.#probeOut,
+                    0,
+                    0,
+                ),
             );
             const hx = Math.trunc(this.#probeOut.readS32());
             const hy = Math.trunc(this.#probeOut.add(4).readS32());
@@ -293,7 +303,7 @@ class WallGrid {
                 hit & 1
                     ? Math.max(0, Math.round(Math.hypot(hx - wx0, hy - wy0)))
                     : Math.round(Math.hypot(wx1 - wx0, wy1 - wy0));
-            this.#pfRemember(q, dist);
+            this.#pfRemember(query, dist);
             return dist;
         } catch {
             return -1;

@@ -174,18 +174,18 @@ class FunctionTable {
     #image: Module | null = null;
     #table: Readonly<NativeFunctions> | null = null;
 
-    init(baseIn: NativePointer, imageIn: Module | null): Readonly<NativeFunctions> {
+    init(base: NativePointer, image: Module | null): Readonly<NativeFunctions> {
         if (this.#table) return this.#table;
-        this.#base = baseIn;
-        this.#image = imageIn || null;
-        const built: Record<string, unknown> = {};
+        this.#base = base;
+        this.#image = image || null;
+        const table: Record<string, unknown> = {};
         for (const [key, [name, ret, args]] of Object.entries(NATIVE_SPECS)) {
             const off = OFFSETS[name];
             if (typeof off !== "number" || off <= 0)
                 throw new Error(`functions: missing offset ${name}`);
-            built[key] = new NativeFunction(this.#base.add(off), ret, args);
+            table[key] = new NativeFunction(this.#base.add(off), ret, args);
         }
-        this.#table = Object.freeze(built) as unknown as Readonly<NativeFunctions>;
+        this.#table = Object.freeze(table) as unknown as Readonly<NativeFunctions>;
         return this.#table;
     }
 
@@ -207,9 +207,9 @@ class FunctionTable {
 const functions = new FunctionTable();
 
 export const initFunctions = (
-    baseIn: NativePointer,
-    imageIn: Module | null,
-): Readonly<NativeFunctions> => functions.init(baseIn, imageIn);
+    base: NativePointer,
+    image: Module | null,
+): Readonly<NativeFunctions> => functions.init(base, image);
 export const getFunctions = (): Readonly<NativeFunctions> => functions.table;
 export const getBase = (): NativePointer => functions.base;
 export const getImage = (): Module | null => functions.image;
