@@ -568,8 +568,7 @@ class DodgeCore {
         this.#refreshTarget(cmd);
         const moved = !isFinite(cmd.sentX) || this.#dist(cmd.tx, cmd.ty, cmd.sentX, cmd.sentY) > 80;
         const quiet = !this.#withinStick(cmd.headingDeg, this.#urgent);
-        const send =
-            !quiet && (cmd.forceSend || moved || this.#now - cmd.lastSendAt >= 260);
+        const send = !quiet && (cmd.forceSend || moved || this.#now - cmd.lastSendAt >= 260);
         if (send && this.#stickDeg != null) {
             const rad = cmd.headingDeg * deg2rad;
             cmd.tx = this.#myX + Math.cos(rad) * 160;
