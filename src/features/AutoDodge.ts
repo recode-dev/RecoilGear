@@ -20,7 +20,10 @@ const CFG = {
     T_FIELD: 1.05,
     T_RELEASE: 0.2,
     MIN_CLEARANCE: 70,
-    DODGE_COMMIT_MS: 70,
+    DODGE_COMMIT_MS: 110,
+    DODGE_DWELL_MS: 300,
+    SWITCH_MARGIN: 1.4,
+    BREAK_WINDOW_S: 0.25,
     N_DIRECTIONS: 24,
     STEP_SIZE: 150,
     MAX_SEARCH_DIST: 1500,
@@ -38,6 +41,8 @@ const CFG = {
     HOLD_AFTER_CLEAR_MS: 15,
     VOLLEY_WINDOW_MS: 200,
     SPAWN_BUCKET: 128,
+    SEND_MIN_SHIFT: 55,
+    WALK_OUT: 350,
 } as const;
 
 interface Vec {
@@ -149,6 +154,7 @@ class DodgeCore {
 
     #commit: Vec | null = null;
     #commitUntil = 0;
+    #commitAt = 0;
     #clearSince = 0;
     #safeX = 0;
     #safeY = 0;
@@ -413,30 +419,55 @@ class DodgeCore {
         const dirs: Vec[] = [];
         if (intent.x !== 0 || intent.y !== 0) dirs.push(normalize2d(intent.x, intent.y));
         for (const d of RING) dirs.push(d);
-        const points: SafePoint[] = [];
-        let nearest = Infinity;
+
+        let bestDir: Vec | null = null;
+        let bestScore = Infinity;
+        let bestReach = 0;
         for (const dir of dirs) {
-            if (this.#expire(px, py, myR, dir, CFG.T_FIELD) >= 0) continue;
             const reach = this.#wallReach(px, py, myR, dir);
             if (reach < CFG.STEP_SIZE) continue;
-            for (
-                let step: number = CFG.STEP_SIZE;
-                step <= reach && step <= CFG.MAX_SEARCH_DIST && !(step > nearest);
-                step += CFG.STEP_SIZE
-            ) {
-                const sx = px + dir.x * step;
-                const sy = py + dir.y * step;
-                if (this.#pointThreatened(sx, sy, myR)) continue;
-                const clearance = this.#clearanceAt(sx, sy, myR);
-                if (clearance < CFG.MIN_CLEARANCE) continue;
-                points.push({ x: sx, y: sy, dist: step, clearance });
-                if (step < nearest) nearest = step;
-                break;
+            const score = this.#collect(dir, px, py, myR, intent);
+            if (score < bestScore) {
+                bestScore = score;
+                bestDir = dir;
+                bestReach = reach;
             }
         }
-        if (points.length === 0) return null;
-        points.sort((a, b) => (a.dist !== b.dist ? a.dist - b.dist : b.clearance - a.clearance));
-        return points[0];
+        if (!bestDir) return null;
+
+        const point = this.#walkOut(px, py, myR, bestDir, bestReach);
+        if (point) return point;
+
+        const ranked: { dir: Vec; score: number; reach: number }[] = [];
+        for (const dir of dirs) {
+            const reach = this.#wallReach(px, py, myR, dir);
+            if (reach < CFG.STEP_SIZE) continue;
+            ranked.push({ dir, score: this.#collect(dir, px, py, myR, intent), reach });
+        }
+        ranked.sort((a, b) => a.score - b.score);
+        for (const cand of ranked) {
+            const p2 = this.#walkOut(px, py, myR, cand.dir, cand.reach);
+            if (p2) return p2;
+        }
+        return null;
+    }
+
+    #walkOut(px: number, py: number, myR: number, dir: Vec, reach: number): SafePoint | null {
+        const limit = Math.min(reach, CFG.WALK_OUT);
+        let best: SafePoint | null = null;
+        for (let step = CFG.STEP_SIZE; step <= limit; step += CFG.STEP_SIZE) {
+            const sx = px + dir.x * step;
+            const sy = py + dir.y * step;
+            if (this.#pointThreatened(sx, sy, myR)) break;
+            const clearance = this.#clearanceAt(sx, sy, myR);
+            if (clearance < CFG.MIN_CLEARANCE) break;
+            best = { x: sx, y: sy, dist: step, clearance };
+        }
+        if (best) return best;
+        const sx = px + dir.x * CFG.STEP_SIZE;
+        const sy = py + dir.y * CFG.STEP_SIZE;
+        if (limit < CFG.STEP_SIZE) return null;
+        return { x: sx, y: sy, dist: CFG.STEP_SIZE, clearance: this.#clearanceAt(sx, sy, myR) };
     }
 
     #groupKey(threat: Threat): string {
@@ -502,11 +533,8 @@ class DodgeCore {
         return best;
     }
 
-    #stillThreatened(dir: Vec, px: number, py: number, myR: number): boolean {
-        for (const threat of this.#threats) {
-            if (this.#perform(threat, px, py, myR, dir, CFG.T_FIELD) >= 0) return true;
-        }
-        return false;
+    #urgentThreat(dir: Vec, px: number, py: number, myR: number): boolean {
+        return this.#expire(px, py, myR, dir, CFG.BREAK_WINDOW_S) >= 0;
     }
 
     #keepCommitted(
@@ -529,13 +557,55 @@ class DodgeCore {
         return false;
     }
 
+    #similarDirection(a: Vec, b: Vec): boolean {
+        return a.x * b.x + a.y * b.y > 0.94;
+    }
+
     #sameDirection(a: Vec, b: Vec): boolean {
         return a.x * b.x + a.y * b.y > 0.98;
+    }
+
+    #decide(
+        px: number,
+        py: number,
+        myR: number,
+        threatened: boolean,
+        intent: Vec,
+        now: number,
+    ): Vec | null {
+        if (this.#commit && !this.#urgentThreat(this.#commit, px, py, myR)) return this.#commit;
+        let dir: Vec | null = null;
+        if (threatened) {
+            const parsed = this.#parse(px, py, myR, intent);
+            const safe = this.#findSafe(px, py, myR, parsed ?? intent);
+            if (safe) {
+                const nx = Math.round(safe.x);
+                const ny = Math.round(safe.y);
+                const newDir = normalize2d(nx - px, ny - py);
+                if (this.#commit && this.#similarDirection(this.#commit, newDir) && this.#safeX)
+                    return this.#commit;
+                this.#safeX = nx;
+                this.#safeY = ny;
+                dir =
+                    this.#lastDir && this.#keepCommitted(this.#lastDir, newDir, px, py, myR, intent)
+                        ? this.#lastDir
+                        : newDir;
+            } else if (parsed) {
+                dir = parsed;
+            }
+        }
+        if (!dir || !this.#commit || this.#similarDirection(this.#commit, dir)) return dir;
+        const settled = now - this.#commitAt >= CFG.DODGE_DWELL_MS;
+        const keep = this.#collect(this.#commit, px, py, myR, intent);
+        const next = this.#collect(dir, px, py, myR, intent);
+        const urgent = this.#urgentThreat(this.#commit, px, py, myR);
+        return urgent || (settled && next > keep * CFG.SWITCH_MARGIN) ? dir : this.#commit;
     }
 
     #resetCommit(): void {
         this.#commit = null;
         this.#commitUntil = 0;
+        this.#commitAt = 0;
         this.#clearSince = 0;
         this.#safeX = 0;
         this.#safeY = 0;
@@ -575,22 +645,7 @@ class DodgeCore {
                 return { active: false };
             }
         }
-        let dir: Vec | null = null;
-        if (this.#commit && !this.#stillThreatened(this.#commit, px, py, myR)) dir = this.#commit;
-        if (!dir && threatened) {
-            const parsed = this.#parse(px, py, myR, intent);
-            const candidate = parsed ?? intent;
-            const safe = this.#findSafe(px, py, myR, candidate);
-            if (safe) {
-                this.#safeX = Math.round(safe.x);
-                this.#safeY = Math.round(safe.y);
-                dir = normalize2d(this.#safeX - px, this.#safeY - py);
-                if (this.#lastDir && this.#keepCommitted(this.#lastDir, dir, px, py, myR, intent))
-                    dir = this.#lastDir;
-            } else if (parsed) {
-                dir = parsed;
-            }
-        }
+        const dir = this.#decide(px, py, myR, threatened, intent, now);
         if (!dir) {
             this.#resetCommit();
             return { active: false };
@@ -598,6 +653,7 @@ class DodgeCore {
         this.#lastDir = dir;
         if (!this.#commit || !this.#sameDirection(this.#commit, dir)) {
             this.#commit = dir;
+            this.#commitAt = now;
             this.#commitUntil = now + CFG.DODGE_COMMIT_MS;
         }
         const targetX = this.#safeX || Math.round(px + dir.x * CFG.DODGE_RANGE);
@@ -623,6 +679,9 @@ class DodgeCore {
 
 class AutoDodge {
     #hitbox = 0;
+    #lastSentX = 0;
+    #lastSentY = 0;
+    #hasSent = false;
     #radiusMemoData: NativePointer | null = null;
     #radiusMemoValue = 0;
 
@@ -693,6 +752,15 @@ class AutoDodge {
         });
         if (!d.active || !d.send) return;
         if (!isFinite(d.targetX) || !isFinite(d.targetY)) return;
+        if (
+            this.#hasSent &&
+            Math.hypot(d.targetX - this.#lastSentX, d.targetY - this.#lastSentY) <
+                CFG.SEND_MIN_SHIFT
+        )
+            return;
+        this.#lastSentX = d.targetX;
+        this.#lastSentY = d.targetY;
+        this.#hasSent = true;
         this.#issueMove(d.targetX, d.targetY);
     }
 
@@ -705,6 +773,7 @@ class AutoDodge {
     reset(): void {
         this.#core.reset();
         this.#invalidateOwnMetrics();
+        this.#hasSent = false;
     }
 
     setup(): void {
