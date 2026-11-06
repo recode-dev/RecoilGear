@@ -27,7 +27,6 @@ class WallGrid {
     #syncTileSize() {
         try {
             const fn = getFunctions().LogicTileMap_tileToLogic;
-            if (!fn) return;
             const a = Math.trunc(fn(0));
             const b = Math.trunc(fn(1));
             const size = b - a;
@@ -165,8 +164,6 @@ class WallGrid {
         if (this.#pfHookInstalled) return;
         this.#pfHookInstalled = true;
         try {
-            const fns = getFunctions();
-            if (!fns.LogicGamePlayUtil_getClosestPathfinderCollision) return;
             const remember = (q, dist) => this.#pfRemember(q, dist);
             Interceptor.attach(base.add(offsets.LogicGamePlayUtil_getClosestPathfinderCollision), {
                 onEnter(args) {
@@ -272,7 +269,7 @@ class WallGrid {
 
     firstWallHit(wx0, wy0, wx1, wy1, size) {
         const fn = getFunctions().LogicGamePlayUtil_getClosestPathfinderCollision;
-        if (!fn || !isValidPtr(this.#pathFinder)) return -1;
+        if (!isValidPtr(this.#pathFinder)) return -1;
         const bodySize = typeof size === "number" ? Math.trunc(size) : 0;
         const q = this.#queryFor(bodySize, wx0, wy0, wx1, wy1);
         const memo = this.#pfLookup(q);

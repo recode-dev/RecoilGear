@@ -5,9 +5,7 @@ export const offsets = Object.freeze({
     LogicGameObjectManagerClient_objects: 0x0,
     LogicGameObjectManagerClient_count: 0xc,
     LogicGameObjectManagerClient_ptrStride: 0x8,
-    LogicGameObjectManagerClient_ownTeam: 0xe4,
     LogicGameObjectManagerClient_findGameObject: 0xa267dc,
-    LogicGameObjectManagerClient_getOwnPlayerTeam: 0xa7f47c,
 
     LogicTileMap_pathFinder: 0x60,
     LogicTileMap_width: 0xc4,
@@ -19,7 +17,6 @@ export const offsets = Object.freeze({
     LogicGameObjectClient_x: 0x30,
     LogicGameObjectClient_y: 0x34,
     LogicGameObjectClient_ownerIndex: 0x3c,
-    LogicGameObjectClient_team: 0x40,
     LogicGameObjectClient_getTeam: 0xa23b0c,
     LogicGamePlayUtil_isEnemy: 0x4cf7a4,
     LogicCharacterClient_hitpoints: 0xc4,
@@ -27,8 +24,6 @@ export const offsets = Object.freeze({
 
     LogicProjectileClient_targetObject: 0xa0,
     LogicProjectileClient_lifeTicks: 0x1e8,
-    LogicProjectileClient_targetX: 0x1ec,
-    LogicProjectileClient_targetY: 0x1f0,
     LogicProjectileClient_travelType: 0x204,
     LogicProjectileClient_stunMs: 0x220,
     LogicProjectileClient_effectMs: 0x228,
@@ -51,9 +46,6 @@ export const offsets = Object.freeze({
     LogicProjectileData_attachAreaEffectToTarget: 0x2e1,
 
     LogicCharacterData_speed: 0x26c,
-    LogicCharacterData_collisionRadius: 0x2ac,
-
-    LogicSkillData_projectileData: 0x78,
 
     ClientInput_type: 0x8,
     ClientInput_x: 0xc,
@@ -63,7 +55,6 @@ export const offsets = Object.freeze({
     BattleMode_hashEnabled: 0x70,
     BattleMode_hashKey: 0x60,
     ClientInput_typeConstantTable: 0xe1bd30,
-    ClientInput_typeConstantFallback: 0xe1bc28,
     ClientInput_hashInnerMask: 0xe1bbd0,
     ClientInput_hashOuterMask: 0xe1bbf0,
 
@@ -103,7 +94,6 @@ export const offsets = Object.freeze({
     LogicProjectileClient_getTravelTicks: 0xa3192c,
     LogicProjectileClient_decode: 0xa314e0,
     LogicProjectileData_createReferences: 0x9cb388,
-    LogicProjectileData_getTravelType: 0x9cdd48,
 
     LogicSkillData_getSpread: 0x9dec84,
     LogicSkillData_getNumBulletsInOneAttack: 0x9ded40,

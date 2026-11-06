@@ -64,16 +64,10 @@ class Scanner {
         }
     }
 
-    dataOf(obj) {
-        return this.dataFieldOf(obj);
-    }
-
     #readDataName(data) {
         if (!isValidPtr(data)) return null;
-        const fns = getFunctions();
-        if (!fns.LogicData_getName) return null;
         try {
-            const name = readScString(fns.LogicData_getName(data), 128);
+            const name = readScString(getFunctions().LogicData_getName(data), 128);
             if (!name) return null;
             return (name.indexOf("hero_icon_") === 0 ? name.slice(10) : name).toUpperCase();
         } catch {}
@@ -106,71 +100,23 @@ class Scanner {
     }
 
     #teamOf(obj, bm) {
-        const fns = getFunctions();
-        if (fns.LogicGameObjectClient_getTeam && isValidPtr(bm)) {
-            try {
-                const mgr = bm.add(offsets.BattleMode_objectManager).readPointer();
-                if (isValidPtr(mgr)) {
-                    const t = Math.trunc(fns.LogicGameObjectClient_getTeam(obj, mgr));
-                    if (t !== -1) return t;
-                }
-            } catch {}
-        }
+        if (!isValidPtr(bm)) return -1;
         try {
-            const t = Math.trunc(obj.add(offsets.LogicGameObjectClient_team).readS32());
-            return t === -1 ? -1 : t;
+            const mgr = bm.add(offsets.BattleMode_objectManager).readPointer();
+            if (!isValidPtr(mgr)) return -1;
+            return Math.trunc(getFunctions().LogicGameObjectClient_getTeam(obj, mgr));
         } catch {
             return -1;
         }
     }
 
-    #ownTeamOf(mgr) {
-        if (!isValidPtr(mgr)) return -1;
-        const fns = getFunctions();
-        if (fns.LogicGameObjectManagerClient_getOwnPlayerTeam) {
-            try {
-                const t = Math.trunc(fns.LogicGameObjectManagerClient_getOwnPlayerTeam(mgr));
-                if (t >= 0) return t;
-            } catch {}
-        }
-        try {
-            const t = Math.trunc(mgr.add(offsets.LogicGameObjectManagerClient_ownTeam).readS32());
-            return t >= 0 ? t : -1;
-        } catch {
-            return -1;
-        }
-    }
-
-    #enemyByTeams(obj, bm) {
-        try {
-            const mode = isValidPtr(bm) ? bm : this.state.battleModeClient;
-            if (!isValidPtr(mode)) return null;
-            const mgr = mode.add(offsets.BattleMode_objectManager).readPointer();
-            if (!isValidPtr(mgr)) return null;
-            const myTeam = this.#ownTeamOf(mgr);
-            const fns = getFunctions();
-            if (myTeam < 0 || !fns.LogicGameObjectClient_getTeam) return null;
-            try {
-                return Math.trunc(fns.LogicGameObjectClient_getTeam(obj, mgr)) !== myTeam;
-            } catch {
-                return null;
-            }
-        } catch {
-            return null;
-        }
-    }
-
-    #isEnemyOf(obj, bm, unknownAsEnemy) {
+    #isEnemyOf(obj, unknownAsEnemy) {
         if (!isValidPtr(obj)) return unknownAsEnemy === true;
-        const fns = getFunctions();
-        if (fns.LogicGamePlayUtil_isEnemy) {
-            try {
-                return fns.LogicGamePlayUtil_isEnemy(obj) !== 0;
-            } catch {}
+        try {
+            return getFunctions().LogicGamePlayUtil_isEnemy(obj) !== 0;
+        } catch {
+            return unknownAsEnemy === true;
         }
-        const byTeams = this.#enemyByTeams(obj, bm);
-        if (byTeams !== null) return byTeams;
-        return unknownAsEnemy === true;
     }
 
     travelDistance(ticks, speed) {
@@ -180,10 +126,8 @@ class Scanner {
 
     #weaponSkillFor(character) {
         if (!isValidPtr(character)) return null;
-        const fns = getFunctions();
-        if (!fns.LogicCharacterClient_getWeaponSkill) return null;
         try {
-            const skill = fns.LogicCharacterClient_getWeaponSkill(character);
+            const skill = getFunctions().LogicCharacterClient_getWeaponSkill(character);
             if (isValidPtr(skill)) return skill;
         } catch {}
         return null;
@@ -192,10 +136,8 @@ class Scanner {
     #castingRangeTiles(character) {
         const skill = this.#weaponSkillFor(character);
         if (!skill) return 0;
-        const fns = getFunctions();
-        if (!fns.LogicSkillData_getCastingRange) return 0;
         try {
-            const tiles = Math.trunc(fns.LogicSkillData_getCastingRange(skill));
+            const tiles = Math.trunc(getFunctions().LogicSkillData_getCastingRange(skill));
             if (tiles >= 1 && tiles <= 64) return tiles;
         } catch {}
         return 0;
@@ -240,14 +182,7 @@ class Scanner {
     collisionRadius(data) {
         if (!isValidPtr(data)) return 0;
         try {
-            const direct = Math.trunc(
-                data.add(offsets.LogicCharacterData_collisionRadius).readS32()
-            );
-            if (direct > 0) return direct;
-        } catch {}
-        try {
-            const getRadius = getFunctions().LogicCharacterData_getCollisionRadius;
-            if (getRadius) return Math.trunc(getRadius(data));
+            return Math.trunc(getFunctions().LogicCharacterData_getCollisionRadius(data));
         } catch {}
         return 0;
     }
@@ -261,15 +196,13 @@ class Scanner {
     }
 
     travelTicksFor(data, rangeUnits, speed) {
-        const fn = getFunctions().LogicProjectileClient_getTravelTicks;
-        if (fn && isValidPtr(data) && rangeUnits > 0 && speed > 0) {
-            try {
-                const ticks = Math.trunc(fn(data, rangeUnits, speed));
-                if (ticks > 0 && ticks <= beamTicks) return ticks;
-            } catch {}
-        }
-        if (!(rangeUnits > 0) || !(speed > 0)) return 0;
-        return Math.max(1, Math.round((rangeUnits * ticksPerSec) / speed));
+        if (!isValidPtr(data) || !(rangeUnits > 0) || !(speed > 0)) return 0;
+        try {
+            return Math.trunc(
+                getFunctions().LogicProjectileClient_getTravelTicks(data, rangeUnits, speed)
+            );
+        } catch {}
+        return 0;
     }
 
     #skillStats(owner, fns) {
@@ -277,12 +210,8 @@ class Scanner {
         try {
             const skill = fns.LogicCharacterClient_getWeaponSkill(owner);
             if (!isValidPtr(skill)) return out;
-            out.bullets = fns.LogicSkillData_getNumBulletsInOneAttack
-                ? Math.trunc(fns.LogicSkillData_getNumBulletsInOneAttack(skill))
-                : 0;
-            out.msBetween = fns.LogicSkillData_getMsBetweenAttacks
-                ? Math.trunc(fns.LogicSkillData_getMsBetweenAttacks(skill))
-                : 0;
+            out.bullets = Math.trunc(fns.LogicSkillData_getNumBulletsInOneAttack(skill));
+            out.msBetween = Math.trunc(fns.LogicSkillData_getMsBetweenAttacks(skill));
             out.spread = Math.trunc(fns.LogicSkillData_getSpread(skill));
         } catch {}
         return out;
@@ -293,14 +222,11 @@ class Scanner {
         if (this.#weaponMeta.has(ownerIndex)) return this.#weaponMeta.get(ownerIndex);
         const owner = this.#charsByIndex.get(ownerIndex);
         if (!isValidPtr(owner)) return null;
-        const fns = getFunctions();
         const out = { spread: 0, bullets: 0, msBetween: 0 };
-        if (fns.LogicCharacterClient_getWeaponSkill && fns.LogicSkillData_getSpread) {
-            const stats = this.#skillStats(owner, fns);
-            if (stats.bullets >= 1 && stats.bullets <= 40) out.bullets = stats.bullets;
-            if (stats.msBetween >= 0 && stats.msBetween <= 3000) out.msBetween = stats.msBetween;
-            if (stats.spread > 0 && stats.spread <= 120) out.spread = stats.spread;
-        }
+        const stats = this.#skillStats(owner, getFunctions());
+        if (stats.bullets >= 1 && stats.bullets <= 40) out.bullets = stats.bullets;
+        if (stats.msBetween >= 0 && stats.msBetween <= 3000) out.msBetween = stats.msBetween;
+        if (stats.spread > 0 && stats.spread <= 120) out.spread = stats.spread;
         this.#weaponMeta.set(ownerIndex, out);
         return out;
     }
@@ -312,28 +238,16 @@ class Scanner {
         return { x: tx, y: ty };
     }
 
-    #readProjectileTarget(projectile, data, x, y) {
+    #readProjectileTarget(projectile, x, y) {
         const fns = getFunctions();
         try {
-            const hit = this.#validTarget(
-                Math.trunc(projectile.add(offsets.LogicProjectileClient_targetX).readS32()),
-                Math.trunc(projectile.add(offsets.LogicProjectileClient_targetY).readS32()),
+            return this.#validTarget(
+                Math.trunc(fns.LogicProjectileClient_getTargetX(projectile)),
+                Math.trunc(fns.LogicProjectileClient_getTargetY(projectile)),
                 x,
                 y
             );
-            if (hit) return hit;
         } catch {}
-        if (fns.LogicProjectileClient_getTargetX && fns.LogicProjectileClient_getTargetY) {
-            try {
-                const hit = this.#validTarget(
-                    Math.trunc(fns.LogicProjectileClient_getTargetX(projectile)),
-                    Math.trunc(fns.LogicProjectileClient_getTargetY(projectile)),
-                    x,
-                    y
-                );
-                if (hit) return hit;
-            } catch {}
-        }
         return null;
     }
 
@@ -372,16 +286,6 @@ class Scanner {
         }
     }
 
-    #travelTypeFromFn(data) {
-        const fn = getFunctions().LogicProjectileData_getTravelType;
-        if (!fn) return 0;
-        try {
-            const v = Math.trunc(fn(data));
-            if (v > 0 && v <= 20) return v;
-        } catch {}
-        return 0;
-    }
-
     #travelTypeOf(data, projectile) {
         let travelType = this.#dataS32(data, offsets.LogicProjectileData_travelType, 0, 20);
         if (!travelType) {
@@ -392,7 +296,6 @@ class Scanner {
             );
             travelType = Math.max(raw, 0);
         }
-        if (!travelType) travelType = this.#travelTypeFromFn(data);
         return travelType;
     }
 
@@ -420,7 +323,7 @@ class Scanner {
         const x = this.#fieldS32(projectile, offsets.LogicGameObjectClient_x);
         const y = this.#fieldS32(projectile, offsets.LogicGameObjectClient_y);
         const spawnReady = x !== 0 || y !== 0;
-        const target = this.#readProjectileTarget(projectile, data, x, y);
+        const target = this.#readProjectileTarget(projectile, x, y);
         let isIndirect = this.#dataU8(data, offsets.LogicProjectileData_indirect);
         const travelType = this.#travelTypeOf(data, projectile);
         const dynamicRange = this.#dataU8(data, offsets.LogicProjectileData_allowDynamicRange);
@@ -606,7 +509,7 @@ class Scanner {
     }
 
     #updateEntryTarget(entry, x, y) {
-        const target = this.#readProjectileTarget(entry.ptr, entry.data, x, y);
+        const target = this.#readProjectileTarget(entry.ptr, x, y);
         if (!target) return;
         entry.targetX = target.x;
         entry.targetY = target.y;
@@ -628,10 +531,8 @@ class Scanner {
 
     #findOwnerObject(entry) {
         if (!isValidPtr(this.#objMgrPtr)) return null;
-        const fns = getFunctions();
-        if (!fns.LogicGameObjectManagerClient_findGameObject) return null;
         try {
-            const resolved = fns.LogicGameObjectManagerClient_findGameObject(
+            const resolved = getFunctions().LogicGameObjectManagerClient_findGameObject(
                 this.#objMgrPtr,
                 entry.ownerIndex,
                 -1
@@ -654,7 +555,7 @@ class Scanner {
     #entryVisible(entry, ownerObj) {
         if (ownerObj && this.state.ownCharacter && ownerObj.equals(this.state.ownCharacter))
             return false;
-        if (ownerObj && !this.#isEnemyOf(ownerObj, this.state.battleModeClient, true)) return false;
+        if (ownerObj && !this.#isEnemyOf(ownerObj, true)) return false;
         if (entry.ownerIndex >= 0 && this.#friendlyIdx.has(entry.ownerIndex)) return false;
         if (entry.ownerIndex === this.state.myPlayerIndex) return false;
         return entry.seg > 0 || entry.hasTarget || entry.hasVelocitySample;
@@ -763,8 +664,7 @@ class Scanner {
         this.state.myX = this.#fieldS32(own, offsets.LogicGameObjectClient_x);
         this.state.myY = this.#fieldS32(own, offsets.LogicGameObjectClient_y);
         this.state.mySpeed = 0;
-        let ownData = this.dataFieldOf(own);
-        if (!isValidPtr(ownData)) ownData = this.dataOf(own);
+        const ownData = this.dataFieldOf(own);
         if (!isValidPtr(ownData)) return;
         this.state.myRadius = Math.trunc(this.collisionRadius(ownData));
         const ownSpeed = this.#characterSpeed(ownData);
@@ -816,7 +716,7 @@ class Scanner {
             return null;
         }
         if (obj.equals(own)) return null;
-        if (!this.#isEnemyOf(obj, bm, false)) {
+        if (!this.#isEnemyOf(obj, false)) {
             const idx = this.#readOwnerIndex(obj);
             if (idx >= 0) {
                 this.#friendlyIdx.add(idx);
@@ -928,7 +828,6 @@ const scanner = new Scanner();
 const scanData = scanner.state;
 
 export { scanData };
-export const dataOf = (obj) => scanner.dataOf(obj);
 export const travelDistance = (ticks, speed) => scanner.travelDistance(ticks, speed);
 export const travelTicksFor = (data, rangeUnits, speed) =>
     scanner.travelTicksFor(data, rangeUnits, speed);

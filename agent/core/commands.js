@@ -4,10 +4,8 @@ import { getBase, getFunctions } from "./functions.js";
 import { offsets } from "./offsets.js";
 
 const cmdBufSize = 72;
-const maxTableType = 0x16;
 const tableEntries = 0x17;
 const maskSize = 16;
-const fallbackConstSize = 8;
 const data16Offset = 4;
 const sanityMinNonzero = 16;
 const sanityMinDistinct = 16;
@@ -17,7 +15,6 @@ class CommandSigner {
     #typeTable = null;
     #innerMask = null;
     #outerMask = null;
-    #fallbackType = 0xdeadbeef;
 
     #bytesAt(address, size) {
         const raw = address.readByteArray(size);
@@ -51,10 +48,6 @@ class CommandSigner {
         return nonzero >= sanityMinNonzero && seen.size >= sanityMinDistinct;
     }
 
-    #decodeFallbackConst(raw) {
-        return ((raw[6] << 24) | (raw[4] << 16) | (raw[2] << 8) | raw[0]) >>> 0;
-    }
-
     #loadSigning() {
         if (this.#typeTable) return true;
         const base = getBase();
@@ -70,15 +63,6 @@ class CommandSigner {
                 this.#typeTable = null;
                 return false;
             }
-            try {
-                const decoded = this.#decodeFallbackConst(
-                    this.#bytesAt(
-                        base.add(offsets.ClientInput_typeConstantFallback),
-                        fallbackConstSize
-                    )
-                );
-                if (decoded !== 0) this.#fallbackType = decoded;
-            } catch {}
             return true;
         } catch {
             this.#typeTable = null;
@@ -89,13 +73,6 @@ class CommandSigner {
     }
 
     #typeConstBytes(type) {
-        if (type > maxTableType)
-            return new Uint8Array([
-                this.#fallbackType & 0xff,
-                (this.#fallbackType >>> 8) & 0xff,
-                (this.#fallbackType >>> 16) & 0xff,
-                (this.#fallbackType >>> 24) & 0xff
-            ]);
         const raw = this.#typeTable[type];
         return new Uint8Array([raw & 0xff, (raw >>> 16) & 0xff, 0, 0]);
     }

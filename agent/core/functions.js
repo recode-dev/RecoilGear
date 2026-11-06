@@ -43,11 +43,6 @@ class FunctionTable {
                 "void",
                 ["pointer", "int", "int", "bool"]
             ),
-            LogicGameObjectManagerClient_getOwnPlayerTeam: this.#nf(
-                "LogicGameObjectManagerClient_getOwnPlayerTeam",
-                "int32",
-                ["pointer"]
-            ),
             LogicGameObjectManagerClient_findGameObject: this.#nf(
                 "LogicGameObjectManagerClient_findGameObject",
                 "pointer",
@@ -134,11 +129,6 @@ class FunctionTable {
             ),
             LogicProjectileClient_getTargetY: this.#nf(
                 "LogicProjectileClient_getTargetY",
-                "int32",
-                ["pointer"]
-            ),
-            LogicProjectileData_getTravelType: this.#nf(
-                "LogicProjectileData_getTravelType",
                 "int32",
                 ["pointer"]
             ),

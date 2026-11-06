@@ -259,19 +259,13 @@ class AutoAim {
     #ownProjectileData(own) {
         const fns = getFunctions();
         const skill = fns.LogicCharacterClient_getWeaponSkill(own);
-        let data = skill && !skill.isNull() ? fns.LogicSkillData_getProjectileData(skill) : null;
-        if ((!data || data.isNull()) && skill && !skill.isNull()) {
-            try {
-                const direct = skill.add(offsets.LogicSkillData_projectileData).readPointer();
-                if (direct && !direct.isNull()) data = direct;
-            } catch {}
-        }
+        const data = skill && !skill.isNull() ? fns.LogicSkillData_getProjectileData(skill) : null;
         return data && !data.isNull() ? data : null;
     }
 
     #shotRadius(data, fns) {
         let rad = this.#readInt(data, offsets.LogicProjectileData_radius, 1, 2000);
-        if (!(rad > 0) && fns.LogicCharacterData_getProjectileStartRadius) {
+        if (!(rad > 0)) {
             try {
                 const start = Math.trunc(fns.LogicCharacterData_getProjectileStartRadius());
                 if (start >= 1 && start <= 2000) rad = start;
@@ -322,13 +316,7 @@ class AutoAim {
         let engineSpeed = 0;
         try {
             const own = scanData.ownCharacter;
-            const fns = getFunctions();
-            if (
-                own &&
-                !own.isNull() &&
-                fns.LogicCharacterClient_getWeaponSkill &&
-                fns.LogicSkillData_getProjectileData
-            ) {
+            if (own && !own.isNull()) {
                 const data = this.#ownProjectileData(own);
                 if (data) engineSpeed = this.#learnWeaponState(data, own);
             }
