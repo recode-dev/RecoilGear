@@ -78,28 +78,81 @@ export const sha256 = (bytes) => {
     return compress(buf);
 };
 
-export const inputToken = (key16, innerMask, outerMask, data16, mapped) => {
-    const a = new Uint8Array(128);
-    for (let i = 0; i < 16; i++) a[i] = key16[i] ^ innerMask[i];
-    a.fill(0x36, 16, 64);
-    for (let i = 0; i < 12; i++) a[64 + i] = data16[4 + i];
-    for (let i = 0; i < 4; i++) a[76 + i] = data16[i];
-    a[80] = mapped & 0xff;
-    a[81] = (mapped >>> 8) & 0xff;
-    a[82] = (mapped >>> 16) & 0xff;
-    a[83] = (mapped >>> 24) & 0xff;
-    a[84] = 0x80;
-    a[126] = 0x02;
-    a[127] = 0xa0;
-    const inner = compress(a);
-    const b = new Uint8Array(128);
-    for (let i = 0; i < 16; i++) b[i] = key16[i] ^ outerMask[i];
-    b.fill(0x5c, 16, 64);
-    b.set(inner, 64);
-    b[96] = 0x80;
-    b[126] = 0x03;
-    b[127] = 0x00;
-    const digest = compress(b);
-    const value = (digest[0] | ((digest[1] & 0x7f) << 8)) >>> 0;
+export const tokenVariants = Object.freeze(
+    [true, false].flatMap((swap) =>
+        [0, 4].flatMap((rot) =>
+            [
+                [0, 1],
+                [0, 2],
+                [3, 2]
+            ].map(([lo, hi]) =>
+                Object.freeze({
+                    id: `v69-${swap ? "swap" : "raw"}-r${rot}-${lo}${hi}`,
+                    swap,
+                    rot,
+                    lo,
+                    hi
+                })
+            )
+        )
+    )
+);
+
+const putWords = (dst, off, src, swap) => {
+    if (!swap) {
+        dst.set(src.subarray(0, 16), off);
+        return;
+    }
+    for (let i = 0; i < 16; i += 4) {
+        dst[off + i] = src[i + 3];
+        dst[off + i + 1] = src[i + 2];
+        dst[off + i + 2] = src[i + 1];
+        dst[off + i + 3] = src[i];
+    }
+};
+
+export const inputToken = (key16, maskIn, maskOut, typeConst, snapshot, variant) => {
+    const v = variant || tokenVariants[0];
+    let data = snapshot;
+    if (v.rot) {
+        data = new Uint8Array(16);
+        for (let i = 0; i < 16; i++) data[i] = snapshot[(i + v.rot) & 15];
+    }
+    const mixed = new Uint8Array(16);
+    const outerKey = new Uint8Array(16);
+    for (let i = 0; i < 16; i++) {
+        mixed[i] = key16[i] ^ maskIn[i];
+        outerKey[i] = key16[i] ^ maskOut[i];
+    }
+    const inner = new Uint8Array(128);
+    putWords(inner, 0, mixed, v.swap);
+    inner.fill(0x36, 16, 64);
+    putWords(inner, 64, data, v.swap);
+    inner[80] = typeConst[0];
+    inner[81] = typeConst[1];
+    inner[82] = typeConst[2];
+    inner[83] = typeConst[3];
+    inner[84] = 0x80;
+    inner[126] = 0x02;
+    inner[127] = 0xa0;
+    const innerDigest = compress(inner);
+    const outer = new Uint8Array(128);
+    putWords(outer, 0, outerKey, v.swap);
+    outer.fill(0x5c, 16, 64);
+    outer.set(innerDigest, 64);
+    outer[96] = 0x80;
+    outer[126] = 0x03;
+    outer[127] = 0x00;
+    const digest = compress(outer);
+    const value = (digest[v.lo] | ((digest[v.hi] & 0x7f) << 8)) >>> 0;
     return value < 2 ? 1 : value;
+};
+
+export const matchVariant = (key16, maskIn, maskOut, typeConst, snapshot, expected) => {
+    for (const variant of tokenVariants) {
+        if (inputToken(key16, maskIn, maskOut, typeConst, snapshot, variant) === expected) {
+            return variant;
+        }
+    }
+    return null;
 };
