@@ -870,7 +870,6 @@ class Scanner {
         entry.vx = entry.vx * (1 - alpha) + observedVx * alpha;
         entry.vy = entry.vy * (1 - alpha) + observedVy * alpha;
         entry.hasVelocitySample = true;
-
     }
 
     #sampleEntryMotion(entry, x, y, now) {
