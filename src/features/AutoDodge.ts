@@ -34,6 +34,7 @@ const CFG = {
     URGENT_CACHE_MS: 16,
     URGENT_FAST_SPEED: 1800,
     URGENT_FAST_BONUS: 0.25,
+    HOLD_AFTER_CLEAR_MS: 15,
 } as const;
 
 interface Vec {
@@ -141,6 +142,7 @@ class DodgeCore {
 
     #commit: Vec | null = null;
     #commitUntil = 0;
+    #clearSince = 0;
     #safeX = 0;
     #safeY = 0;
     #lastDir: Vec | null = null;
@@ -492,6 +494,7 @@ class DodgeCore {
     #resetCommit(): void {
         this.#commit = null;
         this.#commitUntil = 0;
+        this.#clearSince = 0;
         this.#safeX = 0;
         this.#safeY = 0;
     }
@@ -517,13 +520,18 @@ class DodgeCore {
         const intent = ZERO;
         const tMin = this.#expire(px, py, myR, intent, this.#urgent());
         const threatened = tMin >= 0 || this.#pointThreatened(px, py, myR);
-        if (
-            this.#commit &&
-            now >= this.#commitUntil &&
-            this.#expire(px, py, myR, ZERO, CFG.T_RELEASE + 0.1) < 0
-        ) {
-            this.#resetCommit();
-            return { active: false };
+        if (this.#commit) {
+            const clear = this.#expire(px, py, myR, ZERO, CFG.T_RELEASE + 0.1) < 0;
+            if (threatened || !clear) this.#clearSince = 0;
+            else if (this.#clearSince === 0) this.#clearSince = now;
+            if (
+                now >= this.#commitUntil &&
+                clear &&
+                now - this.#clearSince >= CFG.HOLD_AFTER_CLEAR_MS
+            ) {
+                this.#resetCommit();
+                return { active: false };
+            }
         }
         let dir: Vec | null = null;
         if (this.#commit && !this.#stillThreatened(this.#commit, px, py, myR)) dir = this.#commit;
