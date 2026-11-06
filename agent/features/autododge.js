@@ -46,8 +46,7 @@ class DodgeCore {
     #speed = 0;
     #now = 0;
     #cmd = null;
-    #stickDeg = null;
-    #urgent = false;
+    #curDeg = NaN;
     #zoneMem = new Map();
     #lastZones = new Map();
 
@@ -434,7 +433,6 @@ class DodgeCore {
         let outScore = -Infinity;
         const top = Math.min(cands.length, 6);
         for (let i = 0; i < top; i++) {
-            if (!this.#withinStick(cands[i].deg, this.#urgent)) continue;
             const room = this.#wallRoom(cands[i].deg);
             if (room <= 240) continue;
             const score = this.#headingScore(cands[i], room, refDeg);
@@ -489,11 +487,10 @@ class DodgeCore {
         if (deg === null) {
             const snapped = this.#snapHeading(this.#retreatHeading(hazards));
             anchor = this.#anchor(snapped);
-            if (anchor && this.#withinStick(snapped, this.#urgent)) deg = snapped;
+            if (anchor) deg = snapped;
         }
         if (deg === null) {
             for (const element of ring) {
-                if (!this.#withinStick(element, this.#urgent)) continue;
                 anchor = this.#anchor(element);
                 if (anchor) {
                     deg = element;
@@ -502,17 +499,15 @@ class DodgeCore {
             }
         }
         if (deg === null || !anchor) return { active: false };
+        this.#curDeg = deg;
+        const step = this.#stepTarget(deg);
         this.#cmd = {
             headingDeg: deg,
-            tx: anchor.x,
-            ty: anchor.y,
+            tx: step.x,
+            ty: step.y,
             startedAt: now,
             lastDangerAt: now,
-            lastCheckAt: now,
-            lastSendAt: -1e9,
-            sentX: NaN,
-            sentY: NaN,
-            forceSend: true
+            lastCheckAt: now
         };
         return {
             active: true,
@@ -531,12 +526,7 @@ class DodgeCore {
         const alt = this.#bestHeading(hazards, cmd.headingDeg);
         if (!alt || alt.deg === cmd.headingDeg) return;
         if (!(cur < -30) || alt.score <= cur + 420) return;
-        const a = this.#anchor(alt.deg);
-        if (!a) return;
         cmd.headingDeg = alt.deg;
-        cmd.tx = a.x;
-        cmd.ty = a.y;
-        cmd.forceSend = true;
     }
 
     #releaseCheck(cmd, danger) {
@@ -547,17 +537,23 @@ class DodgeCore {
         return true;
     }
 
-    #refreshTarget(cmd) {
-        if (this.#dist(this.#myX, this.#myY, cmd.tx, cmd.ty) >= 300) return;
-        const a = this.#anchor(cmd.headingDeg);
-        if (!a) return;
-        cmd.tx = a.x;
-        cmd.ty = a.y;
+    #stepTarget(deg) {
+        const step = Math.max(150, Math.min(320, Math.round(this.#speed * 0.34)));
+        this.#curDeg = this.#slewDeg(deg);
+        const rad = this.#curDeg * deg2rad;
+        return {
+            x: this.#myX + Math.cos(rad) * step,
+            y: this.#myY + Math.sin(rad) * step
+        };
     }
 
-    #withinStick(deg, ignoreStick) {
-        if (ignoreStick || this.#stickDeg == null) return true;
-        return angDiff(deg, this.#stickDeg) <= 70;
+    #slewDeg(deg) {
+        if (!isFinite(this.#curDeg)) return deg;
+        const diff = angDiff(deg, this.#curDeg);
+        const maxStep = 16;
+        if (diff > maxStep) return this.#curDeg + maxStep;
+        if (diff < -maxStep) return this.#curDeg - maxStep;
+        return deg;
     }
 
     #hold(hazards, danger) {
@@ -565,22 +561,10 @@ class DodgeCore {
         if (danger) cmd.lastDangerAt = this.#now;
         this.#revalidate(cmd, hazards);
         if (this.#releaseCheck(cmd, danger)) return { active: false, stopped: true };
-        this.#refreshTarget(cmd);
-        const moved = !isFinite(cmd.sentX) || this.#dist(cmd.tx, cmd.ty, cmd.sentX, cmd.sentY) > 80;
-        const quiet = !this.#withinStick(cmd.headingDeg, this.#urgent);
-        const send = !quiet && (cmd.forceSend || moved || this.#now - cmd.lastSendAt >= 260);
-        if (send && this.#stickDeg != null) {
-            const rad = cmd.headingDeg * deg2rad;
-            cmd.tx = this.#myX + Math.cos(rad) * 160;
-            cmd.ty = this.#myY + Math.sin(rad) * 160;
-        }
-        if (send) {
-            cmd.forceSend = false;
-            cmd.lastSendAt = this.#now;
-            cmd.sentX = cmd.tx;
-            cmd.sentY = cmd.ty;
-        }
-        return { active: true, targetX: cmd.tx, targetY: cmd.ty, headingDeg: cmd.headingDeg, send };
+        const step = this.#stepTarget(cmd.headingDeg);
+        cmd.tx = step.x;
+        cmd.ty = step.y;
+        return { active: true, targetX: cmd.tx, targetY: cmd.ty, headingDeg: cmd.headingDeg, send: true };
     }
 
     tick(world) {
@@ -596,9 +580,7 @@ class DodgeCore {
             return this.#cmd ? { active: false, stopped: true } : { active: false };
         this.#myR = world.radius > 0 ? world.radius : this.#myR;
         const hazards = this.#collectHazards();
-        const { danger, tMin } = this.#assess(hazards);
-        this.#stickDeg = isFinite(world.stickDeg) ? world.stickDeg : null;
-        this.#urgent = isFinite(tMin) && tMin * 1000 <= 160;
+        const { danger } = this.#assess(hazards);
         if (this.#cmd) return this.#hold(hazards, danger);
         if (!danger) return { active: false };
         return this.#engage(hazards);
@@ -606,8 +588,7 @@ class DodgeCore {
 
     reset() {
         this.#cmd = null;
-        this.#stickDeg = null;
-        this.#urgent = false;
+        this.#curDeg = NaN;
         this.#zoneMem.clear();
         this.#lastZones.clear();
         this.#world = { projectiles: [] };
@@ -616,12 +597,6 @@ class DodgeCore {
 
 class AutoDodge {
     #hitbox = 0;
-    #prevX = NaN;
-    #prevY = NaN;
-    #prevAt = 0;
-    #motionDeg = null;
-    #heading = NaN;
-    #humanSince = 0;
     #radiusMemoData = null;
     #radiusMemoValue = 0;
     #last = { active: false };
@@ -644,32 +619,6 @@ class AutoDodge {
             this.#radiusMemoValue = value;
         }
         return value;
-    }
-
-    #sampleMotion(now, x, y) {
-        const dt = now - this.#prevAt;
-        if (!isFinite(this.#prevX) || dt < 90) {
-            if (!isFinite(this.#prevX) || dt > 500) {
-                this.#prevX = x;
-                this.#prevY = y;
-                this.#prevAt = now;
-            }
-            return;
-        }
-        const dx = x - this.#prevX;
-        const dy = y - this.#prevY;
-        const moved = (Math.hypot(dx, dy) * 1000) / dt;
-        const own = Math.trunc(scanData.mySpeed);
-        this.#motionDeg = moved > Math.max(220, own * 0.35) ? bearingDeg(dx, dy) : null;
-        this.#prevX = x;
-        this.#prevY = y;
-        this.#prevAt = now;
-    }
-
-    #stickActive(now, heading) {
-        if (this.#motionDeg == null || !isFinite(heading)) return false;
-        if (angDiff(this.#motionDeg, heading) > 55) this.#humanSince = now;
-        return now - this.#humanSince < 260;
     }
 
     #learnOwnHitbox() {
@@ -723,9 +672,6 @@ class AutoDodge {
             const fb = Math.trunc(scanData.myRadius);
             if (fb > 0) this.#hitbox = fb;
         }
-        this.#sampleMotion(now, scanData.myX, scanData.myY);
-        if (isFinite(this.#last.headingDeg)) this.#heading = this.#last.headingDeg;
-        const stick = this.#stickActive(now, this.#heading);
         const d = this.#core.tick({
             now,
             x: scanData.myX,
@@ -733,8 +679,7 @@ class AutoDodge {
             speed: Math.trunc(scanData.mySpeed),
             radius: Math.trunc(this.#hitbox),
             projectiles: scanData.projectiles,
-            walls: this.#wallsApi,
-            stickDeg: stick ? this.#motionDeg : null
+            walls: this.#wallsApi
         });
         this.#last = d;
         if (d.active) {
@@ -743,7 +688,7 @@ class AutoDodge {
                 this.#issueMove(d.targetX, d.targetY);
             return;
         }
-        if (d.stopped && !this.#stopSent && !stick) {
+        if (d.stopped && !this.#stopSent) {
             this.#stopSent = true;
             this.#issueStop();
         }
