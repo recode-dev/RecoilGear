@@ -21,9 +21,9 @@ const CFG = {
     T_RELEASE: 0.2,
     MIN_CLEARANCE: 70,
     DODGE_COMMIT_MS: 110,
-    DODGE_DWELL_MS: 300,
-    SWITCH_MARGIN: 1.4,
-    BREAK_WINDOW_S: 0.25,
+    DODGE_DWELL_MS: 200,
+    SWITCH_MARGIN: 1.25,
+    BREAK_WINDOW_S: 0.2,
     N_DIRECTIONS: 24,
     STEP_SIZE: 150,
     MAX_SEARCH_DIST: 1500,
@@ -42,7 +42,8 @@ const CFG = {
     VOLLEY_WINDOW_MS: 200,
     SPAWN_BUCKET: 128,
     SEND_MIN_SHIFT: 55,
-    WALK_OUT: 350,
+    WALK_OUT: 750,
+    MIN_REACH: 300,
 } as const;
 
 interface Vec {
@@ -420,34 +421,20 @@ class DodgeCore {
         if (intent.x !== 0 || intent.y !== 0) dirs.push(normalize2d(intent.x, intent.y));
         for (const d of RING) dirs.push(d);
 
-        let bestDir: Vec | null = null;
-        let bestScore = Infinity;
-        let bestReach = 0;
-        for (const dir of dirs) {
-            const reach = this.#wallReach(px, py, myR, dir);
-            if (reach < CFG.STEP_SIZE) continue;
-            const score = this.#collect(dir, px, py, myR, intent);
-            if (score < bestScore) {
-                bestScore = score;
-                bestDir = dir;
-                bestReach = reach;
-            }
-        }
-        if (!bestDir) return null;
-
-        const point = this.#walkOut(px, py, myR, bestDir, bestReach);
-        if (point) return point;
-
         const ranked: { dir: Vec; score: number; reach: number }[] = [];
         for (const dir of dirs) {
             const reach = this.#wallReach(px, py, myR, dir);
             if (reach < CFG.STEP_SIZE) continue;
-            ranked.push({ dir, score: this.#collect(dir, px, py, myR, intent), reach });
+            const room = Math.min(reach, CFG.WALK_OUT);
+            const score = this.#collect(dir, px, py, myR, intent) + (CFG.WALK_OUT - room) * 5;
+            ranked.push({ dir, score, reach });
         }
+        if (ranked.length === 0) return null;
         ranked.sort((a, b) => a.score - b.score);
         for (const cand of ranked) {
-            const p2 = this.#walkOut(px, py, myR, cand.dir, cand.reach);
-            if (p2) return p2;
+            if (cand.reach < CFG.MIN_REACH && ranked[0].reach >= CFG.MIN_REACH) continue;
+            const point = this.#walkOut(px, py, myR, cand.dir, cand.reach);
+            if (point) return point;
         }
         return null;
     }
@@ -463,11 +450,7 @@ class DodgeCore {
             if (clearance < CFG.MIN_CLEARANCE) break;
             best = { x: sx, y: sy, dist: step, clearance };
         }
-        if (best) return best;
-        const sx = px + dir.x * CFG.STEP_SIZE;
-        const sy = py + dir.y * CFG.STEP_SIZE;
-        if (limit < CFG.STEP_SIZE) return null;
-        return { x: sx, y: sy, dist: CFG.STEP_SIZE, clearance: this.#clearanceAt(sx, sy, myR) };
+        return best;
     }
 
     #groupKey(threat: Threat): string {
@@ -573,7 +556,15 @@ class DodgeCore {
         intent: Vec,
         now: number,
     ): Vec | null {
-        if (this.#commit && !this.#urgentThreat(this.#commit, px, py, myR)) return this.#commit;
+        if (this.#commit && !this.#urgentThreat(this.#commit, px, py, myR)) {
+            const reach = this.#wallReach(px, py, myR, this.#commit);
+            const along = this.#walkOut(px, py, myR, this.#commit, reach);
+            if (along) {
+                this.#safeX = Math.round(along.x);
+                this.#safeY = Math.round(along.y);
+            }
+            return this.#commit;
+        }
         let dir: Vec | null = null;
         if (threatened) {
             const parsed = this.#parse(px, py, myR, intent);
